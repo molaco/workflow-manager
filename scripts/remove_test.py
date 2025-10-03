@@ -37,6 +37,34 @@ def sort_list_descending(lst):
     return sorted(lst, reverse=True)
 
 
+def sum_two_integers(a, b):
+    """
+    Sum two integers.
+
+    Args:
+        a: First integer
+        b: Second integer
+
+    Returns:
+        The sum of a and b
+    """
+    return a + b
+
+
+def subtract_two_integers(a, b):
+    """
+    Subtract two integers.
+
+    Args:
+        a: First integer
+        b: Second integer
+
+    Returns:
+        The difference of a and b (a - b)
+    """
+    return a - b
+
+
 if __name__ == "__main__":
     # Example usage
     numbers = [64, 34, 25, 12, 22, 11, 90]
@@ -49,3 +77,36 @@ if __name__ == "__main__":
     numbers_copy = numbers.copy()
     sort_list_in_place(numbers_copy)
     print("Sorted in-place:", numbers_copy)
+
+
+def multiply_two_integers(a, b):
+    """
+    Multiply two integers.
+
+    Args:
+        a: First integer
+        b: Second integer
+
+    Returns:
+        The product of a and b
+    """
+    return a * b
+
+
+def divide_two_integers(a, b):
+    """
+    Divide two integers.
+
+    Args:
+        a: First integer (dividend)
+        b: Second integer (divisor)
+
+    Returns:
+        The quotient of a divided by b
+
+    Raises:
+        ZeroDivisionError: If b is zero
+    """
+    if b == 0:
+        raise ZeroDivisionError("Cannot divide by zero")
+    return a / b
