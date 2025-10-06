@@ -1,0 +1,360 @@
+task:
+  id: 4
+  name: "Stroke Order Animation System"
+
+context:
+  description: |
+    Create a GPU-accelerated stroke order animation system using iced's Canvas
+    and Animation APIs to provide smooth, sequential stroke rendering with partial
+    path animation. This system parses SVG stroke data from character definitions
+    and renders them as educational animations showing proper Japanese character
+    writing technique.
+
+    The animation system is foundational to the visual learning experience,
+    transforming static stroke data into dynamic, memorable demonstrations that
+    help users internalize correct stroke sequences and writing flow.
+
+  key_points:
+    - "GPU-accelerated rendering via Canvas ensures 60fps performance even with complex multi-stroke characters"
+    - "Sequential animation with timing pauses between strokes mimics natural writing rhythm"
+    - "Partial path rendering enables smooth stroke-by-stroke progression rather than instant appearance"
+    - "SVG path parsing converts character data into renderable lyon Path segments"
+    - "EaseOutCubic easing provides natural deceleration matching human writing motion"
+    - "Reusable animation component integrates across Watch mode and practice sessions"
+
+files:
+  - path: "src/animation/stroke_order.rs"
+    description: "Main animation state management and sequencing logic"
+  - path: "src/animation/stroke_path.rs"
+    description: "Individual stroke representation with partial rendering support"
+  - path: "src/widgets/animated_character.rs"
+    description: "Canvas Program implementation for GPU-accelerated rendering"
+  - path: "src/parsers/svg_path.rs"
+    description: "SVG path string parsing to lyon Path conversion"
+
+functions:
+  - file: "src/animation/stroke_order.rs"
+    items:
+      - type: "struct"
+        name: "StrokeOrderAnimation"
+        description: "Manages animation state, timing, and stroke sequence progression"
+        preconditions: "Character stroke data must be loaded and valid"
+        postconditions: "Animation progresses through all strokes in correct sequence"
+        invariants: "Current stroke index never exceeds total stroke count; timing remains synchronized"
+
+      - type: "method"
+        name: "StrokeOrderAnimation::new(strokes: Vec<StrokePath>) -> Self"
+        description: "Initializes animation with stroke sequence and default timing"
+        preconditions: "Non-empty stroke vector"
+        postconditions: "Animation ready at initial state (stroke 0, progress 0.0)"
+
+      - type: "method"
+        name: "StrokeOrderAnimation::update(&mut self, delta: Duration) -> bool"
+        description: "Advances animation by time delta, returns true when complete"
+        preconditions: "Animation not already complete"
+        postconditions: "Progress updated; stroke index incremented when stroke completes"
+        invariants: "Progress stays in [0.0, 1.0]; maintains pause timing between strokes"
+
+      - type: "method"
+        name: "StrokeOrderAnimation::reset(&mut self)"
+        description: "Resets animation to initial state for replay"
+        postconditions: "All state returned to frame zero"
+
+      - type: "method"
+        name: "StrokeOrderAnimation::pause(&mut self)"
+        description: "Pauses animation at current frame"
+
+      - type: "method"
+        name: "StrokeOrderAnimation::resume(&mut self)"
+        description: "Resumes paused animation"
+
+  - file: "src/animation/stroke_path.rs"
+    items:
+      - type: "struct"
+        name: "StrokePath"
+        description: "Represents single stroke with lyon Path and cached length data"
+        invariants: "Path length is non-negative; cached length matches actual computed length"
+
+      - type: "method"
+        name: "StrokePath::from_svg(svg_data: &str) -> Result<Self, ParseError>"
+        description: "Constructs StrokePath from SVG path data string"
+        preconditions: "Valid SVG path syntax"
+        postconditions: "lyon Path built with computed total length cached"
+
+      - type: "method"
+        name: "StrokePath::partial_path(&self, progress: f32) -> Path"
+        description: "Generates partial path from start to progress percentage"
+        preconditions: "progress in [0.0, 1.0]"
+        postconditions: "Returned path represents first (progress * 100)% of full stroke"
+        invariants: "Progress 0.0 returns empty path; 1.0 returns complete path"
+
+      - type: "method"
+        name: "StrokePath::total_length(&self) -> f32"
+        description: "Returns cached total path length in canvas units"
+
+  - file: "src/widgets/animated_character.rs"
+    items:
+      - type: "struct"
+        name: "AnimatedCharacter"
+        description: "Canvas-based widget rendering stroke order animation"
+
+      - type: "trait_impl"
+        name: "canvas::Program for AnimatedCharacter"
+        description: "Implements iced Canvas Program for GPU rendering"
+
+      - type: "method"
+        name: "AnimatedCharacter::draw(&self, renderer: &Renderer, bounds: Rectangle, cursor: Cursor) -> Vec<Geometry>"
+        description: "Renders current animation frame with completed and partial strokes"
+        preconditions: "Valid animation state; renderer initialized"
+        postconditions: "Frame drawn with all completed strokes in dark gray, current partial stroke in primary color"
+        invariants: "Maintains visual distinction between completed and animating strokes"
+
+      - type: "method"
+        name: "AnimatedCharacter::update(&mut self, event: Event, bounds: Rectangle, cursor: Cursor) -> (event::Status, Option<Message>)"
+        description: "Handles animation tick events and user interactions"
+        postconditions: "Animation state updated; redraw requested if animating"
+
+  - file: "src/parsers/svg_path.rs"
+    items:
+      - type: "function"
+        name: "parse_svg_path(svg: &str) -> Result<lyon::path::Path, ParseError>"
+        description: "Converts SVG path 'd' attribute string to lyon Path"
+        preconditions: "Valid SVG path syntax (M, L, C, Q, Z commands)"
+        postconditions: "lyon Path with all commands converted; absolute coordinates"
+
+      - type: "function"
+        name: "compute_path_length(path: &lyon::path::Path) -> f32"
+        description: "Calculates total length of path by accumulating segment lengths"
+        preconditions: "Valid lyon Path"
+        postconditions: "Returns sum of all segment lengths in path units"
+        invariants: "Length is non-negative; empty path returns 0.0"
+
+      - type: "function"
+        name: "split_path_at_length(path: &lyon::path::Path, length: f32) -> lyon::path::Path"
+        description: "Creates new path containing first 'length' units of original"
+        preconditions: "length >= 0.0; path is valid"
+        postconditions: "New path represents initial segment up to specified length"
+
+formal_verification:
+  needed: false
+  level: "None"
+  explanation: |
+    While animation involves complex timing and path calculations, the correctness
+    criteria are primarily visual/subjective rather than mathematically provable.
+    Property-based testing and manual verification of animation smoothness are
+    more appropriate than formal methods.
+
+    The mathematical properties (path lengths, progress percentages) are straightforward
+    enough to verify through conventional unit tests. No safety-critical behavior
+    requires formal proofs.
+
+tests:
+  strategy:
+    approach: "mixed"
+    rationale:
+      - "Unit tests verify SVG parsing correctness and path length calculations"
+      - "Integration tests validate animation sequencing and timing behavior"
+      - "Manual verification required for subjective animation quality (smoothness, naturalness)"
+      - "Property tests ensure path operations maintain invariants (partial paths ⊆ full path)"
+
+  implementation:
+    file: "src/animation/tests.rs"
+    location: "create new"
+    code: |
+      #[cfg(test)]
+      mod stroke_path_tests {
+          use super::*;
+
+          #[test]
+          fn test_svg_path_parsing_basic() {
+              // Test simple line path
+              let svg = "M 10 10 L 50 50";
+              let stroke = StrokePath::from_svg(svg).unwrap();
+              assert!(stroke.total_length() > 0.0);
+          }
+
+          #[test]
+          fn test_svg_path_parsing_curves() {
+              // Test cubic bezier
+              let svg = "M 10 10 C 20 20, 40 20, 50 10";
+              let stroke = StrokePath::from_svg(svg).unwrap();
+              assert!(stroke.total_length() > 0.0);
+          }
+
+          #[test]
+          fn test_partial_path_progress_zero() {
+              let svg = "M 0 0 L 100 0";
+              let stroke = StrokePath::from_svg(svg).unwrap();
+              let partial = stroke.partial_path(0.0);
+              // Path should be empty or minimal
+              assert_eq!(compute_path_length(&partial), 0.0);
+          }
+
+          #[test]
+          fn test_partial_path_progress_full() {
+              let svg = "M 0 0 L 100 0";
+              let stroke = StrokePath::from_svg(svg).unwrap();
+              let full_length = stroke.total_length();
+              let partial = stroke.partial_path(1.0);
+              assert!((compute_path_length(&partial) - full_length).abs() < 0.01);
+          }
+
+          #[test]
+          fn test_partial_path_progress_half() {
+              let svg = "M 0 0 L 100 0";
+              let stroke = StrokePath::from_svg(svg).unwrap();
+              let full_length = stroke.total_length();
+              let partial = stroke.partial_path(0.5);
+              let partial_length = compute_path_length(&partial);
+              assert!((partial_length - full_length * 0.5).abs() < 1.0);
+          }
+      }
+
+      #[cfg(test)]
+      mod animation_tests {
+          use super::*;
+          use std::time::Duration;
+
+          fn create_test_animation() -> StrokeOrderAnimation {
+              let stroke1 = StrokePath::from_svg("M 0 0 L 100 0").unwrap();
+              let stroke2 = StrokePath::from_svg("M 0 0 L 0 100").unwrap();
+              StrokeOrderAnimation::new(vec![stroke1, stroke2])
+          }
+
+          #[test]
+          fn test_animation_initialization() {
+              let anim = create_test_animation();
+              assert_eq!(anim.current_stroke_index(), 0);
+              assert_eq!(anim.current_progress(), 0.0);
+              assert!(!anim.is_complete());
+          }
+
+          #[test]
+          fn test_animation_progression() {
+              let mut anim = create_test_animation();
+              // Advance by small time delta
+              let complete = anim.update(Duration::from_millis(100));
+              assert!(!complete);
+              assert!(anim.current_progress() > 0.0);
+          }
+
+          #[test]
+          fn test_animation_stroke_transition() {
+              let mut anim = create_test_animation();
+              // Advance past first stroke duration (600ms)
+              anim.update(Duration::from_millis(700));
+              assert_eq!(anim.current_stroke_index(), 1);
+          }
+
+          #[test]
+          fn test_animation_completion() {
+              let mut anim = create_test_animation();
+              // Advance past all strokes (2 strokes * 600ms + pause)
+              let complete = anim.update(Duration::from_secs(2));
+              assert!(complete);
+              assert!(anim.is_complete());
+          }
+
+          #[test]
+          fn test_animation_reset() {
+              let mut anim = create_test_animation();
+              anim.update(Duration::from_millis(500));
+              anim.reset();
+              assert_eq!(anim.current_stroke_index(), 0);
+              assert_eq!(anim.current_progress(), 0.0);
+          }
+
+          #[test]
+          fn test_animation_pause_resume() {
+              let mut anim = create_test_animation();
+              anim.update(Duration::from_millis(100));
+              let progress_before_pause = anim.current_progress();
+
+              anim.pause();
+              anim.update(Duration::from_millis(100));
+              assert_eq!(anim.current_progress(), progress_before_pause);
+
+              anim.resume();
+              anim.update(Duration::from_millis(100));
+              assert!(anim.current_progress() > progress_before_pause);
+          }
+      }
+
+      #[cfg(test)]
+      mod property_tests {
+          use super::*;
+          use proptest::prelude::*;
+
+          proptest! {
+              #[test]
+              fn prop_partial_path_monotonic(progress in 0.0f32..1.0f32) {
+                  let svg = "M 0 0 L 100 0 L 100 100";
+                  let stroke = StrokePath::from_svg(svg).unwrap();
+                  let partial = stroke.partial_path(progress);
+                  let partial_len = compute_path_length(&partial);
+                  let full_len = stroke.total_length();
+
+                  // Partial length should be <= full length
+                  prop_assert!(partial_len <= full_len + 0.1);
+                  // Partial length should be roughly proportional to progress
+                  prop_assert!((partial_len - full_len * progress).abs() < full_len * 0.2);
+              }
+
+              #[test]
+              fn prop_progress_bounds(millis in 0u64..5000u64) {
+                  let mut anim = create_test_animation();
+                  anim.update(Duration::from_millis(millis));
+                  let progress = anim.current_progress();
+                  prop_assert!(progress >= 0.0 && progress <= 1.0);
+              }
+          }
+      }
+
+  coverage:
+    - "SVG path parsing for basic commands (M, L, C, Q, Z)"
+    - "Path length computation accuracy"
+    - "Partial path generation at various progress values"
+    - "Animation initialization state"
+    - "Time-based animation progression"
+    - "Stroke-to-stroke transitions with pauses"
+    - "Animation completion detection"
+    - "Pause/resume functionality"
+    - "Reset to initial state"
+    - "Progress bounds invariant (0.0 to 1.0)"
+    - "Partial path monotonicity (length increases with progress)"
+
+dependencies:
+  depends_on:
+    - task_id: 1
+      reason: "Requires CharData with stroke SVG path strings loaded from character definitions"
+    - task_id: 2
+      reason: "Builds on character display infrastructure; shares Canvas rendering patterns"
+
+  depended_upon_by:
+    - task_id: 8
+      reason: "Practice canvas uses animation as reference display during trace modes"
+    - task_id: 10
+      reason: "Watch practice mode directly integrates stroke order animation"
+
+  external:
+    - name: "lyon::path::Path"
+      type: "struct"
+      status: "already exists"
+    - name: "lyon::path::Builder"
+      type: "struct"
+      status: "already exists"
+    - name: "iced::widget::canvas"
+      type: "module"
+      status: "already exists"
+    - name: "iced::widget::canvas::Program"
+      type: "trait"
+      status: "already exists"
+    - name: "iced::animation::Animator"
+      type: "struct"
+      status: "to be imported"
+    - name: "iced::animation::easing::EaseOutCubic"
+      type: "constant"
+      status: "to be imported"
+    - name: "std::time::Duration"
+      type: "struct"
+      status: "already exists"

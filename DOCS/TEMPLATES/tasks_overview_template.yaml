@@ -1,0 +1,155 @@
+# Tasks Overview Template
+# High-level strategic view of implementation tasks
+# Use this to generate tasks_overview.yaml from IMPL.md
+# Each task here will be expanded into detailed specifications in tasks.yaml
+
+task:
+  id: [NUMBER]
+  name: "[TASK_NAME]"
+
+  overview:
+    purpose: |
+      [What this task accomplishes from a high level.
+      Focus on the business/architectural value and outcome.
+      1-2 paragraphs explaining the strategic importance.]
+
+    motivation: |
+      [Why this task is necessary.
+      What problem does it solve?
+      How does it fit into the larger system architecture?]
+
+    outcome: |
+      [What will be true after this task is complete.
+      Focus on capabilities unlocked, not implementation details.
+      Example: "Users can now stream real-time market data from Exchange X"]
+
+  scope_summary:
+    description: "[Brief scope overview - e.g., 'Adds 3 new functions across 2 files']"
+    files_affected: [NUMBER]
+    functions_added: [NUMBER]
+    tests_required: [NUMBER]
+    complexity: "[simple|moderate|complex|critical]"
+    estimated_effort: "[1-2 hours|half day|1 day|2-3 days|1 week]"
+
+  key_components:
+    # High-level list of what's being built/modified
+    - component: "[Component name - e.g., 'Rate limiter']"
+      type: "[struct|enum|function|module|trait]"
+      purpose: "[Brief purpose - e.g., 'Prevents API rate limit violations']"
+
+    - component: "[Component name]"
+      type: "[type]"
+      purpose: "[purpose]"
+
+    # Repeat for each major component (3-5 max, high-level only)
+
+  implementation_hints:
+    approach: |
+      [High-level approach to implementation.
+      General strategy, not specific code.
+      Example: "Follow existing adapter pattern used by Binance integration"]
+
+    key_considerations:
+      - "[Consideration 1 - e.g., 'Must maintain thread safety for concurrent access']"
+      - "[Consideration 2 - e.g., 'API uses non-standard array format for klines']"
+      - "[Consideration 3 - e.g., 'Requires client-side orderbook aggregation']"
+      # 3-5 key points that affect implementation decisions
+
+    integration_points:
+      - "[Where this integrates - e.g., 'Integrates with central dispatch in adapter.rs']"
+      - "[Integration point 2]"
+      # List major integration points with existing system
+
+  testing_overview:
+    strategy: "[unit|property-based|integration|mixed|end-to-end]"
+
+    rationale: |
+      [Why this testing strategy was chosen.
+      What makes it appropriate for this task?]
+
+    critical_properties:
+      # Properties that MUST be verified (high-level)
+      - "[Property 1 - e.g., 'Orderbook maintains bid < ask invariant']"
+      - "[Property 2 - e.g., 'No data loss during reconnection']"
+      # 2-4 critical properties
+
+    verification_needs:
+      formal_verification: [true|false]
+      property_testing: [true|false]
+      concurrency_testing: [true|false]
+      integration_testing: [true|false]
+
+    estimated_test_count: [NUMBER]
+
+  dependencies:
+    requires_completion_of:
+      # Tasks that must be done before this one
+      - task_id: [NUMBER]
+        reason: "[Why - e.g., 'Needs Exchange enum variants to exist']"
+      # Use empty array [] if no dependencies
+
+    enables_start_of:
+      # Tasks that can begin after this one completes
+      - task_id: [NUMBER]
+        reason: "[Why - e.g., 'REST functions need these serde structs']"
+      # List tasks this unblocks
+
+    parallel_with:
+      # Tasks that can be done in parallel (optional)
+      - [TASK_ID]
+      - [TASK_ID]
+
+  acceptance_criteria:
+    # What must be true for this task to be considered complete
+    - "[Criterion 1 - e.g., 'All dispatch functions route to new exchange']"
+    - "[Criterion 2 - e.g., 'Integration tests pass with live API']"
+    - "[Criterion 3 - e.g., 'WebSocket streams remain stable for 10+ minutes']"
+    # 3-6 clear, testable criteria
+
+  risk_assessment:
+    complexity_risk: "[low|medium|high]"
+    integration_risk: "[low|medium|high]"
+    testing_risk: "[low|medium|high]"
+
+    concerns:
+      # Optional: List any risks or concerns
+      - "[Concern 1 - e.g., 'Sequence validation logic is complex and error-prone']"
+      - "[Concern 2 - e.g., 'Rate limiting behavior differs from documentation']"
+      # Leave empty if no significant concerns
+
+  notes:
+    # Optional: Additional context that doesn't fit elsewhere
+    - "[Note 1 - e.g., 'API is Binance-compatible, can reuse patterns']"
+    - "[Note 2 - e.g., 'Server has 24-hour WebSocket lifetime limit']"
+    # Strategic notes, not implementation details
+
+# =============================================================================
+# USAGE INSTRUCTIONS
+# =============================================================================
+#
+# 1. Generate tasks_overview.yaml from IMPL.md:
+#    - One task block per logical implementation objective
+#    - Keep descriptions strategic and high-level
+#    - Focus on WHAT and WHY, not HOW
+#
+# 2. From tasks_overview.yaml, expand each task into tasks.yaml:
+#    - Use task_template.yaml for detailed specifications
+#    - Include all functions, pre/post-conditions, test code
+#    - Add implementation-level detail (HOW)
+#
+# 3. From tasks.yaml, proceed to implementation:
+#    - tasks.yaml should be detailed enough to code from directly
+#    - No need for additional design documents
+#
+# =============================================================================
+# TEMPLATE PHILOSOPHY
+# =============================================================================
+#
+# tasks_overview.yaml = "Strategic roadmap for project managers/architects"
+# tasks.yaml = "Implementation blueprint for developers"
+#
+# Same tasks, different perspectives:
+# - Overview: 30,000 foot view, outcomes and dependencies
+# - Detailed: Ground level view, functions and test code
+#
+# =============================================================================

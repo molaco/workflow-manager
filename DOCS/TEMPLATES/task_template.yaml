@@ -1,0 +1,117 @@
+task:
+  id: [NUMBER]
+  name: "[TASK_NAME]"
+
+context:
+  description: |
+    [Detailed description of what this task accomplishes and why it matters.
+    Explain the architectural significance and how it fits into the larger system.
+    Provide background on the problem being solved or feature being added.]
+
+  key_points:
+    - "[Important architectural consideration 1]"
+    - "[Important architectural consideration 2]"
+    - "[Important architectural consideration 3]"
+    - "[Additional context points as needed]"
+
+files:
+  - path: "[file/path.rs]"
+    description: "[Brief description of the file's role]"
+  # Repeat for each file involved
+
+functions:
+  - file: "[file/path.rs]"
+    items:
+      - type: "[enum_variant|struct|trait_impl|method|constant|function|module_declaration]"
+        name: "[Full::qualified::name or signature]"
+        description: "[Brief description of purpose and behavior]"
+        preconditions: "[What must be true before execution - optional]"
+        postconditions: "[What will be true after execution - optional]"
+        invariants: "[Properties that remain constant/guaranteed behaviors - optional]"
+      # Repeat for each function/item
+
+  # Repeat section for each file with functions
+
+formal_verification:
+  needed: [true|false]
+  level: "[None|Basic|Critical]"
+  explanation: |
+    [Explanation of why verification is/isn't needed.
+    If needed, describe what properties must be verified and why.]
+
+  # Optional: Include only if verification is needed
+  properties:
+    - name: "[Property 1]"
+      formal_statement: "[Mathematical or logical statement]"
+    - name: "[Property 2]"
+      formal_statement: "[Mathematical or logical statement]"
+
+  # Optional: Include only if verification is needed
+  strategy:
+    - "[Verification approach 1]"
+    - "[Verification approach 2]"
+
+tests:
+  strategy:
+    approach: "[unit tests|property-based|integration|end-to-end|mixed]"
+    rationale:
+      - "[Justification for approach]"
+      - "[Key testing considerations]"
+      - "[Coverage goals]"
+
+  implementation:
+    file: "[test/file/path.rs]"
+    location: "[in existing test module|create new|separate test file]"
+    code: |
+      #[cfg(test)]
+      mod [test_module_name] {
+          use super::*;
+          // [Additional imports as needed]
+
+          #[test]
+          fn test_[specific_behavior]() {
+              // [Test description]
+              // [Test implementation]
+          }
+
+          // [Additional test functions]
+      }
+
+      // Optional: Property-based testing section
+      #[cfg(test)]
+      mod [property_test_module] {
+          use proptest::prelude::*;
+
+          proptest! {
+              #[test]
+              fn prop_[property_name]([inputs]) {
+                  // [Property assertion]
+              }
+          }
+      }
+
+  coverage:
+    - "[Feature/behavior tested 1]"
+    - "[Feature/behavior tested 2]"
+    - "[Feature/behavior tested 3]"
+    # Continue checklist for all tested behaviors
+
+dependencies:
+  depends_on:
+    # Use empty array [] if no dependencies
+    - task_id: [NUMBER|"none"]
+      reason: "[Explanation of dependency]"
+    # Repeat for each dependency
+
+  depended_upon_by:
+    # List tasks that depend on this one
+    - task_id: [NUMBER|RANGE]
+      reason: "[How dependent task uses this task's output]"
+    # Repeat for each dependent task
+
+  external:
+    # External types, modules, crates needed
+    - name: "[Type/Module/Crate name]"
+      type: "[enum|struct|trait|module|crate]"
+      status: "[already exists|needs implementation|to be imported]"
+    # Repeat for each external dependency
