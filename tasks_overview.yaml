@@ -1,93 +1,70 @@
-# Tasks Overview - Hiragana/Katakana Learning Application
-# Generated from hiragana_learning_research2.md
-# Strategic roadmap for project implementation
-
-# =============================================================================
-# PHASE 1: MVP (Foundation)
-# =============================================================================
-
 task:
   id: 1
-  name: "Basic Application Structure and Character Data Management"
+  name: "Project Structure and Application Foundation"
 
   overview:
     purpose: |
-      Establish the foundational application structure using iced's Elm architecture,
-      implement character data loading and management, and set up the core state
-      management system. This task creates the skeleton upon which all other features
-      will be built, ensuring a solid architectural foundation.
+      Establish the foundational Rust project structure with iced GUI framework integration,
+      including proper module organization, dependency configuration, and basic application
+      scaffolding. This task creates the skeleton that all other components will build upon.
 
     motivation: |
-      Without proper application structure and data management, the app cannot function.
-      This foundational work enables all subsequent features by providing the core
-      infrastructure for character data access, state transitions, and UI rendering.
-      A well-structured foundation prevents architectural debt and enables rapid
-      feature development.
+      A well-organized project structure is critical for maintainability and scalability.
+      The modular architecture separates concerns (UI, state, models, persistence, scheduling)
+      allowing parallel development of features. Proper iced integration from the start ensures
+      the Elm architecture pattern is correctly implemented.
 
     outcome: |
-      Application launches successfully with a main menu, character data (hiragana)
-      is loaded and accessible through efficient lookup structures, and the Elm
-      architecture properly manages state transitions and UI updates.
+      A compilable Rust application with iced GUI framework configured, module structure
+      in place, and a basic "Hello World" window that demonstrates the application lifecycle.
+      All dependencies are properly configured in Cargo.toml with appropriate feature flags.
 
   scope_summary:
-    description: "Creates main app structure, implements character data models and loading, sets up state management"
-    files_affected: 8
-    functions_added: 15
-    tests_required: 5
-    complexity: "moderate"
-    estimated_effort: "2-3 days"
+    description: "Creates project structure with 7 module directories and main application entry point"
+    files_affected: 10
+    functions_added: 3
+    tests_required: 0
+    complexity: "simple"
+    estimated_effort: "1-2 hours"
 
   key_components:
-    - component: "AppState"
+    - component: "Main application struct"
       type: "struct"
-      purpose: "Central application state following Elm architecture"
+      purpose: "Implements iced::Application trait, orchestrates application lifecycle"
 
-    - component: "CharData"
-      type: "struct"
-      purpose: "Character data model with stroke information"
+    - component: "Module organization"
+      type: "module"
+      purpose: "Separates concerns into state/, ui/, models/, persistence/, scheduler/, data/"
 
-    - component: "Message"
-      type: "enum"
-      purpose: "Application-wide message types for state updates"
-
-    - component: "HIRAGANA static map"
-      type: "static"
-      purpose: "Compile-time character data lookup for zero-cost access"
-
-    - component: "Screen navigation"
-      type: "enum"
-      purpose: "Manages different application screens"
+    - component: "Cargo configuration"
+      type: "module"
+      purpose: "Configures dependencies with correct features and build optimization"
 
   implementation_hints:
     approach: |
-      Use iced's Application trait as the core structure. Implement static character
-      data using phf crate for compile-time perfect hash maps, enabling zero-cost
-      lookups. Follow the Elm architecture pattern strictly: State → View → Message → Update.
-      Load hiragana data from RON files at compile time using include_str!().
+      Follow standard Rust project conventions with cargo new. Implement minimal iced
+      Application trait with empty update/view methods. Create module files with
+      placeholder content to establish structure.
 
     key_considerations:
-      - "Use Arc<RwLock<T>> only for shared progress data, keep UI state owned"
-      - "Character data should be immutable and static for performance"
-      - "Message passing must be non-blocking to maintain UI responsiveness"
-      - "RON format provides human-readable data files that are easy to maintain"
+      - "Use iced 0.13 with canvas, tokio, and advanced features enabled"
+      - "Set up proper Cargo.toml [profile.release] optimizations from the start"
+      - "Include directories crate for cross-platform data path detection"
+      - "Embed fonts using include_bytes!() for portability"
 
     integration_points:
-      - "Main entry point integrates with iced runtime"
-      - "Character data integrates with all learning modules"
-      - "State management integrates with persistence layer"
+      - "main.rs serves as application entry point"
+      - "All modules export through mod.rs files for clean API"
 
   testing_overview:
     strategy: "unit"
-
     rationale: |
-      Unit tests are appropriate for foundational data structures and state
-      management logic. Each component can be tested in isolation to verify
-      correct behavior before integration.
+      Basic compilation and smoke tests to verify project structure and dependencies
+      are correctly configured. No complex logic to test at this stage.
 
     critical_properties:
-      - "All 46 hiragana characters load successfully"
-      - "Character lookups return correct data"
-      - "State transitions follow Elm architecture contracts"
+      - "Application compiles without errors"
+      - "Application window opens and displays correctly"
 
     verification_needs:
       formal_verification: false
@@ -95,113 +72,114 @@ task:
       concurrency_testing: false
       integration_testing: false
 
-    estimated_test_count: 5
+    estimated_test_count: 2
 
   dependencies:
     requires_completion_of: []
-
     enables_start_of:
       - task_id: 2
-        reason: "Flashcard display requires character data structures"
+        reason: "Character data structures need module structure to exist"
       - task_id: 3
-        reason: "SRS requires application state infrastructure"
-      - task_id: 5
-        reason: "Persistence requires state models"
+        reason: "Font loading requires application foundation"
+      - task_id: 6
+        reason: "State management builds on application structure"
 
     parallel_with: []
 
   acceptance_criteria:
-    - "Application launches without errors"
-    - "Main menu displays with navigation options"
-    - "All 46 hiragana characters load from data files"
-    - "Character data lookups complete in O(1) time"
-    - "State updates trigger proper UI re-renders"
+    - "cargo build completes successfully"
+    - "Application launches and displays empty window"
+    - "All module directories created with mod.rs files"
+    - "Cargo.toml includes all required dependencies"
 
   risk_assessment:
     complexity_risk: "low"
     integration_risk: "low"
     testing_risk: "low"
-
-    concerns:
-      - "RON parsing errors must be caught at compile time"
+    concerns: []
 
   notes:
-    - "Start with hiragana only; katakana follows same pattern in Task 7"
-    - "Stroke data will be used in Task 4 for animations"
+    - "This is the foundation task - keep it simple and focus on structure"
+    - "Verify iced version 0.13 is used for cosmic-text integration"
 
-# =============================================================================
+---
 
 task:
   id: 2
-  name: "Japanese Text Rendering and Flashcard Display"
+  name: "Character Data Structures and Loading System"
 
   overview:
     purpose: |
-      Implement proper Japanese character rendering using cosmic-text with Unicode
-      support, create a custom CharacterCard widget for flashcard-style display,
-      and establish the visual foundation for all character learning interactions.
+      Define core data structures for representing hiragana and katakana characters
+      including their Unicode values, romanization, stroke paths, and metadata.
+      Implement efficient compile-time or runtime loading mechanisms for character
+      data that will power the entire learning system.
 
     motivation: |
-      Japanese characters require special font handling and rendering considerations
-      that standard text widgets don't provide. A custom widget enables proper
-      typography, supports future stroke order overlays, and provides a consistent
-      visual experience across all learning modes.
+      Character data is the foundation of the learning application. The structure must
+      efficiently represent stroke order information for animation, support fast lookups
+      for flashcards and recognition, and maintain metadata for scheduling. The choice
+      between compile-time (phf) and runtime loading affects performance and flexibility.
 
     outcome: |
-      Japanese characters display correctly at large sizes with proper font rendering,
-      the custom CharacterCard widget provides a reusable component for all character
-      display needs, and users can view hiragana characters in a clear, readable format.
+      A complete character database covering all 46 hiragana and 46 katakana characters
+      with stroke path data, accessible through zero-cost lookups. Data is serialized in
+      RON format for human readability and can be embedded in the binary or loaded at runtime.
 
   scope_summary:
-    description: "Implements Japanese font loading, creates CharacterCard widget, builds flashcard display screen"
-    files_affected: 4
+    description: "Defines CharData struct, creates hiragana.ron and katakana.ron data files, implements lookup system"
+    files_affected: 5
     functions_added: 8
-    tests_required: 3
-    complexity: "simple"
+    tests_required: 12
+    complexity: "moderate"
     estimated_effort: "1 day"
 
   key_components:
-    - component: "CharacterCard"
+    - component: "CharData struct"
       type: "struct"
-      purpose: "Custom widget for displaying Japanese characters with proper typography"
+      purpose: "Represents a single kana character with all metadata and stroke information"
 
-    - component: "Font loading system"
-      type: "function"
-      purpose: "Loads Noto Sans JP font at application startup"
-
-    - component: "Flashcard screen"
+    - component: "Character database"
       type: "module"
-      purpose: "Screen for displaying characters in flashcard format"
+      purpose: "Static or lazy-loaded HashMap/phf::Map for O(1) character lookups"
+
+    - component: "RON data files"
+      type: "module"
+      purpose: "Human-readable serialized character data for hiragana and katakana"
+
+    - component: "SVG path parser"
+      type: "function"
+      purpose: "Converts SVG path strings to internal stroke representation"
 
   implementation_hints:
     approach: |
-      Use iced's built-in cosmic-text support with Shaping::Advanced for proper
-      Japanese rendering. Embed Noto Sans JP font using include_bytes!() to avoid
-      external font dependencies. Create CharacterCard as a reusable Element that
-      can be configured for different display modes.
+      Start with compile-time phf::Map for MVP simplicity and zero runtime cost.
+      Define CharData with serde derive for serialization. Extract stroke data from
+      kana-svg-data or animCJK repositories and convert to RON format.
 
     key_considerations:
-      - "Must use Shaping::Advanced for proper Japanese glyph rendering"
-      - "Font should be embedded in binary for portability"
-      - "Character size should scale based on available space"
-      - "Support optional stroke order guide overlay for future use"
+      - "Use phf for compile-time perfect hash map (zero runtime cost)"
+      - "Store SVG paths as strings initially, parse on-demand for animation"
+      - "Include median points for stroke direction visualization"
+      - "Frequency rank enables ordered presentation (common characters first)"
+      - "Unicode values needed for text rendering and recognition"
 
     integration_points:
-      - "Integrates with character data from Task 1"
-      - "Provides foundation for learning session in Task 3"
-      - "Will be extended with stroke overlays in Task 4"
+      - "models/character.rs defines core data structures"
+      - "data/ directory contains RON files embedded with include_str!()"
+      - "Used by flashcard system, animation engine, and practice modes"
 
   testing_overview:
     strategy: "unit"
-
     rationale: |
-      Widget rendering can be tested through snapshot tests and property tests
-      that verify proper layout and sizing behavior.
+      Character data is static and deterministic, making it ideal for unit tests.
+      Verify data integrity, lookup correctness, and SVG path parsing.
 
     critical_properties:
-      - "Japanese characters render without garbled glyphs"
-      - "Character remains centered and properly sized"
-      - "Font loads successfully on all platforms"
+      - "All 92 characters (46 hiragana + 46 katakana) are present"
+      - "Each character has valid Unicode code point"
+      - "Stroke counts match expected values"
+      - "SVG paths parse without errors"
 
     verification_needs:
       formal_verification: false
@@ -209,170 +187,163 @@ task:
       concurrency_testing: false
       integration_testing: false
 
-    estimated_test_count: 3
-
-  dependencies:
-    requires_completion_of:
-      - task_id: 1
-        reason: "Needs character data structures and app infrastructure"
-
-    enables_start_of:
-      - task_id: 3
-        reason: "Learning session needs flashcard display"
-      - task_id: 4
-        reason: "Stroke animation builds on character display"
-
-    parallel_with: []
-
-  acceptance_criteria:
-    - "Noto Sans JP font loads without errors"
-    - "Hiragana characters display correctly at 48-72px sizes"
-    - "CharacterCard widget renders centered with proper spacing"
-    - "No garbled or missing glyphs in Japanese text"
-
-  risk_assessment:
-    complexity_risk: "low"
-    integration_risk: "low"
-    testing_risk: "low"
-
-    concerns: []
-
-  notes:
-    - "Consider Source Han Sans as alternative font"
-    - "Keep widget flexible for future enhancements (stroke order, hints)"
-
-# =============================================================================
-
-task:
-  id: 3
-  name: "SM-2 Spaced Repetition System and Learning Session"
-
-  overview:
-    purpose: |
-      Implement the SM-2 spaced repetition algorithm for optimal learning scheduling,
-      create a review queue management system, and build the core learning session
-      flow that presents characters to users based on their individual progress.
-
-    motivation: |
-      Spaced repetition is scientifically proven to be the most effective method for
-      long-term retention. The SM-2 algorithm provides an excellent balance of
-      simplicity and effectiveness for MVP, while the queue system ensures users
-      always practice the right characters at the right time.
-
-    outcome: |
-      Users receive character reviews at scientifically optimized intervals, the
-      system tracks individual card performance and adjusts scheduling accordingly,
-      and learning sessions present a balanced mix of new, learning, and review cards.
-
-  scope_summary:
-    description: "Implements SM-2 algorithm, review queue, learning session flow, and progress tracking"
-    files_affected: 5
-    functions_added: 20
-    tests_required: 12
-    complexity: "complex"
-    estimated_effort: "2-3 days"
-
-  key_components:
-    - component: "SM2Card"
-      type: "struct"
-      purpose: "Tracks individual character progress with ease factor and intervals"
-
-    - component: "ReviewQueue"
-      type: "struct"
-      purpose: "Manages prioritization of new, learning, and review cards"
-
-    - component: "LearningSession"
-      type: "struct"
-      purpose: "Orchestrates the learning flow and session state"
-
-    - component: "review method"
-      type: "function"
-      purpose: "Core SM-2 algorithm implementation"
-
-    - component: "get_next_card method"
-      type: "function"
-      purpose: "Queue management with proper prioritization"
-
-  implementation_hints:
-    approach: |
-      Implement SM-2 algorithm exactly as specified in SuperMemo paper. Use
-      priority-based queue management: learning cards (interval < 1 day) first,
-      then review cards (due), then new cards (within daily limit). Track all
-      reviews for future algorithm optimization.
-
-    key_considerations:
-      - "Quality ratings 0-5 must map correctly to ease factor calculations"
-      - "Failed cards (quality < 3) must reset to learning state"
-      - "Queue prioritization critical for effective learning flow"
-      - "Session history enables future FSRS migration"
-      - "Daily limits prevent cognitive overload"
-
-    integration_points:
-      - "Integrates with character data from Task 1"
-      - "Uses flashcard display from Task 2"
-      - "Requires persistence layer from Task 5"
-      - "Provides review data for statistics in Task 6"
-
-  testing_overview:
-    strategy: "mixed"
-
-    rationale: |
-      Unit tests verify algorithm correctness, property tests ensure mathematical
-      invariants hold, and integration tests validate complete session flows.
-
-    critical_properties:
-      - "Ease factor never drops below 1.3"
-      - "Failed cards always reset to interval 1"
-      - "Queue priority order maintained: learning > review > new"
-      - "Interval calculations match SM-2 specification"
-
-    verification_needs:
-      formal_verification: false
-      property_testing: true
-      concurrency_testing: false
-      integration_testing: true
-
     estimated_test_count: 12
 
   dependencies:
     requires_completion_of:
       - task_id: 1
-        reason: "Needs character data and app state infrastructure"
-      - task_id: 2
-        reason: "Learning session requires flashcard display"
+        reason: "Needs models/ module structure to exist"
 
     enables_start_of:
-      - task_id: 5
-        reason: "Progress persistence needs review data structures"
-      - task_id: 6
-        reason: "Statistics require review history"
+      - task_id: 3
+        reason: "Font rendering needs character data to display"
+      - task_id: 4
+        reason: "Stroke animation requires stroke path data"
+      - task_id: 7
+        reason: "Flashcard system needs character database"
 
-    parallel_with: []
+    parallel_with: [3]
 
   acceptance_criteria:
-    - "SM-2 algorithm produces correct intervals for all quality ratings"
-    - "Queue correctly prioritizes learning > review > new cards"
-    - "Learning sessions complete without state inconsistencies"
-    - "Daily new card limits enforced"
-    - "Review history accurately recorded"
-    - "Failed cards reset to learning state"
+    - "CharData struct defined with all required fields"
+    - "hiragana.ron contains all 46 hiragana characters"
+    - "katakana.ron contains all 46 katakana characters"
+    - "Lookup function returns correct CharData for any valid kana"
+    - "All unit tests pass verifying data integrity"
+    - "SVG paths parse without panics"
 
   risk_assessment:
-    complexity_risk: "medium"
-    integration_risk: "medium"
+    complexity_risk: "low"
+    integration_risk: "low"
     testing_risk: "low"
-
     concerns:
-      - "Algorithm edge cases need thorough testing (quality 0, 5, failures)"
-      - "Queue management complexity increases with card count"
+      - "SVG path data extraction from kana-svg-data may require manual processing"
+      - "Median point calculation may need custom tooling"
 
   notes:
-    - "Keep review logs for future FSRS migration (Task 12)"
-    - "Default to 20 new cards/day, 200 reviews/day limits"
+    - "Consider using kana-svg-data GitHub repository as primary source"
+    - "RON format chosen for readability - can switch to bincode for production"
+    - "Compile-time embedding trades binary size for runtime performance"
 
-# =============================================================================
-# PHASE 2: Core Features
-# =============================================================================
+---
+
+task:
+  id: 3
+  name: "Japanese Font Integration and Text Rendering"
+
+  overview:
+    purpose: |
+      Integrate a Japanese font (Noto Sans JP) into the iced application and configure
+      cosmic-text for proper Unicode rendering of hiragana and katakana characters.
+      Create a custom CharacterCard widget for flashcard-style character display with
+      configurable sizing and styling.
+
+    motivation: |
+      Proper Japanese text rendering is non-negotiable for a kana learning application.
+      Iced's cosmic-text backend supports full Unicode, but requires explicit font loading
+      and shaping configuration. A custom widget abstracts rendering complexity and provides
+      consistent character presentation across the application.
+
+    outcome: |
+      Japanese characters render correctly at all sizes with proper glyph shaping.
+      A reusable CharacterCard widget provides flashcard-style display with options
+      for size, stroke order overlay, and styling. Font is embedded in the binary for
+      portability across platforms.
+
+  scope_summary:
+    description: "Embeds Noto Sans JP font, configures text rendering, implements CharacterCard widget"
+    files_affected: 4
+    functions_added: 6
+    tests_required: 4
+    complexity: "moderate"
+    estimated_effort: "half day"
+
+  key_components:
+    - component: "Font loading system"
+      type: "function"
+      purpose: "Loads embedded Japanese font at application startup"
+
+    - component: "CharacterCard widget"
+      type: "struct"
+      purpose: "Custom iced widget for displaying kana characters in flashcard style"
+
+    - component: "Font asset"
+      type: "module"
+      purpose: "Embedded Noto Sans JP font file (700KB-1MB OTF)"
+
+  implementation_hints:
+    approach: |
+      Use include_bytes!() to embed font at compile time. Load font in Application::new()
+      using iced's font loading API. Create CharacterCard as a custom widget implementing
+      iced::Widget trait with draw() method that uses cosmic-text for rendering.
+
+    key_considerations:
+      - "Must use Shaping::Advanced for proper Japanese character rendering"
+      - "Font::with_name() reference must match exact font family name"
+      - "Consider Noto Sans JP Regular (400) for primary UI, Bold (700) for emphasis"
+      - "CharacterCard should center character both horizontally and vertically"
+      - "Support optional stroke order guides as overlay layer"
+
+    integration_points:
+      - "Font loaded in main.rs Application::new()"
+      - "CharacterCard widget used in ui/flashcard.rs"
+      - "Integrates with Canvas widget for stroke order overlay"
+
+  testing_overview:
+    strategy: "integration"
+    rationale: |
+      Text rendering requires integration testing with actual font and renderer.
+      Visual regression tests or snapshot tests would be ideal but may be complex
+      for MVP. Focus on ensuring no panics and correct text output.
+
+    critical_properties:
+      - "All hiragana characters render without missing glyphs"
+      - "All katakana characters render without missing glyphs"
+      - "Text centering works correctly at various sizes"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: false
+      integration_testing: true
+
+    estimated_test_count: 4
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 1
+        reason: "Needs application foundation and ui/ module"
+
+    enables_start_of:
+      - task_id: 7
+        reason: "Flashcard system needs CharacterCard widget"
+      - task_id: 8
+        reason: "Practice mode displays characters using this system"
+
+    parallel_with: [2]
+
+  acceptance_criteria:
+    - "Noto Sans JP font embedded in binary"
+    - "Font loads successfully at application startup"
+    - "CharacterCard widget displays hiragana correctly"
+    - "CharacterCard widget displays katakana correctly"
+    - "Text renders at 48px, 64px, and 72px sizes"
+    - "No missing glyph boxes (□) appear for any kana"
+
+  risk_assessment:
+    complexity_risk: "low"
+    integration_risk: "medium"
+    testing_risk: "medium"
+    concerns:
+      - "Font loading errors may be platform-specific and hard to debug"
+      - "cosmic-text shaping configuration may require experimentation"
+
+  notes:
+    - "Noto Sans JP Regular is ~900KB - acceptable for embedded font"
+    - "Alternative: Source Han Sans if handwriting-style strokes needed"
+    - "Consider font subsetting to reduce binary size (kana-only subset ~100KB)"
+
+---
 
 task:
   id: 4
@@ -380,82 +351,217 @@ task:
 
   overview:
     purpose: |
-      Create a GPU-accelerated stroke order animation system using iced's Canvas
-      and Animation APIs, implementing sequential stroke rendering with partial
-      path animation, and integrating SVG stroke data from character definitions.
+      Implement a GPU-accelerated stroke-by-stroke animation system using iced's Canvas
+      widget and Animation API. The system renders character strokes sequentially with
+      smooth partial path drawing, configurable timing, and natural easing curves that
+      mimic human handwriting motion.
 
     motivation: |
-      Stroke order is fundamental to properly writing Japanese characters. Visual
-      animations provide an intuitive, memorable way to learn correct stroke
-      sequences. GPU acceleration ensures smooth 60fps animations even with
-      complex paths, creating a professional learning experience.
+      Stroke order animation is the primary visual teaching tool. It must be smooth,
+      accurate, and feel natural to be pedagogically effective. GPU acceleration via
+      lyon tessellation ensures 60fps animation even on lower-end hardware. Sequential
+      stroke rendering with proper timing helps learners internalize correct writing
+      patterns.
 
     outcome: |
-      Users can watch smooth, sequenced animations showing correct stroke order
-      for any character, animations can be paused/replayed, and the visual feedback
-      helps build muscle memory for handwriting practice.
+      A reusable StrokeOrderAnimation component that takes stroke path data and produces
+      smooth, timed animations. Each stroke draws progressively over 500-800ms with
+      200-300ms pauses between strokes. Completed strokes render in black, current stroke
+      in blue. Animation can be played, paused, and reset.
 
   scope_summary:
-    description: "Implements Canvas-based animation, SVG path parsing, sequential stroke rendering"
-    files_affected: 4
+    description: "Implements Canvas-based animation with lyon path rendering, timing control, and partial path calculation"
+    files_affected: 6
     functions_added: 15
-    tests_required: 6
+    tests_required: 8
     complexity: "complex"
-    estimated_effort: "3-4 days"
+    estimated_effort: "2-3 days"
 
   key_components:
     - component: "StrokeOrderAnimation"
       type: "struct"
-      purpose: "Manages animation state and timing for stroke sequences"
+      purpose: "Manages animation state, timing, and rendering for stroke order display"
 
     - component: "StrokePath"
       type: "struct"
-      purpose: "Represents individual strokes with partial rendering support"
+      purpose: "Represents a single stroke with segments and length calculations"
 
-    - component: "Canvas Program implementation"
-      type: "trait impl"
-      purpose: "Renders animated strokes with GPU acceleration"
+    - component: "PathSegment"
+      type: "enum"
+      purpose: "Individual SVG path commands (MoveTo, LineTo, CubicBezier, etc.)"
 
-    - component: "SVG path parser"
+    - component: "Animation controller"
+      type: "module"
+      purpose: "Manages animation lifecycle (play, pause, reset, complete)"
+
+    - component: "Partial path renderer"
       type: "function"
-      purpose: "Converts SVG path data to lyon Path segments"
-
-    - component: "partial_path method"
-      type: "function"
-      purpose: "Calculates partial stroke rendering based on animation progress"
+      purpose: "Calculates and renders partial stroke paths based on animation progress"
 
   implementation_hints:
     approach: |
-      Use iced's Canvas widget with lyon for path tessellation. Parse SVG paths
-      from character data into lyon segments, calculating lengths for partial
-      rendering. Animate using iced's Animation API with EaseOutCubic for natural
-      writing feel. Sequence strokes with 200-300ms pauses between each.
+      Implement canvas::Program trait for StrokeOrderAnimation. Parse SVG path data
+      into PathSegment enums with precomputed lengths. Use iced's Animation API to
+      interpolate 0.0 to 1.0 progress for each stroke. In draw(), render completed
+      strokes fully and current stroke partially based on animation progress.
 
     key_considerations:
-      - "Must request redraw on every frame during animation"
-      - "Partial path rendering requires accumulated length calculations"
-      - "Stroke timing critical for natural appearance: 500-800ms per stroke"
-      - "EaseOutCubic easing provides most natural writing motion"
-      - "Cache static geometry to avoid re-tessellation"
+      - "Precompute total stroke length for accurate partial path rendering"
+      - "Use EaseOutCubic easing for natural handwriting feel"
+      - "Request redraw on every frame while animating"
+      - "Parse SVG commands: M (move), L (line), C (cubic), S (smooth cubic), Q (quadratic)"
+      - "Handle stroke sequence correctly - wait for current stroke to complete"
+      - "Color differentiation: black for complete, blue for animating"
 
     integration_points:
-      - "Uses stroke data from CharData (Task 1)"
-      - "Integrates into practice session screen"
-      - "Provides visual reference for handwriting (Task 8)"
+      - "Used by practice mode for teaching stroke order"
+      - "Integrates with character data from Task 2"
+      - "Canvas rendering pipeline uses lyon for GPU tessellation"
+
+  testing_overview:
+    strategy: "mixed"
+    rationale: |
+      Animation logic is deterministic but timing-sensitive. Unit tests verify path
+      calculations and segment parsing. Integration tests verify animation state
+      transitions. Visual inspection needed for timing/easing quality.
+
+    critical_properties:
+      - "Partial path calculation maintains stroke continuity"
+      - "Animation completes all strokes in sequence"
+      - "Total animation time matches expected duration"
+      - "No rendering artifacts or flicker between frames"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: true
+      concurrency_testing: false
+      integration_testing: true
+
+    estimated_test_count: 8
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 1
+        reason: "Needs Canvas widget support from iced foundation"
+      - task_id: 2
+        reason: "Requires stroke path data from character database"
+
+    enables_start_of:
+      - task_id: 8
+        reason: "Practice mode uses stroke animation for teaching"
+
+    parallel_with: [3, 5]
+
+  acceptance_criteria:
+    - "Stroke animation renders at 60fps without frame drops"
+    - "Each stroke animates over 500-800ms as configured"
+    - "200-300ms pause occurs between strokes"
+    - "Partial path rendering shows smooth progression (no jumps)"
+    - "Animation completes all strokes in correct order"
+    - "Play/pause/reset controls work correctly"
+    - "Color differentiation between complete and animating strokes"
+
+  risk_assessment:
+    complexity_risk: "high"
+    integration_risk: "medium"
+    testing_risk: "medium"
+    concerns:
+      - "SVG path parsing is complex and error-prone for edge cases"
+      - "Partial path length calculations may have floating-point precision issues"
+      - "Performance may degrade on low-end hardware"
+      - "Bezier curve length calculation requires numerical approximation"
+
+  notes:
+    - "Consider using lyon's path builder API directly instead of SVG parsing"
+    - "Bezier curve length: use adaptive subdivision or Legendre-Gauss quadrature"
+    - "Animation timing may need tuning based on user feedback"
+
+---
+
+task:
+  id: 5
+  name: "Handwriting Canvas and Input System"
+
+  overview:
+    purpose: |
+      Create an interactive drawing canvas that captures user handwriting input with
+      mouse or touch. The system records stroke sequences with timestamps, provides
+      visual feedback during drawing, and outputs normalized stroke data suitable for
+      character recognition. Supports both freehand and stroke-order-enforced modes.
+
+    motivation: |
+      Handwriting practice is essential for kinesthetic learning. The canvas must feel
+      responsive and natural, with smooth stroke rendering and proper point sampling.
+      Stroke data collection enables recognition validation and progress tracking.
+      The system must work across desktop (mouse) and touch-enabled devices.
+
+    outcome: |
+      A HandwritingCanvas widget that captures drawing input, renders strokes in
+      real-time with smooth anti-aliased paths, and exports stroke data as sequences
+      of points. Canvas supports clear/undo operations, provides visual feedback for
+      stroke starts/ends, and can optionally overlay guide images for tracing practice.
+
+  scope_summary:
+    description: "Implements interactive Canvas with mouse/touch input, stroke recording, and rendering"
+    files_affected: 5
+    functions_added: 12
+    tests_required: 6
+    complexity: "moderate"
+    estimated_effort: "1 day"
+
+  key_components:
+    - component: "HandwritingCanvas"
+      type: "struct"
+      purpose: "Canvas widget implementing canvas::Program for interactive drawing"
+
+    - component: "DrawingState"
+      type: "struct"
+      purpose: "Maintains stroke history and current drawing state"
+
+    - component: "Stroke"
+      type: "struct"
+      purpose: "Represents a single stroke as sequence of points with timestamp"
+
+    - component: "Input handler"
+      type: "function"
+      purpose: "Processes mouse/touch events into stroke points"
+
+    - component: "Stroke renderer"
+      type: "function"
+      purpose: "Renders strokes with anti-aliasing and proper line caps/joins"
+
+  implementation_hints:
+    approach: |
+      Implement canvas::Program with DrawingState. Handle mouse ButtonPressed to start
+      stroke, CursorMoved to add points, ButtonReleased to complete stroke. Apply
+      distance threshold (2px) to reduce noise. Use lyon Path with line_to() for
+      rendering with round caps/joins for smooth appearance.
+
+    key_considerations:
+      - "Apply distance threshold to prevent excessive point density"
+      - "Use LineCap::Round and LineJoin::Round for natural stroke appearance"
+      - "Store timestamps for velocity analysis (future recognition enhancement)"
+      - "Normalize coordinates to 0-1 range for recognition"
+      - "Request redraw on every cursor move while drawing"
+      - "Differentiate visual style for current vs completed strokes"
+
+    integration_points:
+      - "Used in practice mode for handwriting exercises"
+      - "Exports stroke data to recognition system (Task 9)"
+      - "Overlays on top of guide images from character data"
 
   testing_overview:
     strategy: "integration"
-
     rationale: |
-      Animation behavior requires integration testing to verify timing,
-      sequencing, and visual correctness. Manual verification needed for
-      subjective animation quality.
+      Drawing input requires integration testing with simulated mouse events.
+      Unit tests verify stroke data structure and normalization. Integration
+      tests ensure event handling state machine works correctly.
 
     critical_properties:
-      - "Strokes animate in correct sequence order"
-      - "Partial paths render smoothly without gaps or jumps"
-      - "Animation timing matches specified duration"
-      - "Completed strokes remain visible during subsequent strokes"
+      - "Strokes are continuous (no gaps from missed events)"
+      - "Point sampling rate is consistent and appropriate"
+      - "Stroke completion triggers recognition callback"
+      - "Multiple strokes are maintained in correct sequence"
 
     verification_needs:
       formal_verification: false
@@ -468,250 +574,657 @@ task:
   dependencies:
     requires_completion_of:
       - task_id: 1
-        reason: "Needs stroke data from character definitions"
-      - task_id: 2
-        reason: "Builds on character display foundation"
+        reason: "Needs Canvas widget support from iced foundation"
 
     enables_start_of:
       - task_id: 8
-        reason: "Practice modes use animation as reference"
+        reason: "Practice mode requires drawing canvas"
+      - task_id: 9
+        reason: "Recognition system needs stroke data format"
 
-    parallel_with:
-      - 5
-      - 6
+    parallel_with: [2, 3, 4]
 
   acceptance_criteria:
-    - "All hiragana characters animate smoothly at 60fps"
-    - "Strokes appear in correct sequential order"
-    - "Animation can be paused and resumed"
-    - "Partial paths render without visual artifacts"
-    - "Animation completes in expected time (500-800ms per stroke)"
-    - "No performance degradation with complex characters"
+    - "Canvas captures mouse input and renders strokes in real-time"
+    - "Strokes appear smooth with anti-aliasing and round caps"
+    - "Distance threshold reduces point noise effectively"
+    - "Clear button removes all strokes"
+    - "Stroke data exports as Vec<Vec<Point>>"
+    - "Visual differentiation between drawing and completed strokes"
 
   risk_assessment:
-    complexity_risk: "high"
+    complexity_risk: "medium"
     integration_risk: "medium"
-    testing_risk: "medium"
-
+    testing_risk: "low"
     concerns:
-      - "SVG path parsing complexity varies by character data source"
-      - "Partial path rendering calculations are mathematically complex"
-      - "Animation timing synchronization can be tricky"
+      - "Touch input support may require platform-specific testing"
+      - "Point sampling rate may need tuning for different input devices"
 
   notes:
-    - "Consider using kana-svg-data or animCJK for stroke data"
-    - "May need to normalize coordinates to canvas bounds"
+    - "Consider adding pressure sensitivity support for stylus input (future)"
+    - "Stroke smoothing algorithms (Catmull-Rom splines) could improve appearance"
+    - "Canvas size should be configurable but default to 200x200px"
 
-# =============================================================================
+---
 
 task:
-  id: 5
-  name: "Progress Persistence and Database Integration"
+  id: 6
+  name: "Application State Management and Navigation"
 
   overview:
     purpose: |
-      Implement local data persistence using redb for card progress, review logs,
-      and user settings. Establish platform-specific data directories and create
-      efficient serialization for all state that needs to persist across sessions.
+      Implement the Elm architecture state management system for the application,
+      including screen navigation, session management, and the message/update pipeline.
+      This establishes the control flow for transitioning between menu, learning,
+      practice, and statistics screens while maintaining application state consistency.
 
     motivation: |
-      Without persistence, users lose all progress when closing the application.
-      Local storage ensures data privacy, offline functionality, and fast access.
-      The redb embedded database provides ACID guarantees without requiring
-      external database setup.
+      Proper state management is the backbone of the Elm architecture and ensures
+      predictable, testable application behavior. The state structure must support
+      complex interactions (learning sessions, animations, drawing) while remaining
+      maintainable. Clear message types and update logic prevent bugs and make the
+      application easy to extend.
 
     outcome: |
-      User progress automatically saves after each review, application state
-      persists across restarts, all review history is preserved for analytics,
-      and users can confidently close the app without losing data.
+      A complete state management system with Screen enum for navigation, Message
+      enum for all user interactions, and update() function that implements all
+      state transitions. Application can navigate between screens, maintain session
+      state, and handle complex workflows like review sessions and practice modes.
 
   scope_summary:
-    description: "Implements redb database, serialization, auto-save, platform-specific paths"
-    files_affected: 4
-    functions_added: 12
-    tests_required: 8
-    complexity: "moderate"
-    estimated_effort: "2 days"
+    description: "Defines AppState, Screen enum, Message enum, and implements Application::update()"
+    files_affected: 8
+    functions_added: 25
+    tests_required: 15
+    complexity: "complex"
+    estimated_effort: "2-3 days"
 
   key_components:
-    - component: "AppDatabase"
+    - component: "AppState"
       type: "struct"
-      purpose: "Database handle and transaction management"
+      purpose: "Root state container holding current screen and shared data"
 
-    - component: "save_card_progress"
-      type: "function"
-      purpose: "Persists individual card state"
+    - component: "Screen enum"
+      type: "enum"
+      purpose: "Represents all application screens with associated state"
 
-    - component: "load_card_progress"
-      type: "function"
-      purpose: "Retrieves saved card state"
+    - component: "Message enum"
+      type: "enum"
+      purpose: "All possible user interactions and system events"
 
-    - component: "save_review_log"
+    - component: "Application::update()"
       type: "function"
-      purpose: "Logs completed reviews for analytics"
+      purpose: "State transition function implementing Elm architecture update logic"
 
-    - component: "Platform path resolver"
-      type: "function"
-      purpose: "Determines correct data directory per OS"
+    - component: "Navigation functions"
+      type: "module"
+      purpose: "Helper functions for screen transitions and state setup"
 
   implementation_hints:
     approach: |
-      Use redb with bincode serialization for compact storage. Use the directories
-      crate for cross-platform data paths. Batch writes in transactions for
-      performance. Auto-save after each review but batch during sessions.
-      Implement lazy loading for large datasets.
+      Define comprehensive Screen enum variants (MainMenu, Learning, Practice, etc.)
+      each carrying relevant state. Create Message enum covering all interactions.
+      Implement update() as large match statement routing messages to screen-specific
+      handlers. Use Task for async operations (database saves, recognition).
 
     key_considerations:
-      - "Use transactions to batch multiple writes for performance"
-      - "Bincode provides fast, compact serialization"
-      - "Handle migration gracefully if data structures change"
-      - "Platform-specific paths: Linux (~/.local/share), macOS (~/Library/Application Support)"
-      - "Error handling critical: never lose user data"
+      - "Keep state transitions pure - no side effects in update()"
+      - "Use Task::perform() for async operations that return Messages"
+      - "Maintain referential transparency for testability"
+      - "Session state (learning/practice) is owned by Screen variants"
+      - "Shared state (progress, settings) lives in AppState via Arc<RwLock>"
+      - "Navigation messages trigger screen transitions and state initialization"
 
     integration_points:
-      - "Saves SM2Card data from Task 3"
-      - "Loads data on app startup (Task 1)"
-      - "Provides review logs for statistics (Task 6)"
+      - "Integrates with all other systems - central orchestrator"
+      - "Coordinates between UI layer (view) and business logic (update)"
+      - "Manages database persistence operations asynchronously"
 
   testing_overview:
-    strategy: "integration"
-
+    strategy: "unit"
     rationale: |
-      Persistence requires integration tests that verify data survives across
-      application restarts and database transactions complete correctly.
+      State transitions are pure functions and highly testable. Unit tests can
+      verify all state transitions, message handling, and navigation flows without
+      requiring UI or database. This is the most critical testing area.
 
     critical_properties:
-      - "Data written in transaction is retrievable after commit"
-      - "No data loss on application crash (ACID guarantees)"
-      - "Concurrent reads/writes handled correctly"
-      - "Data directory creates successfully on all platforms"
+      - "All screen transitions maintain state consistency"
+      - "No unreachable states or invalid state combinations"
+      - "Session data persists correctly across screen changes"
+      - "Navigation stack allows proper back/forward flow"
 
     verification_needs:
       formal_verification: false
       property_testing: true
-      concurrency_testing: true
-      integration_testing: true
+      concurrency_testing: false
+      integration_testing: false
 
-    estimated_test_count: 8
+    estimated_test_count: 15
 
   dependencies:
     requires_completion_of:
       - task_id: 1
-        reason: "Needs state models to persist"
-      - task_id: 3
-        reason: "SM2Card and review data structures required"
+        reason: "Needs application foundation and state/ module structure"
 
     enables_start_of:
-      - task_id: 6
-        reason: "Statistics require persistent review logs"
+      - task_id: 7
+        reason: "Learning session requires state management framework"
+      - task_id: 8
+        reason: "Practice session requires state management framework"
+      - task_id: 10
+        reason: "Statistics screen needs navigation support"
 
-    parallel_with:
-      - 4
+    parallel_with: []
 
   acceptance_criteria:
-    - "Card progress saves automatically after each review"
-    - "All data survives application restart"
-    - "Database transactions complete without errors"
-    - "Platform-specific paths work on Linux, macOS, Windows"
-    - "Batch operations complete efficiently (< 50ms for 100 cards)"
-    - "No data corruption on abnormal shutdown"
+    - "All Screen variants defined with appropriate state"
+    - "Message enum covers all user interactions"
+    - "update() handles all message types correctly"
+    - "Navigation between screens works bidirectionally"
+    - "Session state initializes correctly on screen entry"
+    - "State transitions pass all unit tests"
+    - "No panics or invalid states reachable"
 
   risk_assessment:
-    complexity_risk: "low"
-    integration_risk: "medium"
-    testing_risk: "medium"
-
+    complexity_risk: "high"
+    integration_risk: "high"
+    testing_risk: "low"
     concerns:
-      - "Schema migration strategy needed for future changes"
-      - "Must handle corrupted database files gracefully"
+      - "Large update() function may become unwieldy - consider sub-handlers"
+      - "Async operations with Task require careful error handling"
+      - "Shared state via Arc<RwLock> introduces potential for deadlocks"
 
   notes:
-    - "Consider export/import functionality in Task 11"
-    - "redb is pure Rust, no external dependencies"
+    - "Consider splitting update() into screen-specific update functions"
+    - "Message enum should use descriptive names, not abbreviations"
+    - "State transitions should be self-documenting through types"
 
-# =============================================================================
+---
 
 task:
-  id: 6
-  name: "Statistics and Progress Tracking"
+  id: 7
+  name: "SM-2 Spaced Repetition Algorithm and Review Queue"
 
   overview:
     purpose: |
-      Create comprehensive statistics tracking system including accuracy metrics,
-      study time, streak tracking, and daily/weekly aggregations. Build a
-      statistics screen to visualize progress and motivate continued learning.
+      Implement the SM-2 spaced repetition algorithm for scheduling card reviews,
+      including ease factor calculation, interval progression, and review quality
+      grading (0-5 scale). Build a review queue manager that prioritizes learning
+      cards, due reviews, and new cards according to SRS best practices.
 
     motivation: |
-      Visible progress is a key motivator for learning. Statistics help users
-      understand their improvement, identify weak areas, and maintain study
-      habits. Streak tracking specifically drives daily engagement through
-      gamification psychology.
+      Spaced repetition is the core pedagogical engine that makes the learning system
+      effective. SM-2 is battle-tested, well-documented, and provides good results for
+      vocabulary learning. Proper implementation with queue prioritization ensures
+      learners review cards at optimal intervals for long-term retention.
 
     outcome: |
-      Users can view detailed statistics on their learning progress, see accuracy
-      trends over time, track study streaks, and feel motivated by visible
-      improvement metrics.
+      A fully functional SM-2 implementation that tracks per-card ease factors, intervals,
+      and next review dates. ReviewQueue manages card prioritization with configurable
+      daily limits. Cards automatically schedule based on user performance (quality rating),
+      with failed cards returning to learning pool.
 
   scope_summary:
-    description: "Implements statistics models, aggregation logic, streak tracking, stats UI screen"
+    description: "Implements SM-2 algorithm, SM2Card struct, ReviewQueue with prioritization logic"
     files_affected: 4
-    functions_added: 18
-    tests_required: 10
+    functions_added: 12
+    tests_required: 20
     complexity: "moderate"
-    estimated_effort: "2-3 days"
+    estimated_effort: "1 day"
 
   key_components:
-    - component: "Statistics"
+    - component: "SM2Card"
       type: "struct"
-      purpose: "Aggregated metrics: accuracy, time, streaks, progress"
+      purpose: "Represents a flashcard with SM-2 scheduling parameters"
 
-    - component: "DayStats / WeekStats"
+    - component: "SM2Card::review()"
+      type: "function"
+      purpose: "Updates card state based on quality rating (0-5)"
+
+    - component: "ReviewQueue"
       type: "struct"
-      purpose: "Time-series data for trend visualization"
+      purpose: "Manages card queues (new, learning, review) with prioritization"
 
-    - component: "update_after_review"
+    - component: "ReviewQueue::get_next_card()"
       type: "function"
-      purpose: "Incremental statistics updates"
-
-    - component: "update_streak"
-      type: "function"
-      purpose: "Streak calculation and tracking"
-
-    - component: "Statistics screen UI"
-      type: "module"
-      purpose: "Visual display of all metrics"
+      purpose: "Returns next card to review based on priority rules"
 
   implementation_hints:
     approach: |
-      Use BTreeMap for time-series data to maintain chronological order. Update
-      statistics incrementally after each review to avoid expensive recalculations.
-      Persist statistics to database for historical trends. Use simple text-based
-      displays for MVP; consider charts in future phases.
+      Implement SM-2 exactly as specified in SuperMemo documentation. Track ease factor
+      (starting at 2.5), interval in days, and repetition count per card. On quality < 3,
+      reset card to learning. On quality >= 3, update ease factor and calculate next
+      interval. Queue prioritizes: learning cards, due reviews, then new cards.
 
     key_considerations:
-      - "Incremental updates more efficient than full recalculation"
-      - "BTreeMap provides sorted dates for free"
-      - "Streak calculation requires consecutive day checking"
-      - "Separate mastered (interval > 21 days) from learning cards"
-      - "Cache calculated values to avoid repeated computations"
+      - "Ease factor has floor of 1.3 to prevent cards from becoming too hard"
+      - "First two intervals are fixed: 1 day, then 6 days"
+      - "Subsequent intervals: previous_interval * ease_factor"
+      - "Quality rating maps to user experience: 5=perfect, 4=correct, 3=difficult, 2=incorrect, 1=barely, 0=blackout"
+      - "Learning cards have priority over reviews to reinforce new material"
+      - "Implement daily new card limits to prevent overwhelming users"
 
     integration_points:
-      - "Consumes review logs from Task 5"
-      - "Updates after each review in Task 3"
-      - "Displays in dedicated statistics screen"
+      - "Used by learning session (Task 8) to schedule reviews"
+      - "Integrates with persistence layer (Task 11) for card state storage"
+      - "Powers flashcard system for both recognition and recall"
 
   testing_overview:
     strategy: "unit"
-
     rationale: |
-      Statistics calculations are pure functions that can be thoroughly tested
-      with deterministic inputs and expected outputs.
+      SM-2 algorithm is deterministic and mathematical, making it ideal for
+      comprehensive unit testing. Property-based testing verifies invariants
+      like ease factor bounds and interval monotonicity.
 
     critical_properties:
-      - "Accuracy rate always between 0.0 and 1.0"
-      - "Streak increments only once per day"
-      - "Longest streak never less than current streak"
-      - "Total reviews equals sum of correct and incorrect"
+      - "Ease factor never falls below 1.3"
+      - "Intervals increase monotonically for consecutive correct reviews"
+      - "Failed cards (quality < 3) reset to interval=1, repetitions=0"
+      - "Queue prioritization follows learning > review > new order"
+      - "Next review date is always in the future after review"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: true
+      concurrency_testing: false
+      integration_testing: false
+
+    estimated_test_count: 20
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 2
+        reason: "Needs character database to create cards"
+
+    enables_start_of:
+      - task_id: 8
+        reason: "Learning session uses SM-2 for scheduling"
+
+    parallel_with: [3, 4, 5]
+
+  acceptance_criteria:
+    - "SM2Card::review() correctly updates ease factor for all quality ratings"
+    - "Intervals progress according to SM-2 specification"
+    - "Failed cards reset to learning state"
+    - "ReviewQueue returns cards in correct priority order"
+    - "Daily limits prevent queue overflow"
+    - "All 20 unit tests pass including property tests"
+    - "No panics for any valid quality rating (0-5)"
+
+  risk_assessment:
+    complexity_risk: "medium"
+    integration_risk: "low"
+    testing_risk: "low"
+    concerns:
+      - "Ease factor formula is sensitive to floating-point precision"
+      - "Daily limits need careful tuning for good UX"
+
+  notes:
+    - "Consider FSRS upgrade path after collecting review data"
+    - "Store review history for future algorithm improvements"
+    - "Quality rating UI should clearly explain 0-5 scale to users"
+
+---
+
+task:
+  id: 8
+  name: "Learning Session and Practice Modes"
+
+  overview:
+    purpose: |
+      Implement the learning session workflow that presents flashcards, collects user
+      responses, records reviews, and progresses through review queues. Build practice
+      mode with four progressive difficulty levels: watch animation, trace with guide,
+      trace without guide, and free drawing. Integrate stroke animation, drawing canvas,
+      and feedback systems into cohesive learning experiences.
+
+    motivation: |
+      The learning session and practice modes are where all other systems converge into
+      actual learning experiences. These must feel polished, provide immediate feedback,
+      and guide users through effective learning progressions. The combination of passive
+      observation, guided practice, and free recall creates optimal learning conditions.
+
+    outcome: |
+      A complete learning session system that cycles through review queues, presents
+      characters, collects quality ratings, and updates SM-2 state. Practice mode
+      provides four progressive stages with stroke animation, tracing guides, and
+      handwriting recognition. Both systems provide rich visual feedback and track
+      session statistics.
+
+  scope_summary:
+    description: "Implements LearningSession and PracticeSession state machines with full UI integration"
+    files_affected: 12
+    functions_added: 30
+    tests_required: 18
+    complexity: "complex"
+    estimated_effort: "2-3 days"
+
+  key_components:
+    - component: "LearningSession"
+      type: "struct"
+      purpose: "Manages review queue progression and session state"
+
+    - component: "PracticeSession"
+      type: "struct"
+      purpose: "Manages practice mode progression through difficulty levels"
+
+    - component: "PracticeMode enum"
+      type: "enum"
+      purpose: "Four practice stages: WatchAnimation, TraceWithGuide, TraceWithoutGuide, FreeDrawing"
+
+    - component: "Session UI views"
+      type: "function"
+      purpose: "Renders flashcards, quality buttons, practice canvas, and feedback"
+
+    - component: "Session statistics"
+      type: "struct"
+      purpose: "Tracks session progress, accuracy, time per card"
+
+  implementation_hints:
+    approach: |
+      LearningSession pulls cards from ReviewQueue, displays them, waits for quality
+      rating, calls SM2Card::review(), records result, moves to next card. PracticeSession
+      starts with animation, progresses through modes on successful recognition, provides
+      visual guides (ghost overlay) for tracing modes.
+
+    key_considerations:
+      - "Session should batch database saves (every 5-10 cards) not every card"
+      - "Practice mode progression requires successful recognition to advance"
+      - "Provide skip/hint options for stuck users"
+      - "Show progress bar with cards remaining"
+      - "Session summary screen shows accuracy, time, cards reviewed"
+      - "Visual feedback (green check, red X) appears immediately after response"
+      - "Keyboard shortcuts (1-5 for quality, space for next) improve flow"
+
+    integration_points:
+      - "Uses ReviewQueue from Task 7"
+      - "Uses StrokeOrderAnimation from Task 4"
+      - "Uses HandwritingCanvas from Task 5"
+      - "Uses CharacterCard from Task 3"
+      - "Saves progress via persistence layer (Task 11)"
+      - "Updates statistics (Task 10)"
+
+  testing_overview:
+    strategy: "integration"
+    rationale: |
+      Session workflows involve complex state machines spanning multiple screens and
+      user interactions. Integration tests verify correct state transitions and data
+      flow. Unit tests cover session logic in isolation.
+
+    critical_properties:
+      - "Session progresses through all queued cards"
+      - "Practice mode only advances on successful recognition"
+      - "Session statistics accurately reflect review history"
+      - "Database saves occur reliably"
+      - "Session can be interrupted and resumed"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: false
+      integration_testing: true
+
+    estimated_test_count: 18
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 2
+        reason: "Needs character data"
+      - task_id: 3
+        reason: "Needs CharacterCard widget"
+      - task_id: 4
+        reason: "Needs stroke animation"
+      - task_id: 5
+        reason: "Needs drawing canvas"
+      - task_id: 6
+        reason: "Needs state management framework"
+      - task_id: 7
+        reason: "Needs SM-2 algorithm and review queue"
+
+    enables_start_of:
+      - task_id: 10
+        reason: "Statistics need session data"
+
+    parallel_with: []
+
+  acceptance_criteria:
+    - "Learning session presents cards from review queue in order"
+    - "Quality ratings (0-5) update card state correctly"
+    - "Practice mode progresses through all four stages"
+    - "Stroke animation plays smoothly in watch mode"
+    - "Tracing guide overlays correctly in trace modes"
+    - "Free drawing mode validates without guides"
+    - "Session summary displays accurate statistics"
+    - "Progress saves to database correctly"
+
+  risk_assessment:
+    complexity_risk: "high"
+    integration_risk: "high"
+    testing_risk: "medium"
+    concerns:
+      - "Practice mode state machine has many transitions to test"
+      - "Recognition validation may have false negatives requiring threshold tuning"
+      - "Session interruption/resume needs careful state management"
+
+  notes:
+    - "Consider session time limits to prevent fatigue"
+    - "Practice mode could offer optional hint button showing one stroke"
+    - "Keyboard shortcuts significantly improve review flow"
+
+---
+
+task:
+  id: 9
+  name: "Character Recognition Integration"
+
+  overview:
+    purpose: |
+      Integrate a character recognition engine that analyzes user-drawn strokes and
+      returns candidate matches with confidence scores. Implement stroke normalization
+      (coordinate scaling, resampling), format conversion for recognition libraries,
+      and result validation against expected characters. Provides feedback for practice
+      mode validation.
+
+    motivation: |
+      Recognition validates that users can reproduce characters from memory, providing
+      objective assessment of learning. Accurate recognition requires proper stroke
+      preprocessing and threshold tuning. The system must handle imperfect handwriting
+      while preventing false positives that would allow incorrect forms to pass.
+
+    outcome: |
+      A recognition module that accepts stroke data from the drawing canvas, normalizes
+      and preprocesses it, calls a recognition engine (hanzi_lookup or similar), and
+      returns ranked candidates. Validation function checks if expected character appears
+      in top-N results with sufficient confidence. Provides feedback for incorrect attempts.
+
+  scope_summary:
+    description: "Implements stroke normalization, recognition library integration, and validation logic"
+    files_affected: 6
+    functions_added: 15
+    tests_required: 12
+    complexity: "complex"
+    estimated_effort: "2-3 days"
+
+  key_components:
+    - component: "Stroke normalizer"
+      type: "function"
+      purpose: "Normalizes coordinates to 0-1 range, resamples points, smooths noise"
+
+    - component: "Recognition interface"
+      type: "module"
+      purpose: "FFI or API wrapper for recognition engine (hanzi_lookup/WASM)"
+
+    - component: "Result validator"
+      type: "function"
+      purpose: "Checks if expected character is in top-N results with threshold confidence"
+
+    - component: "Feedback generator"
+      type: "function"
+      purpose: "Provides helpful feedback for incorrect attempts"
+
+  implementation_hints:
+    approach: |
+      Normalize strokes to unit square (0-1 range) to be resolution-independent.
+      Optionally resample to fixed point count for consistency. Call recognition
+      library via FFI (if Rust) or WASM bridge (if Python/JS). Parse results
+      and rank by confidence. Validation succeeds if expected char in top 3 with >70% confidence.
+
+    key_considerations:
+      - "Normalization must preserve stroke order and direction"
+      - "Resampling reduces noise but may lose detail - tune carefully"
+      - "Recognition threshold affects UX: too strict frustrates, too loose allows bad form"
+      - "Consider multiple recognition attempts with different preprocessing"
+      - "hanzi_lookup (Rust) is ideal for kana if it supports them"
+      - "Fallback: train custom CNN model on kana dataset (future enhancement)"
+      - "Provide stroke count hint if recognition fails (wrong stroke count is common error)"
+
+    integration_points:
+      - "Receives stroke data from HandwritingCanvas (Task 5)"
+      - "Called by PracticeSession (Task 8) after stroke completion"
+      - "Results influence practice mode progression"
+
+  testing_overview:
+    strategy: "integration"
+    rationale: |
+      Recognition requires integration with external library and real handwriting
+      data. Unit tests verify normalization and preprocessing. Integration tests
+      use sample stroke data to verify end-to-end recognition pipeline.
+
+    critical_properties:
+      - "Normalization preserves relative stroke positions and sizes"
+      - "Recognition returns results within acceptable time (<200ms)"
+      - "Validation correctly identifies matches vs non-matches"
+      - "False positive rate is acceptably low (<5%)"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: false
+      integration_testing: true
+
+    estimated_test_count: 12
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 5
+        reason: "Needs stroke data format from drawing canvas"
+
+    enables_start_of:
+      - task_id: 8
+        reason: "Practice mode needs recognition for validation"
+
+    parallel_with: [7, 10, 11]
+
+  acceptance_criteria:
+    - "Stroke normalization produces consistent 0-1 range output"
+    - "Recognition engine integrates and returns results"
+    - "Validation correctly identifies when expected character is matched"
+    - "Recognition performance is <200ms for typical input"
+    - "False positive rate is <5% on test dataset"
+    - "Feedback messages are helpful for common errors"
+
+  risk_assessment:
+    complexity_risk: "high"
+    integration_risk: "high"
+    testing_risk: "high"
+    concerns:
+      - "Recognition library may not support kana (most focus on kanji)"
+      - "FFI integration can be brittle and platform-specific"
+      - "Threshold tuning requires substantial test data"
+      - "User handwriting variability may be higher than expected"
+
+  notes:
+    - "Consider collecting anonymized stroke data to train custom model"
+    - "May need to implement basic pattern matching as fallback"
+    - "Stroke count validation (simple) can catch many errors before expensive recognition"
+
+---
+
+task:
+  id: 10
+  name: "Statistics and Progress Visualization"
+
+  overview:
+    purpose: |
+      Implement comprehensive statistics tracking and visualization for user progress,
+      including accuracy rates, study streaks, cards mastered, daily/weekly metrics,
+      and time-series data. Create an engaging statistics screen that displays progress
+      with charts, streak indicators, and achievement unlocks.
+
+    motivation: |
+      Progress visualization motivates learners and provides insight into learning
+      patterns. Seeing streaks, accuracy trends, and cards mastered creates a sense
+      of accomplishment and encourages consistent practice. Time-series data enables
+      future analytics and personalized recommendations.
+
+    outcome: |
+      A Statistics struct that aggregates review data into meaningful metrics. A
+      statistics screen displaying accuracy percentage, current/longest streak,
+      cards by status (new/learning/mastered), daily review history, and unlocked
+      achievements. Streak tracking encourages daily practice habit formation.
+
+  scope_summary:
+    description: "Implements Statistics struct with metrics aggregation, statistics screen UI, and progress visualization"
+    files_affected: 8
+    functions_added: 20
+    tests_required: 10
+    complexity: "moderate"
+    estimated_effort: "1-2 days"
+
+  key_components:
+    - component: "Statistics struct"
+      type: "struct"
+      purpose: "Aggregates review data into accuracy, streaks, time metrics"
+
+    - component: "DayStats / WeekStats"
+      type: "struct"
+      purpose: "Time-series data for daily and weekly aggregations"
+
+    - component: "Statistics screen UI"
+      type: "function"
+      purpose: "Renders progress visualizations and metrics"
+
+    - component: "Achievement system"
+      type: "module"
+      purpose: "Tracks and displays unlocked achievements"
+
+    - component: "Streak calculator"
+      type: "function"
+      purpose: "Updates current and longest streaks based on study dates"
+
+  implementation_hints:
+    approach: |
+      Maintain Statistics struct updated after each review. Use BTreeMap keyed by
+      date for time-series data (efficient range queries). Calculate accuracy as
+      correct/total. Track study_days HashSet for streak calculation. Update streak
+      on each day's first review. Achievements unlock based on milestones.
+
+    key_considerations:
+      - "Update statistics incrementally during session, batch save at end"
+      - "Use BTreeMap for date-indexed data (enables efficient date range queries)"
+      - "Streak calculation: consecutive days in study_days set"
+      - "Handle timezone correctly for day boundaries"
+      - "Achievement unlocks should show celebratory animation"
+      - "Consider card maturity stages: new (never reviewed), learning (interval <21 days), mature (21+ days)"
+
+    integration_points:
+      - "Updated by LearningSession (Task 8) after each review"
+      - "Persisted by database layer (Task 11)"
+      - "Displayed in dedicated statistics screen"
+
+  testing_overview:
+    strategy: "unit"
+    rationale: |
+      Statistics calculations are deterministic and mathematical. Unit tests can
+      verify all aggregation logic, streak calculations, and achievement unlocking
+      without requiring full application context.
+
+    critical_properties:
+      - "Accuracy calculation is correct (correct/total)"
+      - "Streak increments correctly for consecutive days"
+      - "Streak resets when day is skipped"
+      - "Time-series aggregations match individual reviews"
+      - "Achievement unlock conditions trigger correctly"
 
     verification_needs:
       formal_verification: false
@@ -723,341 +1236,258 @@ task:
 
   dependencies:
     requires_completion_of:
-      - task_id: 3
-        reason: "Needs review data structures"
-      - task_id: 5
-        reason: "Requires persistent review logs"
+      - task_id: 6
+        reason: "Needs navigation framework for statistics screen"
 
     enables_start_of: []
 
-    parallel_with:
-      - 4
-      - 7
+    parallel_with: [9, 11]
 
   acceptance_criteria:
-    - "Statistics update correctly after each review"
-    - "Streak tracking handles multi-day gaps correctly"
-    - "Daily and weekly aggregations calculate accurately"
-    - "Statistics screen displays all key metrics"
-    - "Historical data persists across sessions"
+    - "Accuracy rate displays correctly"
+    - "Current streak increments on daily practice"
+    - "Longest streak tracks correctly"
+    - "Daily stats aggregate reviews correctly"
+    - "Cards mastered count reflects SM-2 maturity"
+    - "Achievement unlocks trigger at correct milestones"
+    - "Statistics screen renders all metrics"
+    - "Study streak displayed with flame emoji"
 
   risk_assessment:
     complexity_risk: "low"
     integration_risk: "low"
     testing_risk: "low"
-
-    concerns: []
+    concerns:
+      - "Timezone handling for day boundaries can be tricky"
+      - "Large time-series data may need pagination or aggregation"
 
   notes:
-    - "Consider adding charts in Phase 3"
-    - "Export statistics for external analysis in Task 11"
+    - "Consider graphs/charts using iced plotting libraries (future enhancement)"
+    - "Export statistics as CSV for external analysis"
+    - "Gamification elements (achievements, streaks) significantly boost motivation"
 
-# =============================================================================
+---
 
 task:
-  id: 7
-  name: "Katakana Character Set Integration"
+  id: 11
+  name: "Local Persistence and Database Layer"
 
   overview:
     purpose: |
-      Extend the application to support katakana characters using the same
-      infrastructure built for hiragana. Add character set selection to the UI
-      and enable users to learn both Japanese syllabaries.
+      Implement robust local data persistence using redb embedded database to store
+      user progress, card state, review history, settings, and statistics. Provide
+      transactional safety, platform-independent file paths, backup/restore capabilities,
+      and efficient batch operations to minimize I/O overhead.
 
     motivation: |
-      Katakana is essential for complete Japanese literacy, used for foreign
-      loanwords, emphasis, and onomatopoeia. Since the infrastructure is already
-      built for hiragana, adding katakana is straightforward and provides
-      significant value to users.
+      Persistence is critical for user data integrity. Losing progress destroys trust
+      and motivation. An embedded database (redb) provides ACID transactions without
+      external dependencies. The persistence layer must handle concurrent access safely,
+      survive crashes, and enable data portability for backup/restore.
 
     outcome: |
-      Users can select katakana as a learning set, all features (flashcards,
-      SRS, animations, practice) work with katakana characters, and the app
-      supports learning both hiragana and katakana simultaneously or separately.
+      An AppDatabase wrapper around redb providing type-safe, transactional operations
+      for all persistent data. Database file stored in platform-appropriate location
+      (XDG on Linux, AppData on Windows, Application Support on macOS). Batch save
+      operations minimize write overhead. Export/import functions enable backup.
 
   scope_summary:
-    description: "Adds katakana data, character set selection UI, extends all modules for dual support"
+    description: "Implements redb database wrapper, schema definitions, CRUD operations, and backup functionality"
     files_affected: 6
-    functions_added: 8
-    tests_required: 4
-    complexity: "simple"
+    functions_added: 25
+    tests_required: 15
+    complexity: "moderate"
+    estimated_effort: "1-2 days"
+
+  key_components:
+    - component: "AppDatabase"
+      type: "struct"
+      purpose: "Wrapper around redb::Database with typed operations"
+
+    - component: "Table definitions"
+      type: "module"
+      purpose: "Defines redb tables for cards, reviews, settings, statistics"
+
+    - component: "CRUD functions"
+      type: "module"
+      purpose: "Save/load/update operations for all data types"
+
+    - component: "Batch operations"
+      type: "function"
+      purpose: "Efficiently save multiple records in single transaction"
+
+    - component: "Backup/restore"
+      type: "function"
+      purpose: "Export/import database to/from portable format"
+
+  implementation_hints:
+    approach: |
+      Use redb TableDefinition to define typed tables. Create wrapper methods that
+      handle serialization (bincode) and transactions. Use directories crate for
+      platform-appropriate data path. Implement batch operations for session saves.
+      Export as JSON or bincode for portability.
+
+    key_considerations:
+      - "Use bincode for fast serialization, JSON for backups (human-readable)"
+      - "Batch writes in single transaction for performance"
+      - "Read transactions are cheap - can use liberally"
+      - "Write transactions block - minimize frequency"
+      - "Database path: directories::ProjectDirs for platform independence"
+      - "Handle database file corruption gracefully with backup restore"
+      - "Consider database compaction for long-term use"
+
+    integration_points:
+      - "Used by all components requiring persistence"
+      - "LearningSession saves progress via this layer"
+      - "Statistics persist to database"
+      - "Settings stored and loaded"
+
+  testing_overview:
+    strategy: "integration"
+    rationale: |
+      Database operations require integration testing with actual redb instance.
+      Tests verify ACID properties, data integrity, and correct serialization.
+      Unit tests cover serialization/deserialization independently.
+
+    critical_properties:
+      - "Data survives application restart"
+      - "Transactions are atomic (all-or-nothing)"
+      - "Concurrent reads don't block each other"
+      - "Write transactions serialize correctly"
+      - "Backup/restore produces identical data"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: true
+      integration_testing: true
+
+    estimated_test_count: 15
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 2
+        reason: "Needs data structures defined to persist"
+      - task_id: 7
+        reason: "Needs SM2Card structure to persist"
+
+    enables_start_of:
+      - task_id: 8
+        reason: "Learning session needs persistence"
+
+    parallel_with: [9, 10]
+
+  acceptance_criteria:
+    - "Database initializes correctly on first run"
+    - "Card state saves and loads correctly"
+    - "Review history persists accurately"
+    - "Statistics data survives restart"
+    - "Batch operations complete in <100ms for 50 cards"
+    - "Database file location is platform-appropriate"
+    - "Export produces valid JSON/bincode file"
+    - "Import correctly restores all data"
+
+  risk_assessment:
+    complexity_risk: "medium"
+    integration_risk: "medium"
+    testing_risk: "low"
+    concerns:
+      - "Database corruption is rare but catastrophic - needs robust backup strategy"
+      - "Migration strategy needed for schema changes in future versions"
+
+  notes:
+    - "Consider automatic daily backups to prevent data loss"
+    - "Compression (gzip) can reduce backup file size significantly"
+    - "Future: cloud sync requires conflict resolution strategy"
+
+---
+
+task:
+  id: 12
+  name: "Visual Feedback and Animation Polish"
+
+  overview:
+    purpose: |
+      Implement rich visual feedback system with animations for correct/incorrect responses,
+      progress indicators, achievement unlocks, and UI transitions. Create micro-interactions
+      that make the application feel polished and responsive. Includes success/error animations,
+      shake effects, progress circles, and celebratory effects for achievements.
+
+    motivation: |
+      Visual feedback dramatically improves learning effectiveness and user satisfaction.
+      Immediate, clear feedback (green checkmark for correct, red X for incorrect) reinforces
+      learning. Smooth animations and micro-interactions make the application feel professional
+      and delightful to use. Gamification elements like achievement animations boost motivation.
+
+    outcome: |
+      A comprehensive feedback system with reusable animation components. Correct answers
+      trigger green flash and checkmark. Incorrect answers trigger red shake and X.
+      Progress circles show session completion. Achievement unlocks display celebratory
+      animations with icons and descriptions. All animations are smooth, purposeful, and
+      configurable.
+
+  scope_summary:
+    description: "Implements feedback animations, progress indicators, shake effects, and achievement celebrations"
+    files_affected: 8
+    functions_added: 18
+    tests_required: 6
+    complexity: "moderate"
     estimated_effort: "1 day"
 
   key_components:
-    - component: "KATAKANA static map"
-      type: "static"
-      purpose: "Katakana character data lookup"
+    - component: "FeedbackAnimation"
+      type: "struct"
+      purpose: "Manages success/error/partial feedback animations"
 
-    - component: "CharacterSet enum"
-      type: "enum"
-      purpose: "Distinguishes hiragana vs katakana"
+    - component: "ShakeEffect"
+      type: "function"
+      purpose: "Oscillating shake animation for errors"
 
-    - component: "Character set selector"
-      type: "UI component"
-      purpose: "Allows users to choose learning set"
+    - component: "ProgressCircle"
+      type: "function"
+      purpose: "Circular progress indicator for sessions"
+
+    - component: "AchievementPopup"
+      type: "struct"
+      purpose: "Celebration animation for unlocked achievements"
+
+    - component: "Color palette"
+      type: "module"
+      purpose: "Consistent color scheme for feedback states"
 
   implementation_hints:
     approach: |
-      Follow exact same pattern as hiragana. Create katakana.ron data file,
-      add KATAKANA static map, extend get_char_data() to check both maps.
-      Add CharacterSet enum to session state. Update UI to show set selector
-      on main menu.
+      Create FeedbackAnimation enum (Correct/Incorrect/Partial) with associated colors
+      and easing curves. Shake uses sine wave oscillation with decay. Progress circle
+      renders partial arc based on 0-1 progress value. Achievement popup slides in from
+      top with fade-in animation, auto-dismisses after 3 seconds.
 
     key_considerations:
-      - "Reuse all existing infrastructure; no algorithmic changes needed"
-      - "Ensure stroke data quality matches hiragana"
-      - "Consider combined learning mode (both sets)"
-      - "Character set preference should persist in user settings"
+      - "Feedback animations should be fast (200-500ms) for immediate response"
+      - "Use color + icon for accessibility (don't rely on color alone)"
+      - "Shake amplitude should decay to avoid motion sickness"
+      - "Progress indicators should update smoothly, not jump"
+      - "Achievement animations can be longer (1-2s) as they're celebratory"
+      - "Consider prefers-reduced-motion for accessibility"
+      - "Use EaseOutElastic for playful feedback, EaseOutCubic for smooth progress"
 
     integration_points:
-      - "Extends character data from Task 1"
-      - "Works with all existing features (Tasks 2-6)"
-
-  testing_overview:
-    strategy: "unit"
-
-    rationale: |
-      Simple extension of existing tested infrastructure. Verify katakana data
-      loads correctly and features work identically to hiragana.
-
-    critical_properties:
-      - "All 46 katakana characters load successfully"
-      - "Features work identically for katakana and hiragana"
-
-    verification_needs:
-      formal_verification: false
-      property_testing: false
-      concurrency_testing: false
-      integration_testing: false
-
-    estimated_test_count: 4
-
-  dependencies:
-    requires_completion_of:
-      - task_id: 1
-        reason: "Reuses character data infrastructure"
-      - task_id: 2
-        reason: "Uses same rendering system"
-      - task_id: 3
-        reason: "SRS works identically for both sets"
-
-    enables_start_of: []
-
-    parallel_with:
-      - 6
-
-  acceptance_criteria:
-    - "All 46 katakana characters load and display correctly"
-    - "Users can select character set from menu"
-    - "SRS, animations, and all features work with katakana"
-    - "Character set preference persists across sessions"
-
-  risk_assessment:
-    complexity_risk: "low"
-    integration_risk: "low"
-    testing_risk: "low"
-
-    concerns: []
-
-  notes:
-    - "Consider combined mode: learn matching pairs (あ/ア) together"
-    - "Stroke order data available from same sources as hiragana"
-
-# =============================================================================
-# PHASE 3: Advanced Features
-# =============================================================================
-
-task:
-  id: 8
-  name: "Handwriting Practice Canvas and Stroke Capture"
-
-  overview:
-    purpose: |
-      Implement an interactive drawing canvas for handwriting practice with stroke
-      capture, real-time rendering, and stroke isolation. Enable users to practice
-      writing characters by hand with immediate visual feedback.
-
-    motivation: |
-      Handwriting practice builds muscle memory and deeper character recognition
-      than passive review alone. An interactive canvas makes practice engaging and
-      provides the foundation for stroke order validation and character recognition.
-
-    outcome: |
-      Users can draw characters freehand on canvas, see their strokes rendered
-      in real-time, clear and retry drawings, and have their handwriting captured
-      for validation and recognition.
-
-  scope_summary:
-    description: "Implements drawing canvas, mouse/touch event handling, stroke capture, visual rendering"
-    files_affected: 3
-    functions_added: 12
-    tests_required: 5
-    complexity: "moderate"
-    estimated_effort: "2 days"
-
-  key_components:
-    - component: "HandwritingCanvas"
-      type: "struct"
-      purpose: "Canvas program for drawing interaction"
-
-    - component: "DrawingState"
-      type: "struct"
-      purpose: "Tracks strokes and current drawing"
-
-    - component: "Stroke"
-      type: "struct"
-      purpose: "Individual stroke with points and timing"
-
-    - component: "Mouse event handlers"
-      type: "functions"
-      purpose: "Capture drawing gestures"
-
-  implementation_hints:
-    approach: |
-      Implement Canvas Program trait with mouse event handling. Track strokes as
-      Vec<Point> with distance threshold to reduce noise. Use LineCap::Round and
-      LineJoin::Round for natural pen feel. Store timing data for future analysis.
-      Provide clear button to reset canvas.
-
-    key_considerations:
-      - "Distance threshold (2-3px) prevents excessive point density"
-      - "Round line caps/joins create natural writing appearance"
-      - "Separate completed strokes from current stroke for visual distinction"
-      - "Timestamp each stroke for potential timing analysis"
-      - "Touch events and mouse events handled identically"
-
-    integration_points:
-      - "Integrates with practice session screen"
-      - "Provides stroke data for recognition (Task 9)"
-      - "Works alongside animation reference (Task 4)"
+      - "Used by LearningSession after each review"
+      - "Used by PracticeSession for recognition feedback"
+      - "Achievement popup triggered by Statistics system"
 
   testing_overview:
     strategy: "integration"
-
     rationale: |
-      Canvas interaction requires integration tests to verify event handling,
-      stroke capture, and rendering work correctly together.
+      Animation quality requires visual inspection. Integration tests verify animations
+      trigger correctly and complete without errors. Unit tests cover timing calculations
+      and state transitions.
 
     critical_properties:
-      - "Mouse down/move/up sequence captures stroke correctly"
-      - "Points filtered by distance threshold"
-      - "Strokes render smoothly without gaps"
-
-    verification_needs:
-      formal_verification: false
-      property_testing: false
-      concurrency_testing: false
-      integration_testing: true
-
-    estimated_test_count: 5
-
-  dependencies:
-    requires_completion_of:
-      - task_id: 4
-        reason: "Builds on Canvas expertise from animation"
-
-    enables_start_of:
-      - task_id: 9
-        reason: "Stroke data needed for recognition"
-      - task_id: 10
-        reason: "Practice modes use drawing canvas"
-
-    parallel_with: []
-
-  acceptance_criteria:
-    - "Drawing follows cursor/touch smoothly without lag"
-    - "Strokes render with natural pen-like appearance"
-    - "Multiple strokes can be drawn sequentially"
-    - "Clear button resets canvas completely"
-    - "Stroke data captured with accurate coordinates"
-
-  risk_assessment:
-    complexity_risk: "low"
-    integration_risk: "low"
-    testing_risk: "low"
-
-    concerns: []
-
-  notes:
-    - "Consider pressure sensitivity for tablets in future"
-    - "Touch support critical for mobile deployment"
-
-# =============================================================================
-
-task:
-  id: 9
-  name: "Character Recognition Integration"
-
-  overview:
-    purpose: |
-      Integrate handwriting recognition to validate user-drawn characters,
-      provide confidence scores, and enable automatic feedback on writing
-      accuracy. Bridge the gap between practice and validation.
-
-    motivation: |
-      Automatic recognition enables self-paced learning without manual validation.
-      Confidence scores help users understand how accurately they've written
-      characters. Recognition validation reinforces correct writing habits.
-
-    outcome: |
-      The system automatically recognizes hand-drawn characters, provides top
-      candidate matches with confidence scores, validates correctness against
-      expected character, and gives immediate feedback on writing accuracy.
-
-  scope_summary:
-    description: "Integrates recognition library, normalizes stroke data, implements async recognition, validates results"
-    files_affected: 3
-    functions_added: 8
-    tests_required: 6
-    complexity: "complex"
-    estimated_effort: "2-3 days"
-
-  key_components:
-    - component: "recognize_character"
-      type: "async function"
-      purpose: "Calls recognition engine with stroke data"
-
-    - component: "normalize_strokes"
-      type: "function"
-      purpose: "Normalizes coordinates for recognition"
-
-    - component: "validate_recognition"
-      type: "function"
-      purpose: "Checks if recognized character matches expected"
-
-    - component: "RecognitionResult"
-      type: "struct"
-      purpose: "Recognition candidates with confidence scores"
-
-  implementation_hints:
-    approach: |
-      Use hanzi_lookup crate for CJK recognition (works for kana). Normalize
-      stroke coordinates to 0-1 range before recognition. Run recognition
-      async to avoid blocking UI. Accept recognition if top candidate matches
-      expected character with confidence > 0.7.
-
-    key_considerations:
-      - "Coordinate normalization critical for recognition accuracy"
-      - "Async execution prevents UI blocking during recognition"
-      - "Confidence threshold (0.7) balances accuracy and usability"
-      - "Handle recognition failures gracefully"
-      - "May need stroke order hints for low confidence"
-
-    integration_points:
-      - "Consumes stroke data from Task 8"
-      - "Provides validation for practice modes (Task 10)"
-
-  testing_overview:
-    strategy: "integration"
-
-    rationale: |
-      Recognition requires integration tests with real character samples to
-      verify accuracy and performance across different writing styles.
-
-    critical_properties:
-      - "Well-formed characters recognized with > 90% accuracy"
-      - "Recognition completes within 500ms"
-      - "Top candidate matches expected for clear input"
+      - "Animations complete in expected time"
+      - "Feedback colors meet WCAG contrast requirements"
+      - "Shake effect returns to center position"
+      - "Progress circle renders correctly at 0%, 50%, 100%"
 
     verification_needs:
       formal_verification: false
@@ -1069,118 +1499,126 @@ task:
 
   dependencies:
     requires_completion_of:
-      - task_id: 8
-        reason: "Needs stroke capture data"
+      - task_id: 1
+        reason: "Needs animation API from iced foundation"
+      - task_id: 6
+        reason: "Needs message system to trigger feedback"
 
-    enables_start_of:
-      - task_id: 10
-        reason: "Practice modes use recognition for validation"
+    enables_start_of: []
 
-    parallel_with: []
+    parallel_with: [8, 10]
 
   acceptance_criteria:
-    - "Recognition returns top 3 candidates with confidence scores"
-    - "Well-formed hiragana/katakana recognized with > 85% accuracy"
-    - "Recognition completes in < 500ms for typical input"
-    - "Invalid/ambiguous input handled without crashes"
-    - "Async execution doesn't block UI responsiveness"
+    - "Correct answer shows green checkmark with flash"
+    - "Incorrect answer shows red X with shake"
+    - "Shake returns to center smoothly"
+    - "Progress circle updates smoothly"
+    - "Achievement popup displays with animation"
+    - "All feedback colors meet WCAG AA contrast"
+    - "Animations run at 60fps without frame drops"
 
   risk_assessment:
-    complexity_risk: "high"
-    integration_risk: "high"
-    testing_risk: "high"
-
+    complexity_risk: "low"
+    integration_risk: "low"
+    testing_risk: "low"
     concerns:
-      - "Recognition library may not work well with simplified kana"
-      - "Accuracy depends heavily on writing style variations"
-      - "May need fallback for low confidence results"
+      - "Motion effects may cause discomfort for some users - need disable option"
 
   notes:
-    - "Consider hanzi_lookup or WASM bridge to Python libraries"
-    - "Collect failed recognition examples for future training"
+    - "Consider sound effects to complement visual feedback (future)"
+    - "Haptic feedback on mobile devices could enhance experience"
+    - "Particle effects for achievements would be delightful but complex"
 
-# =============================================================================
+---
 
 task:
-  id: 10
-  name: "Progressive Practice Modes"
+  id: 13
+  name: "UI/UX Polish and Accessibility"
 
   overview:
     purpose: |
-      Implement four progressive practice modes (Watch, Trace With Guide,
-      Trace Without Guide, Free Drawing) that gradually increase difficulty
-      and build user skills from passive observation to active recall.
+      Apply comprehensive UI/UX polish including WCAG-compliant color contrast, proper
+      typography sizing, touch-friendly target sizes, keyboard navigation, and screen
+      reader support. Implement consistent spacing, visual hierarchy, and responsive
+      layouts. Ensure application is accessible to users with disabilities and feels
+      professional and polished.
 
     motivation: |
-      Progressive difficulty ensures users build solid foundations before
-      advancing to harder challenges. The four-mode system provides scaffolded
-      learning that matches educational best practices for skill acquisition.
+      Accessibility is both an ethical imperative and legal requirement in many jurisdictions.
+      Good UX design reduces cognitive load and makes learning more effective. Professional
+      polish builds trust and encourages continued use. Keyboard navigation and proper
+      contrast benefit all users, not just those with disabilities.
 
     outcome: |
-      Users progress through increasingly challenging practice modes, receive
-      appropriate assistance at each level, build confidence through gradual
-      difficulty increase, and achieve mastery through structured practice.
+      An application that meets WCAG 2.1 Level AA standards for contrast, target sizes,
+      and keyboard navigation. All interactive elements are properly sized (48x48px minimum),
+      colors meet 4.5:1 contrast ratio, and keyboard shortcuts enable efficient navigation.
+      Typography is legible at all sizes, layouts adapt to different window sizes, and
+      screen reader support provides equivalent experience for blind users.
 
   scope_summary:
-    description: "Implements 4 practice modes, mode progression logic, visual guides, practice session flow"
-    files_affected: 4
-    functions_added: 15
+    description: "Implements accessibility features, responsive layouts, keyboard shortcuts, and design system"
+    files_affected: 15
+    functions_added: 25
     tests_required: 8
-    complexity: "complex"
-    estimated_effort: "3 days"
+    complexity: "moderate"
+    estimated_effort: "1-2 days"
 
   key_components:
-    - component: "PracticeMode enum"
-      type: "enum"
-      purpose: "Four progressive difficulty levels"
+    - component: "Color palette"
+      type: "module"
+      purpose: "WCAG-compliant color constants with documented contrast ratios"
 
-    - component: "PracticeSession"
-      type: "struct"
-      purpose: "Manages practice flow and mode transitions"
+    - component: "Typography scale"
+      type: "module"
+      purpose: "Consistent font sizes and weights throughout application"
 
-    - component: "Ghost overlay rendering"
+    - component: "Keyboard shortcuts"
+      type: "module"
+      purpose: "Efficient keyboard-only navigation and actions"
+
+    - component: "Responsive layouts"
       type: "function"
-      purpose: "Shows reference character in trace modes"
+      purpose: "Layouts that adapt to window size gracefully"
 
-    - component: "Stroke order hints"
-      type: "function"
-      purpose: "Displays numbered stroke guides"
-
-    - component: "Mode progression logic"
-      type: "function"
-      purpose: "Advances user through modes based on success"
+    - component: "Touch target sizing"
+      type: "module"
+      purpose: "Ensures all buttons meet 48x48px minimum"
 
   implementation_hints:
     approach: |
-      Each mode builds on previous: Watch (animation only) → Trace With Guide
-      (ghost + numbers) → Trace Without Guide (numbers only) → Free Drawing
-      (no assistance). Require successful recognition to advance modes. Show
-      ghost overlay at 30% opacity for trace modes. Display stroke numbers
-      near stroke start points.
+      Define color palette with documented contrast ratios (use WebAIM contrast checker).
+      Set consistent font sizes (16-18px body, 14px secondary, 12px min). Implement
+      keyboard event handlers for common actions (1-5 for quality, Space for next,
+      Escape for cancel). Use iced's responsive layout tools (Length::Fill, alignment).
+      Test with keyboard-only and screen reader.
 
     key_considerations:
-      - "Ghost overlay should not interfere with drawn strokes"
-      - "Stroke numbers positioned at median line start points"
-      - "Mode progression requires recognition confidence > 0.7"
-      - "Allow manual mode switching for advanced users"
-      - "Provide encouraging feedback on mode transitions"
+      - "WCAG AA requires 4.5:1 contrast for normal text, 3:1 for large text"
+      - "Minimum touch target: 48x48px (44x44px iOS minimum)"
+      - "Keyboard focus indicators must be visible (2px border minimum)"
+      - "Don't use color as sole indicator (add icons/text)"
+      - "Font size minimum: 12px (14px recommended for body text)"
+      - "Spacing: 8px base unit for consistent rhythm"
+      - "Test with actual screen reader (NVDA/JAWS on Windows, VoiceOver on macOS)"
 
     integration_points:
-      - "Uses animation from Task 4"
-      - "Uses canvas from Task 8"
-      - "Uses recognition from Task 9"
+      - "Applied to all UI components across application"
+      - "Keyboard shortcuts integrated with message system"
+      - "Responsive layouts affect all screens"
 
   testing_overview:
     strategy: "integration"
-
     rationale: |
-      Practice modes integrate multiple systems (animation, canvas, recognition)
-      and require end-to-end testing to verify correct flow.
+      Accessibility and UX require manual testing with actual assistive technologies.
+      Automated tests verify contrast ratios, target sizes, and keyboard handler presence.
+      Manual testing with screen readers and keyboard-only navigation validates experience.
 
     critical_properties:
-      - "Modes progress in correct order based on success"
-      - "Visual guides display correctly for each mode"
-      - "Recognition validates before mode progression"
+      - "All text meets WCAG AA contrast requirements"
+      - "All interactive elements are 48x48px or larger"
+      - "All functionality accessible via keyboard"
+      - "Screen reader announces all content correctly"
 
     verification_needs:
       formal_verification: false
@@ -1192,284 +1630,192 @@ task:
 
   dependencies:
     requires_completion_of:
-      - task_id: 4
-        reason: "Uses stroke animation for Watch mode"
-      - task_id: 8
-        reason: "Uses drawing canvas for trace modes"
-      - task_id: 9
-        reason: "Uses recognition for validation"
-
-    enables_start_of: []
-
-    parallel_with:
-      - 11
-
-  acceptance_criteria:
-    - "All four practice modes function correctly"
-    - "Ghost overlay renders at appropriate opacity"
-    - "Stroke numbers display accurately"
-    - "Mode progression requires successful recognition"
-    - "Users can complete full practice flow for any character"
-    - "Visual feedback distinguishes between modes clearly"
-
-  risk_assessment:
-    complexity_risk: "medium"
-    integration_risk: "high"
-    testing_risk: "medium"
-
-    concerns:
-      - "Mode transitions could feel jarring without good UX design"
-      - "Ghost overlay positioning needs careful tuning"
-
-  notes:
-    - "Consider allowing users to skip modes if too easy"
-    - "Track mode-specific success rates for analytics"
-
-# =============================================================================
-
-task:
-  id: 11
-  name: "Enhanced UI, Navigation, and Visual Feedback"
-
-  overview:
-    purpose: |
-      Polish the user interface with smooth navigation, visual feedback animations
-      for correct/incorrect responses, progress indicators, and achievement
-      notifications. Create a cohesive, professional user experience.
-
-    motivation: |
-      Good UX is critical for learning apps. Immediate visual feedback reinforces
-      learning, smooth animations feel professional, and clear navigation reduces
-      cognitive load. These elements dramatically improve user engagement and
-      retention.
-
-    outcome: |
-      Application feels polished and responsive, users receive immediate visual
-      feedback on actions, navigation between screens is intuitive, and progress
-      feels visible and rewarding.
-
-  scope_summary:
-    description: "Implements feedback animations, progress indicators, navigation polish, achievement system"
-    files_affected: 5
-    functions_added: 20
-    tests_required: 4
-    complexity: "moderate"
-    estimated_effort: "2-3 days"
-
-  key_components:
-    - component: "FeedbackAnimation"
-      type: "struct"
-      purpose: "Correct/incorrect visual feedback"
-
-    - component: "ProgressIndicator"
-      type: "widget"
-      purpose: "Circular progress display"
-
-    - component: "Achievement system"
-      type: "module"
-      purpose: "Tracks and displays achievements"
-
-    - component: "Streak display"
-      type: "widget"
-      purpose: "Shows current and longest streaks"
-
-  implementation_hints:
-    approach: |
-      Use iced Animation API for feedback (green flash for correct, red shake
-      for incorrect). Implement circular progress using Canvas arc drawing.
-      Create achievement definitions with unlock conditions. Add streak flame
-      icon that animates on updates. Ensure all animations complete in 200-500ms
-      for snappy feel.
-
-    key_considerations:
-      - "Feedback must appear within 200ms of action"
-      - "Color alone insufficient; use icons + text"
-      - "Shake animation uses sine wave with decay"
-      - "Progress circle draws arc from -90° (top)"
-      - "Achievement unlocks show toast notification"
-
-    integration_points:
-      - "Feedback triggers from learning session (Task 3)"
-      - "Progress indicators throughout app"
-      - "Achievements track statistics (Task 6)"
-
-  testing_overview:
-    strategy: "unit"
-
-    rationale: |
-      Visual components can be tested through snapshot tests and animation
-      timing verification.
-
-    critical_properties:
-      - "Feedback animations complete in specified time"
-      - "Progress calculations display correct percentages"
-      - "Achievements unlock at correct thresholds"
-
-    verification_needs:
-      formal_verification: false
-      property_testing: false
-      concurrency_testing: false
-      integration_testing: false
-
-    estimated_test_count: 4
-
-  dependencies:
-    requires_completion_of:
-      - task_id: 3
-        reason: "Integrates with learning session"
       - task_id: 6
-        reason: "Achievement system uses statistics"
+        reason: "Needs complete UI structure to polish"
+      - task_id: 8
+        reason: "Needs all screens implemented to apply consistency"
 
     enables_start_of: []
 
-    parallel_with:
-      - 10
+    parallel_with: [12]
 
   acceptance_criteria:
-    - "Feedback animations trigger within 200ms"
-    - "Correct/incorrect feedback clearly distinguishable"
-    - "Progress indicators show accurate percentages"
-    - "Achievements unlock and display notifications"
-    - "Streak display updates daily"
-    - "All navigation smooth without lag"
+    - "All colors meet WCAG AA contrast ratio (4.5:1 normal text)"
+    - "All buttons are minimum 48x48px touch targets"
+    - "Keyboard shortcuts work for quality rating and navigation"
+    - "Tab navigation visits all interactive elements in logical order"
+    - "Focus indicators are clearly visible"
+    - "Screen reader announces all content meaningfully"
+    - "Application is usable keyboard-only (no mouse required)"
+    - "Typography is consistent throughout application"
 
   risk_assessment:
     complexity_risk: "low"
     integration_risk: "low"
-    testing_risk: "low"
-
-    concerns: []
+    testing_risk: "medium"
+    concerns:
+      - "Screen reader testing requires platform-specific tools and expertise"
+      - "Keyboard navigation in custom Canvas widgets may be complex"
 
   notes:
-    - "Consider color-blind friendly color schemes"
-    - "Sound effects could enhance feedback (future)"
+    - "Consider hiring accessibility consultant for professional audit"
+    - "User testing with actual disabled users is invaluable"
+    - "Accessibility benefits everyone - better UX overall"
+    - "Document keyboard shortcuts in help screen"
 
-# =============================================================================
+---
 
 task:
-  id: 12
-  name: "FSRS Algorithm Migration (Optional)"
+  id: 14
+  name: "Testing, Documentation, and Release Preparation"
 
   overview:
     purpose: |
-      Migrate from SM-2 to FSRS (Free Spaced Repetition Scheduler) algorithm
-      for 20-30% more efficient scheduling once sufficient review data (1000+
-      reviews) has been collected. Enable algorithm comparison and A/B testing.
+      Implement comprehensive test coverage, write user-facing documentation, create
+      build configurations for release, and prepare distribution packages for Linux,
+      macOS, and Windows. Includes integration tests, performance benchmarks, user
+      manual, and automated build pipeline. Ensures application is production-ready
+      with quality assurance and professional documentation.
 
     motivation: |
-      FSRS is a modern, data-driven algorithm that outperforms SM-2 when properly
-      tuned with user data. Migration provides better scheduling efficiency,
-      reduced review burden, and improved long-term retention for dedicated users.
+      Thorough testing prevents bugs from reaching users and builds confidence in code
+      quality. Documentation enables users to maximize application value and reduces
+      support burden. Professional release packaging ensures smooth installation and
+      good first impressions. This task transforms a working prototype into a shippable
+      product.
 
     outcome: |
-      Users with sufficient review history benefit from optimized scheduling,
-      review burden decreases by 20-30% while maintaining retention, and the
-      system can compare algorithm performance for validation.
+      A test suite with >80% code coverage including unit, integration, and property-based
+      tests. User manual covering all features with screenshots. Optimized release builds
+      for all platforms with appropriate packaging (AppImage/deb for Linux, app bundle
+      for macOS, MSI installer for Windows). CI/CD pipeline for automated builds and testing.
 
   scope_summary:
-    description: "Implements FSRS algorithm, parameter optimization, migration logic, A/B testing infrastructure"
-    files_affected: 4
-    functions_added: 25
-    tests_required: 15
-    complexity: "critical"
-    estimated_effort: "1 week"
+    description: "Adds comprehensive tests, documentation, build configurations, and distribution packages"
+    files_affected: 20
+    functions_added: 40
+    tests_required: 60
+    complexity: "moderate"
+    estimated_effort: "2-3 days"
 
   key_components:
-    - component: "FSRSCard"
-      type: "struct"
-      purpose: "FSRS-specific card state (difficulty, stability, retrievability)"
-
-    - component: "FSRS scheduler"
+    - component: "Integration test suite"
       type: "module"
-      purpose: "Core FSRS algorithm implementation"
+      purpose: "End-to-end tests for complete workflows"
 
-    - component: "Parameter optimizer"
-      type: "function"
-      purpose: "Tunes FSRS parameters from review history"
+    - component: "Benchmark suite"
+      type: "module"
+      purpose: "Performance benchmarks for critical paths"
 
-    - component: "Migration system"
-      type: "function"
-      purpose: "Converts SM2Card to FSRSCard"
+    - component: "User manual"
+      type: "module"
+      purpose: "Comprehensive documentation with screenshots"
 
-    - component: "Algorithm selector"
-      type: "enum"
-      purpose: "Allows choosing SM-2 vs FSRS per user"
+    - component: "Release configuration"
+      type: "module"
+      purpose: "Cargo.toml profiles and build optimization"
+
+    - component: "Distribution packages"
+      type: "module"
+      purpose: "Platform-specific installers and bundles"
 
   implementation_hints:
     approach: |
-      Implement FSRS algorithm per specification at open-spaced-repetition/fsrs-rs.
-      Use review log data to optimize parameters (D, S, R factors). Provide
-      migration tool that converts existing SM-2 cards using review history.
-      Allow users to choose algorithm or auto-select based on data availability.
+      Write integration tests that exercise full learning sessions and practice modes.
+      Add property-based tests for SM-2 algorithm and statistics. Write benchmarks for
+      animation rendering and database operations. Create user manual with Getting Started,
+      Features, and Troubleshooting sections. Configure Cargo release profile with LTO
+      and optimization. Use cargo-bundle for macOS, AppImage for Linux, WiX for Windows.
 
     key_considerations:
-      - "Requires minimum 1000 reviews for reliable parameter optimization"
-      - "Algorithm choice affects all new cards going forward"
-      - "Must maintain backward compatibility with SM-2 data"
-      - "Parameter optimization computationally expensive; run async"
-      - "A/B testing requires tracking algorithm per card"
+      - "Integration tests should use temporary databases, not production data"
+      - "Benchmark critical paths: animation frame rate, database batch saves, recognition latency"
+      - "Documentation should be user-focused, not technical"
+      - "Release build optimizations: opt-level=3, lto=true, strip=true"
+      - "Test release builds on clean VMs to catch dependency issues"
+      - "Code signing certificates required for macOS and Windows distribution"
+      - "Consider automated release with GitHub Actions or similar CI/CD"
 
     integration_points:
-      - "Replaces SM-2 in learning session (Task 3)"
-      - "Uses review history from persistence (Task 5)"
-      - "Compared via statistics (Task 6)"
+      - "Tests cover all previous tasks comprehensively"
+      - "Documentation references all features"
+      - "Build system produces final artifacts"
 
   testing_overview:
-    strategy: "property-based"
-
+    strategy: "mixed"
     rationale: |
-      FSRS algorithm has complex mathematical properties that should be verified
-      with property-based testing. Also requires validation against known datasets.
+      Final testing phase includes unit, integration, property-based, and manual testing.
+      Comprehensive coverage ensures production readiness. Performance benchmarks establish
+      baseline and catch regressions.
 
     critical_properties:
-      - "Retrievability always between 0.0 and 1.0"
-      - "Stability increases with successful reviews"
-      - "Difficulty converges for consistent performance"
-      - "Optimized parameters improve retention prediction"
+      - "All critical paths covered by tests"
+      - "Animation maintains 60fps under benchmark"
+      - "Database operations meet performance targets"
+      - "Application launches successfully on all platforms"
 
     verification_needs:
       formal_verification: false
       property_testing: true
-      concurrency_testing: false
+      concurrency_testing: true
       integration_testing: true
 
-    estimated_test_count: 15
+    estimated_test_count: 60
 
   dependencies:
     requires_completion_of:
+      - task_id: 1
+        reason: "All features must be implemented before final testing"
+      - task_id: 2
+        reason: "All features must be implemented before final testing"
       - task_id: 3
-        reason: "Replaces SM-2 algorithm"
+        reason: "All features must be implemented before final testing"
+      - task_id: 4
+        reason: "All features must be implemented before final testing"
       - task_id: 5
-        reason: "Needs extensive review history"
+        reason: "All features must be implemented before final testing"
+      - task_id: 6
+        reason: "All features must be implemented before final testing"
+      - task_id: 7
+        reason: "All features must be implemented before final testing"
+      - task_id: 8
+        reason: "All features must be implemented before final testing"
+      - task_id: 9
+        reason: "All features must be implemented before final testing"
+      - task_id: 10
+        reason: "All features must be implemented before final testing"
+      - task_id: 11
+        reason: "All features must be implemented before final testing"
+      - task_id: 12
+        reason: "All features must be implemented before final testing"
+      - task_id: 13
+        reason: "All features must be implemented before final testing"
 
     enables_start_of: []
 
     parallel_with: []
 
   acceptance_criteria:
-    - "FSRS algorithm implemented per specification"
-    - "Parameter optimization produces valid parameters from review data"
-    - "Migration converts SM-2 cards without data loss"
-    - "Users can select algorithm preference"
-    - "FSRS performs 20-30% better than SM-2 in validation tests"
-    - "Algorithm choice persists and applies correctly"
+    - "Test coverage exceeds 80%"
+    - "All integration tests pass"
+    - "Benchmarks meet performance targets (60fps animation, <100ms DB saves)"
+    - "User manual covers all features"
+    - "Release builds compile successfully for all platforms"
+    - "Application runs on clean test VMs"
+    - "Distribution packages install correctly"
+    - "No known critical bugs in issue tracker"
 
   risk_assessment:
-    complexity_risk: "high"
-    integration_risk: "medium"
-    testing_risk: "high"
-
+    complexity_risk: "medium"
+    integration_risk: "low"
+    testing_risk: "low"
     concerns:
-      - "FSRS algorithm mathematically complex and error-prone"
-      - "Parameter optimization requires significant computation"
-      - "Insufficient data leads to poor parameter estimates"
-      - "Migration could fail with edge case review histories"
+      - "Platform-specific packaging can have unexpected issues"
+      - "Code signing for macOS/Windows requires certificates and process setup"
+      - "Cross-platform testing requires access to all target platforms"
 
   notes:
-    - "Optional: implement only if user base grows significantly"
-    - "Consider using fsrs-rs crate if available"
-    - "Collect telemetry to validate improvement claims"
-
-# =============================================================================
-# END OF TASKS
-# =============================================================================
+    - "Consider beta testing with small user group before public release"
+    - "Set up crash reporting (sentry.io or similar) for production monitoring"
+    - "Plan for post-release bug fix process and update mechanism"
+    - "Documentation should live with code (mdBook or similar)"

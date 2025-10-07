@@ -62,6 +62,15 @@ def save_yaml(data: str, output_path: Path):
     print(f"✓ Saved: {output_path}")
 
 
+def clean_yaml_response(response: str) -> str:
+    """Clean YAML response by removing markdown code blocks if present."""
+    if "```yaml" in response:
+        return response.split("```yaml")[1].split("```")[0].strip()
+    elif "```" in response:
+        return response.split("```")[1].split("```")[0].strip()
+    return response
+
+
 def parse_tasks_overview(yaml_content: str) -> List[Dict[str, Any]]:
     """Parse tasks_overview.yaml and extract task list."""
     try:
@@ -76,7 +85,8 @@ def parse_tasks_overview(yaml_content: str) -> List[Dict[str, Any]]:
         tasks = [doc for doc in docs if doc and isinstance(doc, dict) and "task" in doc]
         return tasks
     except yaml.YAMLError as e:
-        print(f"Error parsing YAML: {e}")
+        print(f"\n✗ Error parsing YAML: {e}")
+        print("Please fix the YAML syntax errors before proceeding.")
         return []
 
 
@@ -149,13 +159,7 @@ Make sure to just give your response. You must not create or write any files jus
         await client.query(prompt)
         response = await extract_text_response(client)
 
-    # Clean response (remove markdown code blocks if present)
-    if "```yaml" in response:
-        response = response.split("```yaml")[1].split("```")[0].strip()
-    elif "```" in response:
-        response = response.split("```")[1].split("```")[0].strip()
-
-    return response
+    return clean_yaml_response(response)
 
 
 # =============================================================================
@@ -164,23 +168,23 @@ Make sure to just give your response. You must not create or write any files jus
 
 
 async def spawn_specialized_agent(
-    task_overview: Dict[str, Any],
+    task_overview_yaml: str,
     task_template: str,
     agent_type: str,
     agent_prompt: str,
+    task_id: Any,
 ) -> str:
     """
     Spawn a specialized agent (files, functions, formal, tests).
+    task_overview_yaml: Pre-serialized YAML string for efficiency.
     """
-    print(f"  └─ Spawning {agent_type} agent...")
-
-    task_yaml = yaml.dump(task_overview, default_flow_style=False, sort_keys=False)
+    print(f"\n[Task {task_id}] Spawning {agent_type} agent...")
 
     prompt = f"""You are a {agent_type} specialist working on task expansion.
 
 Task Overview:
 ```yaml
-{task_yaml}
+{task_overview_yaml}
 ```
 
 Task Template Section to Fill:
@@ -208,6 +212,7 @@ Output only the YAML section you're responsible for, no markdown or extra text."
 async def suborchestrator_expand_task(
     task_overview: Dict[str, Any],
     task_template: str,
+    debug: bool = False,
 ) -> str:
     """
     Suborchestrator spawns 4 specialized agents and combines their outputs.
@@ -215,7 +220,10 @@ async def suborchestrator_expand_task(
     task_id = task_overview.get("task", {}).get("id", "?")
     task_name = task_overview.get("task", {}).get("name", "Unknown")
 
-    print(f"\n→ Suborchestrator for Task {task_id}: {task_name}")
+    print(f"\n[Task {task_id}] Suborchestrator: {task_name}")
+
+    # Pre-serialize task_overview once for efficiency
+    task_overview_yaml = yaml.dump(task_overview, default_flow_style=False, sort_keys=False)
 
     # Define specialized agent prompts
     agent_specs = {
@@ -288,22 +296,24 @@ tests:
 """,
     }
 
-    # Spawn agents sequentially
-    agent_outputs = {}
-    for agent_type, agent_prompt in agent_specs.items():
-        output = await spawn_specialized_agent(
-            task_overview, task_template, agent_type, agent_prompt
-        )
-        agent_outputs[agent_type] = output
+    # Spawn agents in parallel (they work independently)
+    agent_coros = [
+        spawn_specialized_agent(task_overview_yaml, task_template, agent_type, agent_prompt, task_id)
+        for agent_type, agent_prompt in agent_specs.items()
+    ]
+    agent_outputs_list = await asyncio.gather(*agent_coros)
+
+    # Map outputs back to agent types
+    agent_outputs = dict(zip(agent_specs.keys(), agent_outputs_list))
 
     # Combine outputs into complete task
-    print(f"  └─ Combining agent outputs into complete task...")
+    print(f"\n[Task {task_id}] Combining agent outputs into complete task...")
 
     combined_prompt = f"""Combine the following agent outputs into a complete task specification.
 
 Task Overview:
 ```yaml
-{yaml.dump(task_overview, default_flow_style=False, sort_keys=False)}
+{task_overview_yaml}
 ```
 
 Files Agent Output:
@@ -352,42 +362,336 @@ Output valid YAML only, no markdown."""
         await client.query(combined_prompt)
         combined_output = await extract_text_response(client)
 
-    # Clean output
-    if "```yaml" in combined_output:
-        combined_output = combined_output.split("```yaml")[1].split("```")[0].strip()
-    elif "```" in combined_output:
-        combined_output = combined_output.split("```")[1].split("```")[0].strip()
+    combined_output = clean_yaml_response(combined_output)
 
-    print(f"✓ Task {task_id} expansion complete\n")
+    print(f"\n[Task {task_id}] Expansion complete")
+
+    # Print the task YAML only in debug mode
+    if debug:
+        print(f"\n{'='*80}")
+        print(f"TASK {task_id}: {task_name}")
+        print(f"{'='*80}\n")
+        print(combined_output)
+        print(f"\n{'='*80}\n")
 
     return combined_output
+
+
+async def generate_execution_plan(
+    tasks_overview_yaml: str,
+) -> str:
+    """
+    Use an AI agent to analyze tasks_overview.yaml and generate an execution plan.
+    Returns execution_plan.yaml as a string.
+    """
+    print("\n" + "=" * 80)
+    print("BATCH PLANNING: Analyzing dependencies and generating execution plan")
+    print("=" * 80 + "\n")
+
+    system_prompt = """You are an execution planning specialist focused on dependency analysis and batch optimization.
+
+Your goal is to analyze tasks_overview.yaml and generate an optimal execution plan that maximizes parallelization while respecting dependencies.
+
+Key instructions:
+- Analyze requires_completion_of for each task
+- Group tasks into batches where all tasks in a batch can run in parallel
+- Tasks can only be in a batch if ALL their dependencies are in previous batches
+- Maximize tasks per batch (more parallelization = faster execution)
+- Batches execute sequentially, tasks within batch execute in parallel
+- Identify the critical path (longest dependency chain)
+- Detect any circular dependencies and warn about them
+
+Output only valid YAML following the template structure, no markdown code blocks or extra commentary."""
+
+    execution_plan_template = """execution_plan:
+  total_tasks: [NUMBER]
+  total_batches: [NUMBER]
+
+  batches:
+    - batch_id: 1
+      description: "[Brief description of what this batch accomplishes]"
+      strategy: "sequential"  # All batches execute sequentially
+      tasks:
+        - task_id: [NUMBER]
+          task_name: "[TASK_NAME]"
+          reason: "[Why this task is in this batch - e.g., 'No dependencies' or 'Depends on batch 1']"
+
+      # Tasks within this batch can run in parallel because:
+      parallelization_rationale: |
+        [Explain why these tasks can run in parallel.
+        E.g., "All tasks have no dependencies" or
+        "All dependencies from previous batches are satisfied"]
+
+  dependencies_summary:
+    critical_path:
+      # Longest dependency chain
+      - task_id: [NUMBER]
+      - task_id: [NUMBER]
+
+    parallelization_potential: "[low|medium|high]"
+    parallelization_explanation: |
+      [Explain the overall parallelization potential.
+      E.g., "High - 10 out of 14 tasks can run in parallel across 3 batches"]"""
+
+    prompt = f"""Analyze the tasks and their dependencies, then generate an execution plan.
+
+# Tasks Overview:
+```yaml
+{tasks_overview_yaml}
+```
+
+# Execution Plan Template:
+```yaml
+{execution_plan_template}
+```
+
+Generate a complete execution_plan.yaml that:
+1. Groups tasks into optimal batches for parallel execution
+2. Respects all dependencies (requires_completion_of)
+3. Maximizes parallelization potential
+4. Includes rationale for each batch
+5. Identifies critical path and parallelization potential
+
+Output only the YAML, no markdown formatting."""
+
+    options = ClaudeAgentOptions(
+        system_prompt=system_prompt,
+        allowed_tools=["Read"],
+        permission_mode="bypassPermissions",
+    )
+
+    async with ClaudeSDKClient(options=options) as client:
+        await client.query(prompt)
+        response = await extract_text_response(client)
+
+    return clean_yaml_response(response)
+
+
+def parse_execution_plan(
+    execution_plan_yaml: str, tasks: List[Dict[str, Any]], debug: bool = False
+) -> List[List[Dict[str, Any]]]:
+    """
+    Parse execution_plan.yaml and convert to batch structure.
+    Returns: List of batches, where each batch is a list of task documents.
+    """
+    try:
+        plan = yaml.safe_load(execution_plan_yaml)
+
+        # Build task lookup by ID
+        task_by_id = {}
+        for task_doc in tasks:
+            task_id = task_doc.get("task", {}).get("id")
+            if task_id:
+                task_by_id[task_id] = task_doc
+
+        # Extract batches from plan
+        batches = []
+        plan_batches = plan.get("execution_plan", {}).get("batches", [])
+
+        if debug:
+            print(f"DEBUG: Parsing {len(plan_batches)} batches from execution plan\n")
+
+        for batch_def in plan_batches:
+            batch_id = batch_def.get("batch_id", "?")
+            batch_tasks = []
+            task_refs = batch_def.get("tasks", [])
+
+            if debug:
+                print(f"  Batch {batch_id}: {len(task_refs)} tasks")
+
+            for task_ref in task_refs:
+                task_id = task_ref.get("task_id")
+                task_name = task_ref.get("task_name", "Unknown")
+                if debug:
+                    print(f"    - Task {task_id}: {task_name}")
+
+                if task_id in task_by_id:
+                    batch_tasks.append(task_by_id[task_id])
+                else:
+                    print(f"      ⚠ Warning: Task {task_id} not found in tasks_overview")
+
+            if batch_tasks:
+                batches.append(batch_tasks)
+            if debug:
+                print()
+
+        return batches
+
+    except Exception as e:
+        print(f"⚠ Error parsing execution plan: {e}")
+        print("Falling back to simple dependency analysis")
+        return build_execution_batches_fallback(tasks)
+
+
+def build_execution_batches_fallback(
+    tasks: List[Dict[str, Any]],
+) -> List[List[Dict[str, Any]]]:
+    """
+    Fallback: Simple dependency analysis if execution plan fails.
+    """
+    # Build task lookup by ID
+    task_by_id = {}
+    for task_doc in tasks:
+        task_id = task_doc.get("task", {}).get("id")
+        if task_id:
+            task_by_id[task_id] = task_doc
+
+    # Track which tasks have been scheduled
+    scheduled = set()
+    batches = []
+
+    while len(scheduled) < len(tasks):
+        # Find tasks that can run now (all dependencies satisfied)
+        current_batch = []
+
+        for task_doc in tasks:
+            task = task_doc.get("task", {})
+            task_id = task.get("id")
+
+            if task_id in scheduled:
+                continue
+
+            # Check if all dependencies are satisfied
+            dependencies = task.get("dependencies", {}).get(
+                "requires_completion_of", []
+            )
+
+            # Handle empty array (use len check instead of truthiness)
+            if len(dependencies) == 0:
+                can_run = True
+            else:
+                can_run = all(
+                    dep.get("task_id") in scheduled
+                    for dep in dependencies
+                    if isinstance(dep, dict) and dep.get("task_id")
+                )
+
+            if can_run:
+                current_batch.append(task_doc)
+                scheduled.add(task_id)
+
+        if not current_batch:
+            # Circular dependency or error - add remaining tasks to avoid infinite loop
+            print("⚠ Warning: Circular dependency detected or unresolved dependencies")
+            remaining = [
+                t for t in tasks if t.get("task", {}).get("id") not in scheduled
+            ]
+            if remaining:
+                batches.append(remaining)
+            break
+
+        batches.append(current_batch)
+
+    return batches
 
 
 async def step2_expand_all_tasks(
     tasks_overview_yaml: str,
     task_template: str,
+    project_root: Path,
+    stream_to_file: bool = False,
+    debug: bool = False,
 ) -> str:
     """
     For each task in overview, spawn a suborchestrator to expand it.
+    Uses AI agent for intelligent batch planning and parallelization.
+
+    Args:
+        stream_to_file: If True, write tasks to file immediately to reduce memory usage.
+                       Useful for large projects with many tasks.
+        debug: If True, print detailed debug information including batches and task YAML.
     """
     print("\n" + "=" * 80)
     print("STEP 2: Suborchestrators - Expand Tasks")
     print("=" * 80 + "\n")
 
     tasks = parse_tasks_overview(tasks_overview_yaml)
+
+    if not tasks:
+        print("✗ No valid tasks found. Aborting.")
+        return ""
+
     print(f"Found {len(tasks)} tasks to expand\n")
 
-    expanded_tasks = []
+    # Generate execution plan using AI agent
+    execution_plan_yaml = await generate_execution_plan(tasks_overview_yaml)
 
-    # Process tasks sequentially (can be parallelized if needed)
-    for task_doc in tasks:
-        expanded = await suborchestrator_expand_task(task_doc, task_template)
-        expanded_tasks.append(expanded)
+    # Print execution plan only in debug mode
+    if debug:
+        print("\n" + "="*80)
+        print("EXECUTION PLAN")
+        print("="*80 + "\n")
+        print(execution_plan_yaml)
+        print("\n" + "="*80 + "\n")
 
-    # Combine into multi-document YAML
-    combined = "\n---\n".join(expanded_tasks)
+    # Parse execution plan into batches
+    batches = parse_execution_plan(execution_plan_yaml, tasks, debug)
 
-    return combined
+    print(f"Execution plan: {len(batches)} batch(es)")
+    if debug:
+        print()
+        for i, batch in enumerate(batches, 1):
+            task_ids = [t.get("task", {}).get("id") for t in batch]
+            if len(batch) == 1:
+                print(f"  Batch {i}: Task {task_ids[0]} (sequential)")
+            else:
+                print(f"  Batch {i}: Tasks {task_ids} (parallel)")
+    print()
+
+    # Execute batches sequentially, tasks within batch in parallel
+    all_expanded = []
+    tasks_path = project_root / "tasks.yaml"
+
+    # Open file for streaming if requested
+    file_handle = None
+    if stream_to_file:
+        print(f"Streaming mode: Writing tasks directly to {tasks_path}\n")
+        file_handle = open(tasks_path, "w")
+
+    try:
+        for batch_num, batch in enumerate(batches, 1):
+            print(f"→ Executing Batch {batch_num}/{len(batches)}")
+
+            if len(batch) == 1:
+                # Single task - run directly (YAML printed inside suborchestrator)
+                expanded = await suborchestrator_expand_task(batch[0], task_template, debug)
+                if stream_to_file:
+                    if batch_num > 1:
+                        file_handle.write("\n---\n")
+                    file_handle.write(expanded)
+                    file_handle.flush()  # Ensure written immediately
+                else:
+                    all_expanded.append(expanded)
+            else:
+                # Multiple tasks - run in parallel (YAML printed inside each suborchestrator as they complete)
+                print(f"  Running {len(batch)} tasks in parallel...")
+                tasks_coros = [
+                    suborchestrator_expand_task(task_doc, task_template, debug)
+                    for task_doc in batch
+                ]
+                expanded_batch = await asyncio.gather(*tasks_coros)
+                if stream_to_file:
+                    for expanded in expanded_batch:
+                        if batch_num > 1 or expanded_batch.index(expanded) > 0:
+                            file_handle.write("\n---\n")
+                        file_handle.write(expanded)
+                    file_handle.flush()
+                else:
+                    all_expanded.extend(expanded_batch)
+
+            print()
+
+        # Return combined YAML or empty string if streaming
+        if stream_to_file:
+            return ""  # Already written to file
+        else:
+            combined = "\n---\n".join(all_expanded)
+            return combined
+
+    finally:
+        if file_handle:
+            file_handle.close()
+            print(f"✓ Tasks streamed to: {tasks_path}\n")
 
 
 # =============================================================================
@@ -396,17 +700,16 @@ async def step2_expand_all_tasks(
 
 
 async def spawn_reviewer_agent(
-    task_group: Dict[str, Any],
+    overview_yaml: str,
+    detailed_yaml: str,
     impl_md: str,
+    task_id: Any,
 ) -> Dict[str, Any]:
     """
     Spawn a reviewer agent to validate a task group.
+    Pre-serialized YAML strings passed for efficiency.
     Returns: {"success": bool, "issues": list, "summary": str}
     """
-    overview_task = task_group["overview"]
-    detailed_task = task_group["detailed"]
-
-    task_id = overview_task.get("task", {}).get("id", "?")
     print(f"  → Reviewing task {task_id}...")
 
     system_prompt = """You are an implementation plan reviewer.
@@ -421,9 +724,6 @@ Check for:
 5. Dependencies: External dependencies are properly identified
 
 Report any issues found. If everything looks good, confirm that."""
-
-    overview_yaml = yaml.dump(overview_task, default_flow_style=False, sort_keys=False)
-    detailed_yaml = yaml.dump(detailed_task, default_flow_style=False, sort_keys=False)
 
     prompt = f"""Review this task implementation plan.
 
@@ -527,11 +827,19 @@ async def step3_review_tasks(
         else:
             print(f"⚠ Warning: No detailed task found for overview task {overview_id}")
 
-    # Spawn reviewer agents
-    review_results = []
-    for group in task_groups:
-        result = await spawn_reviewer_agent(group, impl_md)
-        review_results.append(result)
+    # Spawn reviewer agents in parallel (critical performance optimization)
+    print(f"Spawning {len(task_groups)} reviewer agents in parallel...\n")
+
+    review_coros = [
+        spawn_reviewer_agent(
+            overview_yaml=yaml.dump(group["overview"], default_flow_style=False, sort_keys=False),
+            detailed_yaml=yaml.dump(group["detailed"], default_flow_style=False, sort_keys=False),
+            impl_md=impl_md,
+            task_id=group["overview"].get("task", {}).get("id", "?")
+        )
+        for group in task_groups
+    ]
+    review_results = await asyncio.gather(*review_coros)
 
     return review_results
 
@@ -607,6 +915,26 @@ async def main():
         type=str,
         help="Path to IMPL.md (default: auto-detect)",
     )
+    parser.add_argument(
+        "--tasks-overview",
+        type=str,
+        help="Path to tasks_overview.yaml (default: ./tasks_overview.yaml)",
+    )
+    parser.add_argument(
+        "--tasks",
+        type=str,
+        help="Path to tasks.yaml (default: ./tasks.yaml)",
+    )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream tasks to file immediately (reduces memory usage for large projects)",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug output (prints batches, task YAML, etc.)",
+    )
 
     args = parser.parse_args()
 
@@ -614,23 +942,25 @@ async def main():
     print("Loading templates...")
     overview_template, task_template = load_templates()
 
-    # Load IMPL.md
-    if args.impl:
-        impl_path = Path(args.impl)
-        if not impl_path.exists():
-            print(f"Error: IMPL.md not found at {impl_path}")
-            return
-        with open(impl_path, "r") as f:
-            impl_md = f.read()
-    else:
-        try:
-            impl_md = load_impl_md()
-        except FileNotFoundError as e:
-            print(f"Error: {e}")
-            print("Please create IMPL.md or specify path with --impl")
-            return
-
     project_root = Path(__file__).parent.parent
+
+    # Load IMPL.md only if needed (step 1 or step 3)
+    impl_md = None
+    if args.step in ["1", "3", "all"]:
+        if args.impl:
+            impl_path = Path(args.impl)
+            if not impl_path.exists():
+                print(f"Error: IMPL.md not found at {impl_path}")
+                return
+            with open(impl_path, "r") as f:
+                impl_md = f.read()
+        else:
+            try:
+                impl_md = load_impl_md()
+            except FileNotFoundError as e:
+                print(f"Error: {e}")
+                print("Please create IMPL.md or specify path with --impl")
+                return
 
     # Execute workflow steps
     if args.step in ["1", "all"]:
@@ -643,26 +973,51 @@ async def main():
             return
     else:
         # Load existing overview
-        overview_path = project_root / "tasks_overview.yaml"
+        if args.tasks_overview:
+            overview_path = Path(args.tasks_overview)
+        else:
+            overview_path = project_root / "tasks_overview.yaml"
+
         if not overview_path.exists():
-            print("Error: tasks_overview.yaml not found. Run step 1 first.")
+            print(
+                f"Error: tasks_overview.yaml not found at {overview_path}. Run step 1 first or specify with --tasks-overview."
+            )
             return
         with open(overview_path, "r") as f:
             tasks_overview_yaml = f.read()
 
     if args.step in ["2", "all"]:
         # Step 2: Expand tasks
-        tasks_yaml = await step2_expand_all_tasks(tasks_overview_yaml, task_template)
-        tasks_path = project_root / "tasks.yaml"
-        save_yaml(tasks_yaml, tasks_path)
+        # Use streaming mode for large projects (reduces memory usage)
+        tasks_yaml = await step2_expand_all_tasks(
+            tasks_overview_yaml, task_template, project_root,
+            stream_to_file=args.stream, debug=args.debug
+        )
+
+        # Only save if we actually generated tasks and not streaming
+        if tasks_yaml and tasks_yaml.strip():
+            tasks_path = project_root / "tasks.yaml"
+            save_yaml(tasks_yaml, tasks_path)
+        elif not tasks_yaml:
+            # Empty means streaming mode was used, already saved
+            pass
+        else:
+            print("\n✗ No tasks generated. Not saving tasks.yaml")
+            return
 
         if args.step == "2":
             return
     else:
         # Load existing detailed tasks
-        tasks_path = project_root / "tasks.yaml"
+        if args.tasks:
+            tasks_path = Path(args.tasks)
+        else:
+            tasks_path = project_root / "tasks.yaml"
+
         if not tasks_path.exists():
-            print("Error: tasks.yaml not found. Run step 2 first.")
+            print(
+                f"Error: tasks.yaml not found at {tasks_path}. Run step 2 first or specify with --tasks."
+            )
             return
         with open(tasks_path, "r") as f:
             tasks_yaml = f.read()

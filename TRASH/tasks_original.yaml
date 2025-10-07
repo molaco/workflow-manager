@@ -1,0 +1,3096 @@
+---
+# Japanese Learning App - Task Specifications
+# Generated from TASKS.md
+
+tasks:
+
+  - task:
+      id: 2
+      name: "Project Initialization"
+
+    context:
+      description: |
+        Initialize a Rust project with the iced GUI framework as the foundation for the Japanese learning application.
+        This task establishes the project structure, dependency configuration, and build settings that all subsequent
+        development will build upon. Proper initialization ensures optimal binary size, compile times, and maintainability.
+
+      key_points:
+        - "Sets up modular architecture to separate concerns (UI, state, persistence, data)"
+        - "Configures iced framework for cross-platform GUI rendering"
+        - "Optimizes release builds for performance and binary size"
+        - "Establishes data format conventions (RON for static data, redb for runtime persistence)"
+
+    files:
+      - path: "Cargo.toml"
+        description: "Project manifest with dependencies and build configuration"
+      - path: "src/main.rs"
+        description: "Application entry point"
+      - path: "src/state.rs"
+        description: "Application state management module"
+      - path: "src/ui.rs"
+        description: "UI components and rendering logic"
+      - path: "src/models.rs"
+        description: "Core data structures (CharData, SM2Card, etc.)"
+      - path: "src/persistence.rs"
+        description: "Database operations with redb"
+      - path: "src/scheduler.rs"
+        description: "Spaced repetition scheduling logic"
+      - path: "src/data.rs"
+        description: "Character data loading and lookup"
+
+    functions:
+      - file: "src/main.rs"
+        items:
+          - type: "function"
+            name: "main()"
+            description: "Application entry point that initializes iced runtime"
+            postconditions: "GUI window is displayed with initial state"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Project initialization is primarily configuration and boilerplate setup.
+        No complex algorithms or critical invariants require formal verification.
+
+    tests:
+      strategy:
+        approach: "integration"
+        rationale:
+          - "Verify project compiles successfully"
+          - "Ensure all modules are accessible"
+          - "Validate debug and release build configurations"
+
+      implementation:
+        file: "tests/integration_test.rs"
+        location: "create new"
+        code: |
+          #[test]
+          fn test_project_builds() {
+              // Verify compilation succeeds
+              assert!(true);
+          }
+
+      coverage:
+        - "Project compiles in debug mode"
+        - "Project compiles in release mode with optimizations"
+        - "All module declarations are valid"
+
+    dependencies:
+      depends_on: []
+
+      depended_upon_by:
+        - task_id: 3-28
+          reason: "All subsequent tasks build on this project structure"
+
+      external:
+        - name: "iced"
+          type: "crate"
+          status: "to be imported"
+        - name: "redb"
+          type: "crate"
+          status: "to be imported"
+        - name: "serde"
+          type: "crate"
+          status: "to be imported"
+        - name: "bincode"
+          type: "crate"
+          status: "to be imported"
+        - name: "chrono"
+          type: "crate"
+          status: "to be imported"
+        - name: "directories"
+          type: "crate"
+          status: "to be imported"
+        - name: "phf"
+          type: "crate"
+          status: "to be imported"
+        - name: "ron"
+          type: "crate"
+          status: "to be imported"
+
+  - task:
+      id: 3
+      name: "Character Data System"
+
+    context:
+      description: |
+        Implement the character data management system for hiragana, including loading character metadata,
+        stroke order information, and efficient lookup mechanisms. This system serves as the foundation for
+        all character display, animation, and learning features. Data is stored in RON format for human
+        readability and version control friendliness.
+
+      key_points:
+        - "Defines canonical CharData structure used throughout the application"
+        - "Implements efficient O(1) character lookup via phf static map or HashMap"
+        - "Parses SVG stroke data from kana-svg-data/animCJK repositories"
+        - "Supports future extension to katakana and kanji"
+
+    files:
+      - path: "src/models.rs"
+        description: "CharData structure definition"
+      - path: "src/data.rs"
+        description: "Character loading and lookup implementation"
+      - path: "data/hiragana.ron"
+        description: "RON data file with hiragana character metadata"
+
+    functions:
+      - file: "src/models.rs"
+        items:
+          - type: "struct"
+            name: "CharData"
+            description: "Represents a Japanese character with all associated metadata"
+            invariants: "unicode field contains valid Unicode scalar value"
+
+      - file: "src/data.rs"
+        items:
+          - type: "function"
+            name: "load_character_data() -> HashMap<char, CharData>"
+            description: "Loads all character data from RON files into memory"
+            postconditions: "Returns map with all hiragana characters (46 basic + variations)"
+
+          - type: "function"
+            name: "get_character(c: char) -> Option<&CharData>"
+            description: "Retrieves character data by Unicode character"
+            preconditions: "Character data has been loaded"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Data loading and lookup are straightforward operations without complex invariants.
+        Testing is sufficient to ensure correctness.
+
+    tests:
+      strategy:
+        approach: "unit tests"
+        rationale:
+          - "Verify all hiragana characters load correctly"
+          - "Ensure lookup performance is acceptable"
+          - "Validate SVG stroke data parsing"
+
+      implementation:
+        file: "src/data.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_load_hiragana() {
+                  let data = load_character_data();
+                  assert_eq!(data.len(), 46); // Basic hiragana
+                  assert!(data.contains_key(&'あ'));
+                  assert!(data.contains_key(&'ん'));
+              }
+
+              #[test]
+              fn test_character_lookup() {
+                  let data = load_character_data();
+                  let char_data = get_character('あ');
+                  assert!(char_data.is_some());
+                  assert_eq!(char_data.unwrap().romaji, "a");
+              }
+
+              #[test]
+              fn test_stroke_data_present() {
+                  let data = load_character_data();
+                  for (_, char_data) in data.iter() {
+                      assert!(!char_data.strokes.is_empty());
+                      assert!(!char_data.medians.is_empty());
+                  }
+              }
+          }
+
+      coverage:
+        - "All 46 basic hiragana characters load successfully"
+        - "Character lookup returns correct data"
+        - "Stroke and median data are present and non-empty"
+        - "Invalid character lookup returns None"
+
+    dependencies:
+      depends_on:
+        - task_id: 2
+          reason: "Requires project structure and dependencies"
+
+      depended_upon_by:
+        - task_id: 4
+          reason: "Font rendering needs character data"
+        - task_id: 5
+          reason: "Flashcard UI displays character data"
+        - task_id: 10
+          reason: "Stroke animations use stroke path data"
+
+      external:
+        - name: "ron"
+          type: "crate"
+          status: "already imported in task 2"
+        - name: "serde"
+          type: "crate"
+          status: "already imported in task 2"
+
+  - task:
+      id: 6
+      name: "SM-2 Spaced Repetition Algorithm"
+
+    context:
+      description: |
+        Implement the SM-2 (SuperMemo 2) spaced repetition algorithm to optimize long-term retention.
+        This algorithm calculates optimal review intervals based on user performance, ensuring efficient
+        learning by presenting cards just before they would be forgotten. The implementation uses a
+        quality rating scale (0-5) to adjust ease factors and intervals dynamically.
+
+      key_points:
+        - "Implements proven spaced repetition algorithm from SuperMemo research"
+        - "Calculates intervals that maximize retention while minimizing reviews"
+        - "Adapts to individual learner performance via ease factor adjustments"
+        - "Provides foundation for optional FSRS upgrade (Task 20)"
+
+    files:
+      - path: "src/models.rs"
+        description: "SM2Card structure definition"
+      - path: "src/scheduler.rs"
+        description: "SM-2 algorithm implementation and review queue management"
+
+    functions:
+      - file: "src/models.rs"
+        items:
+          - type: "struct"
+            name: "SM2Card"
+            description: "Represents a flashcard with SM-2 scheduling metadata"
+            invariants: |
+              - ease_factor >= 1.3 (minimum threshold per SM-2 spec)
+              - interval_days >= 0
+              - repetitions >= 0
+
+      - file: "src/scheduler.rs"
+        items:
+          - type: "method"
+            name: "SM2Card::review(quality: u8) -> Self"
+            description: "Updates card state based on quality rating (0-5)"
+            preconditions: "quality in range 0..=5"
+            postconditions: |
+              - If quality >= 3: repetitions incremented, interval increased exponentially
+              - If quality < 3: repetitions reset to 0, interval reset to 1 day
+              - ease_factor adjusted based on quality, clamped to minimum 1.3
+
+          - type: "struct"
+            name: "ReviewQueue"
+            description: "Manages prioritization of new, learning, and review cards"
+            invariants: "Cards are ordered by priority: new < learning < review, then by due date"
+
+          - type: "method"
+            name: "ReviewQueue::next_card() -> Option<&SM2Card>"
+            description: "Returns next card due for review following priority rules"
+            postconditions: "Returns highest priority due card, or None if queue empty"
+
+    formal_verification:
+      needed: true
+      level: "Basic"
+      explanation: |
+        The SM-2 algorithm has critical mathematical invariants that directly impact learning efficacy.
+        Formal verification ensures interval calculations are correct and ease factors remain valid.
+
+      properties:
+        - name: "Ease factor bounds"
+          formal_statement: "∀ quality ∈ [0,5]: review(quality).ease_factor >= 1.3"
+
+        - name: "Interval monotonicity for successful reviews"
+          formal_statement: "∀ quality >= 3: review(quality).interval_days >= current.interval_days"
+
+        - name: "Repetition reset on failure"
+          formal_statement: "∀ quality < 3: review(quality).repetitions = 0"
+
+      strategy:
+        - "Property-based testing with proptest to verify invariants across input space"
+        - "Unit tests for boundary conditions (quality 0, 3, 5)"
+        - "Simulation testing to verify long-term convergence behavior"
+
+    tests:
+      strategy:
+        approach: "mixed"
+        rationale:
+          - "Unit tests verify core algorithm logic"
+          - "Property-based tests ensure invariants hold across all inputs"
+          - "Integration tests validate ReviewQueue prioritization"
+
+      implementation:
+        file: "src/scheduler.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_sm2_successful_review() {
+                  let card = SM2Card::new("あ".to_string());
+                  let reviewed = card.review(4); // Good quality
+
+                  assert!(reviewed.repetitions > card.repetitions);
+                  assert!(reviewed.interval_days > card.interval_days);
+                  assert!(reviewed.ease_factor >= 1.3);
+              }
+
+              #[test]
+              fn test_sm2_failed_review() {
+                  let mut card = SM2Card::new("あ".to_string());
+                  card.repetitions = 5;
+                  card.interval_days = 10;
+
+                  let reviewed = card.review(2); // Failed
+
+                  assert_eq!(reviewed.repetitions, 0);
+                  assert_eq!(reviewed.interval_days, 1);
+              }
+
+              #[test]
+              fn test_ease_factor_minimum() {
+                  let card = SM2Card::new("あ".to_string());
+                  let reviewed = card.review(0); // Worst quality
+
+                  assert!(reviewed.ease_factor >= 1.3);
+              }
+          }
+
+          #[cfg(test)]
+          mod property_tests {
+              use super::*;
+              use proptest::prelude::*;
+
+              proptest! {
+                  #[test]
+                  fn prop_ease_factor_bounds(quality in 0u8..=5) {
+                      let card = SM2Card::new("test".to_string());
+                      let reviewed = card.review(quality);
+                      prop_assert!(reviewed.ease_factor >= 1.3);
+                  }
+
+                  #[test]
+                  fn prop_interval_increases_on_success(quality in 3u8..=5) {
+                      let mut card = SM2Card::new("test".to_string());
+                      card.repetitions = 1;
+                      card.interval_days = 1;
+                      let reviewed = card.review(quality);
+                      prop_assert!(reviewed.interval_days >= card.interval_days);
+                  }
+
+                  #[test]
+                  fn prop_failure_resets_repetitions(quality in 0u8..=2) {
+                      let mut card = SM2Card::new("test".to_string());
+                      card.repetitions = 10;
+                      let reviewed = card.review(quality);
+                      prop_assert_eq!(reviewed.repetitions, 0);
+                  }
+              }
+          }
+
+      coverage:
+        - "Successful review (quality >= 3) increases interval and repetitions"
+        - "Failed review (quality < 3) resets to learning state"
+        - "Ease factor remains >= 1.3 for all quality values"
+        - "ReviewQueue returns cards in correct priority order"
+        - "ReviewQueue respects due dates"
+        - "Interval calculations follow SM-2 formula"
+
+    dependencies:
+      depends_on:
+        - task_id: 2
+          reason: "Requires project structure"
+        - task_id: 3
+          reason: "Cards reference character data"
+
+      depended_upon_by:
+        - task_id: 7
+          reason: "Persistence layer stores SM2Card state"
+        - task_id: 9
+          reason: "Learning session uses review queue"
+        - task_id: 20
+          reason: "FSRS algorithm replaces/extends SM-2"
+
+      external:
+        - name: "chrono"
+          type: "crate"
+          status: "already imported in task 2"
+        - name: "proptest"
+          type: "crate"
+          status: "needs implementation"
+
+  - task:
+      id: 10
+      name: "Stroke Order Animation System"
+
+    context:
+      description: |
+        Build GPU-accelerated stroke order animations using iced Canvas to visually teach proper
+        character writing. Animations parse SVG path data from character definitions and render
+        progressive stroke sequences with configurable timing. This provides visual learning feedback
+        critical for handwriting acquisition.
+
+      key_points:
+        - "Uses iced Canvas for hardware-accelerated rendering"
+        - "Parses SVG path commands into drawable segments"
+        - "Implements partial path rendering for smooth animation progress"
+        - "Configurable timing (500-800ms per stroke, 200-300ms pause)"
+
+    files:
+      - path: "src/ui/animations.rs"
+        description: "Stroke animation rendering logic"
+      - path: "src/models.rs"
+        description: "StrokeOrderAnimation state structure"
+
+    functions:
+      - file: "src/ui/animations.rs"
+        items:
+          - type: "struct"
+            name: "StrokeOrderAnimation"
+            description: "Manages animation state for stroke playback"
+            invariants: |
+              - current_stroke < total_strokes
+              - animation_progress in [0.0, 1.0]
+
+          - type: "method"
+            name: "StrokeOrderAnimation::update(delta_time: f32)"
+            description: "Advances animation based on elapsed time"
+            postconditions: "Animation progress updated, stroke index incremented when complete"
+
+          - type: "function"
+            name: "parse_svg_path(path: &str) -> Vec<PathSegment>"
+            description: "Converts SVG path string to drawable segments"
+            preconditions: "path is valid SVG path data"
+            postconditions: "Returns segments with calculated lengths for partial rendering"
+
+          - type: "method"
+            name: "Canvas::draw_partial_path(segments: &[PathSegment], progress: f32)"
+            description: "Renders portion of path based on animation progress"
+            preconditions: "progress in [0.0, 1.0]"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Animation rendering is primarily visual presentation logic without critical invariants.
+        Testing visual correctness and performance is more appropriate than formal verification.
+
+    tests:
+      strategy:
+        approach: "unit tests"
+        rationale:
+          - "Verify SVG path parsing correctness"
+          - "Ensure animation timing calculations"
+          - "Validate progress advancement logic"
+
+      implementation:
+        file: "src/ui/animations.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_parse_svg_path() {
+                  let path = "M 0 0 L 100 100 C 100 200 200 200 200 100";
+                  let segments = parse_svg_path(path);
+
+                  assert_eq!(segments.len(), 3); // MoveTo, LineTo, CurveTo
+                  assert!(segments.iter().all(|s| s.length > 0.0));
+              }
+
+              #[test]
+              fn test_animation_progress() {
+                  let mut anim = StrokeOrderAnimation::new(vec![/* test strokes */]);
+
+                  // Simulate 0.5 seconds at 60fps
+                  for _ in 0..30 {
+                      anim.update(1.0 / 60.0);
+                  }
+
+                  assert!(anim.animation_progress > 0.0);
+                  assert!(anim.animation_progress <= 1.0);
+              }
+
+              #[test]
+              fn test_stroke_advancement() {
+                  let mut anim = StrokeOrderAnimation::new(vec![/* 3 test strokes */]);
+
+                  // Complete first stroke (0.8s at 60fps)
+                  for _ in 0..48 {
+                      anim.update(1.0 / 60.0);
+                  }
+
+                  assert_eq!(anim.current_stroke, 1);
+              }
+          }
+
+      coverage:
+        - "SVG path parsing handles MoveTo, LineTo, CurveTo commands"
+        - "Animation progress advances correctly with time"
+        - "Stroke index increments when stroke completes"
+        - "Animation loops or stops at completion (configurable)"
+        - "Partial path rendering produces visually correct output"
+
+    dependencies:
+      depends_on:
+        - task_id: 2
+          reason: "Requires iced Canvas API"
+        - task_id: 3
+          reason: "Uses stroke data from CharData"
+
+      depended_upon_by:
+        - task_id: 17
+          reason: "Practice modes use stroke animations"
+
+      external:
+        - name: "iced::widget::canvas"
+          type: "module"
+          status: "already exists"
+
+  - task:
+      id: 4
+      name: "Japanese Font Rendering"
+
+    context:
+      description: |
+        Set up proper Japanese text rendering with embedded fonts and advanced text shaping.
+        This ensures all Japanese characters display correctly across platforms without requiring
+        system font installations. Uses cosmic-text with advanced shaping for proper glyph rendering.
+
+      key_points:
+        - "Embeds Noto Sans JP or Source Han Sans in application binary"
+        - "Configures cosmic-text with Shaping::Advanced for proper rendering"
+        - "Creates custom CharacterCard widget for flashcard display"
+        - "Ensures consistent rendering across Windows, macOS, Linux"
+
+    files:
+      - path: "src/ui/widgets/character_card.rs"
+        description: "Custom widget for displaying Japanese characters"
+      - path: "src/fonts.rs"
+        description: "Font loading and initialization"
+      - path: "assets/fonts/NotoSansJP-Regular.ttf"
+        description: "Embedded Japanese font"
+
+    functions:
+      - file: "src/fonts.rs"
+        items:
+          - type: "function"
+            name: "load_japanese_font() -> &'static [u8]"
+            description: "Returns embedded font data for Japanese text rendering"
+            postconditions: "Returns valid TrueType font bytes"
+
+      - file: "src/ui/widgets/character_card.rs"
+        items:
+          - type: "struct"
+            name: "CharacterCard"
+            description: "Custom widget that displays a Japanese character with proper rendering"
+
+          - type: "method"
+            name: "CharacterCard::new(character: char) -> Self"
+            description: "Creates new character card widget"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Font rendering is handled by well-tested libraries (iced, cosmic-text).
+        Visual testing is more appropriate than formal verification.
+
+    tests:
+      strategy:
+        approach: "integration"
+        rationale:
+          - "Verify font loads successfully"
+          - "Test character widget instantiation"
+          - "Visual regression tests for rendering"
+
+      implementation:
+        file: "src/fonts.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_font_loads() {
+                  let font_data = load_japanese_font();
+                  assert!(!font_data.is_empty());
+                  // Verify TrueType magic number
+                  assert_eq!(&font_data[0..4], b"\x00\x01\x00\x00");
+              }
+
+              #[test]
+              fn test_character_card_creation() {
+                  let card = CharacterCard::new('あ');
+                  // Verify widget initializes without panic
+                  assert!(true);
+              }
+          }
+
+      coverage:
+        - "Font data embeds successfully"
+        - "Font data is valid TrueType format"
+        - "CharacterCard widget creates without errors"
+        - "All hiragana characters render visibly"
+
+    dependencies:
+      depends_on:
+        - task_id: 2
+          reason: "Requires iced framework"
+        - task_id: 3
+          reason: "Displays CharData"
+
+      depended_upon_by:
+        - task_id: 5
+          reason: "Flashcard UI uses CharacterCard widget"
+        - task_id: 14
+          reason: "Enhanced UI uses font rendering"
+
+      external:
+        - name: "iced"
+          type: "crate"
+          status: "already imported"
+
+  - task:
+      id: 5
+      name: "Simple Flashcard UI"
+
+    context:
+      description: |
+        Build the basic flashcard learning interface with character display, answer input,
+        and validation. This provides the core user interaction flow for learning characters
+        through recognition and recall exercises.
+
+      key_points:
+        - "Implements main menu with navigation to flashcard mode"
+        - "Creates flashcard view showing character and prompting for romaji"
+        - "Validates user input against correct answer"
+        - "Handles screen transitions between menu and study modes"
+
+    files:
+      - path: "src/ui/screens/menu.rs"
+        description: "Main menu screen"
+      - path: "src/ui/screens/flashcard.rs"
+        description: "Flashcard study screen"
+      - path: "src/state.rs"
+        description: "Application state with screen navigation"
+
+    functions:
+      - file: "src/ui/screens/flashcard.rs"
+        items:
+          - type: "struct"
+            name: "FlashcardScreen"
+            description: "Flashcard study interface state"
+
+          - type: "method"
+            name: "FlashcardScreen::update(message: Message) -> Command"
+            description: "Handles user interactions (input, submit, next)"
+
+          - type: "method"
+            name: "FlashcardScreen::view() -> Element"
+            description: "Renders flashcard UI with character and input"
+
+          - type: "function"
+            name: "validate_answer(input: &str, correct: &str) -> bool"
+            description: "Compares user input to correct romaji"
+            preconditions: "Both strings are trimmed and lowercased"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        UI rendering and basic validation logic do not require formal verification.
+        User testing and integration tests provide adequate coverage.
+
+    tests:
+      strategy:
+        approach: "unit tests"
+        rationale:
+          - "Test answer validation logic"
+          - "Verify state transitions"
+          - "Ensure UI renders without errors"
+
+      implementation:
+        file: "src/ui/screens/flashcard.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_validate_answer_correct() {
+                  assert!(validate_answer("a", "a"));
+                  assert!(validate_answer("ka", "ka"));
+              }
+
+              #[test]
+              fn test_validate_answer_case_insensitive() {
+                  assert!(validate_answer("A", "a"));
+                  assert!(validate_answer("Ka", "ka"));
+              }
+
+              #[test]
+              fn test_validate_answer_whitespace() {
+                  assert!(validate_answer(" a ", "a"));
+              }
+
+              #[test]
+              fn test_validate_answer_incorrect() {
+                  assert!(!validate_answer("a", "ka"));
+              }
+          }
+
+      coverage:
+        - "Answer validation handles correct inputs"
+        - "Case-insensitive comparison works"
+        - "Whitespace is trimmed before comparison"
+        - "Incorrect answers are rejected"
+        - "Screen transitions work (menu ↔ flashcard)"
+
+    dependencies:
+      depends_on:
+        - task_id: 2
+          reason: "Requires iced UI framework"
+        - task_id: 3
+          reason: "Displays character data"
+        - task_id: 4
+          reason: "Uses CharacterCard widget"
+
+      depended_upon_by:
+        - task_id: 9
+          reason: "Learning session integrates with flashcard UI"
+        - task_id: 14
+          reason: "Enhanced UI builds on this foundation"
+
+      external: []
+
+  - task:
+      id: 7
+      name: "Progress Persistence Layer"
+
+    context:
+      description: |
+        Implement local database storage using redb for persisting user progress, card states,
+        and review history. This enables progress tracking across sessions and long-term
+        learning analytics. Uses platform-specific data directories for cross-platform compatibility.
+
+      key_points:
+        - "Uses redb embedded database for zero-configuration persistence"
+        - "Stores data in platform-specific directories (directories crate)"
+        - "Implements atomic transactions for data integrity"
+        - "Logs all reviews with timestamps for analytics"
+
+    files:
+      - path: "src/persistence.rs"
+        description: "Database operations and schema"
+      - path: "src/models.rs"
+        description: "Serializable data structures"
+
+    functions:
+      - file: "src/persistence.rs"
+        items:
+          - type: "function"
+            name: "init_database() -> Result<Database>"
+            description: "Initializes redb database in platform data directory"
+            postconditions: "Database file created with required tables"
+
+          - type: "function"
+            name: "save_card_progress(card: &SM2Card) -> Result<()>"
+            description: "Persists card state to database"
+            preconditions: "Database initialized"
+            postconditions: "Card state written atomically"
+
+          - type: "function"
+            name: "load_card_progress(char: char) -> Result<Option<SM2Card>>"
+            description: "Retrieves card state from database"
+            preconditions: "Database initialized"
+
+          - type: "function"
+            name: "log_review(char: char, quality: u8, timestamp: DateTime) -> Result<()>"
+            description: "Records review event for analytics"
+            postconditions: "Review logged with timestamp"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Database operations use redb's transactional guarantees.
+        Integration tests verify data integrity and persistence.
+
+    tests:
+      strategy:
+        approach: "integration"
+        rationale:
+          - "Test database initialization"
+          - "Verify save/load round-trips"
+          - "Ensure transaction atomicity"
+
+      implementation:
+        file: "src/persistence.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+              use tempfile::tempdir;
+
+              #[test]
+              fn test_database_init() {
+                  let dir = tempdir().unwrap();
+                  std::env::set_var("HOME", dir.path());
+
+                  let db = init_database();
+                  assert!(db.is_ok());
+              }
+
+              #[test]
+              fn test_save_load_card() {
+                  let dir = tempdir().unwrap();
+                  std::env::set_var("HOME", dir.path());
+                  init_database().unwrap();
+
+                  let card = SM2Card::new("あ".to_string());
+                  save_card_progress(&card).unwrap();
+
+                  let loaded = load_card_progress('あ').unwrap();
+                  assert!(loaded.is_some());
+                  assert_eq!(loaded.unwrap().character, "あ");
+              }
+
+              #[test]
+              fn test_review_logging() {
+                  let dir = tempdir().unwrap();
+                  std::env::set_var("HOME", dir.path());
+                  init_database().unwrap();
+
+                  let timestamp = chrono::Utc::now();
+                  log_review('あ', 4, timestamp).unwrap();
+
+                  // Verify review was logged
+                  assert!(true);
+              }
+          }
+
+      coverage:
+        - "Database initializes in correct platform directory"
+        - "Card state saves successfully"
+        - "Card state loads correctly"
+        - "Save/load maintains data integrity"
+        - "Review logging works with timestamps"
+
+    dependencies:
+      depends_on:
+        - task_id: 2
+          reason: "Requires redb dependency"
+        - task_id: 6
+          reason: "Persists SM2Card state"
+
+      depended_upon_by:
+        - task_id: 8
+          reason: "Statistics query persisted data"
+        - task_id: 9
+          reason: "Learning session saves progress"
+
+      external:
+        - name: "redb"
+          type: "crate"
+          status: "already imported"
+        - name: "directories"
+          type: "crate"
+          status: "already imported"
+        - name: "bincode"
+          type: "crate"
+          status: "already imported"
+
+  - task:
+      id: 8
+      name: "Basic Statistics Tracking"
+
+    context:
+      description: |
+        Implement progress metrics and statistics tracking to motivate learners and provide
+        feedback on their progress. Tracks reviews, accuracy, study time, and streaks.
+        Data is aggregated from review logs in the persistence layer.
+
+      key_points:
+        - "Calculates daily and cumulative statistics"
+        - "Tracks current and longest study streaks"
+        - "Categorizes cards by state (new/learning/mastered)"
+        - "Provides data for UI progress displays"
+
+    files:
+      - path: "src/models.rs"
+        description: "Statistics structure definition"
+      - path: "src/statistics.rs"
+        description: "Statistics calculation logic"
+
+    functions:
+      - file: "src/models.rs"
+        items:
+          - type: "struct"
+            name: "Statistics"
+            description: "User progress metrics"
+            invariants: "Counts are non-negative, accuracy in [0.0, 1.0]"
+
+      - file: "src/statistics.rs"
+        items:
+          - type: "function"
+            name: "calculate_stats() -> Statistics"
+            description: "Aggregates statistics from review history"
+            postconditions: "Returns current statistics snapshot"
+
+          - type: "function"
+            name: "calculate_streak() -> (u32, u32)"
+            description: "Calculates current and longest streak"
+            postconditions: "Returns (current_streak, longest_streak) tuple"
+
+          - type: "function"
+            name: "count_cards_by_state() -> (usize, usize, usize)"
+            description: "Counts cards in new/learning/mastered states"
+            postconditions: "Returns (new, learning, mastered) counts"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Statistics are derived calculations from existing data.
+        Unit tests adequately verify calculation correctness.
+
+    tests:
+      strategy:
+        approach: "unit tests"
+        rationale:
+          - "Test statistics calculations"
+          - "Verify streak logic"
+          - "Ensure card state counts"
+
+      implementation:
+        file: "src/statistics.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_calculate_streak_consecutive() {
+                  // Mock review data for consecutive days
+                  let (current, longest) = calculate_streak();
+                  assert!(current > 0);
+                  assert!(longest >= current);
+              }
+
+              #[test]
+              fn test_calculate_streak_broken() {
+                  // Mock review data with gap
+                  let (current, _) = calculate_streak();
+                  // Should reset after gap
+                  assert!(true);
+              }
+
+              #[test]
+              fn test_card_state_counts() {
+                  let (new, learning, mastered) = count_cards_by_state();
+                  assert!(new + learning + mastered > 0);
+              }
+
+              #[test]
+              fn test_accuracy_bounds() {
+                  let stats = calculate_stats();
+                  assert!(stats.accuracy >= 0.0);
+                  assert!(stats.accuracy <= 1.0);
+              }
+          }
+
+      coverage:
+        - "Statistics aggregate correctly from reviews"
+        - "Streak calculation handles consecutive days"
+        - "Streak resets after missed days"
+        - "Card state counts are accurate"
+        - "Accuracy is within valid range [0.0, 1.0]"
+
+    dependencies:
+      depends_on:
+        - task_id: 6
+          reason: "Uses SM2Card state definitions"
+        - task_id: 7
+          reason: "Queries persisted review data"
+
+      depended_upon_by:
+        - task_id: 14
+          reason: "UI displays statistics"
+        - task_id: 19
+          reason: "Advanced statistics extend this"
+
+      external:
+        - name: "chrono"
+          type: "crate"
+          status: "already imported"
+
+  - task:
+      id: 9
+      name: "Learning Session Flow"
+
+    context:
+      description: |
+        Create the complete learning experience that ties together the review queue,
+        flashcard UI, SM-2 algorithm, and persistence layer. Manages the lifecycle
+        of a study session from initialization to completion summary.
+
+      key_points:
+        - "Initializes ReviewQueue with due cards"
+        - "Orchestrates card presentation and user responses"
+        - "Updates card states via SM-2 algorithm based on quality ratings"
+        - "Persists progress after each review for crash resistance"
+
+    files:
+      - path: "src/session.rs"
+        description: "Learning session management"
+      - path: "src/ui/screens/session.rs"
+        description: "Session UI and summary screen"
+
+    functions:
+      - file: "src/session.rs"
+        items:
+          - type: "struct"
+            name: "LearningSession"
+            description: "Manages a study session lifecycle"
+            invariants: "current_index <= queue.len()"
+
+          - type: "method"
+            name: "LearningSession::new() -> Self"
+            description: "Initializes session with ReviewQueue of due cards"
+            postconditions: "Queue populated with cards due for review"
+
+          - type: "method"
+            name: "LearningSession::submit_answer(quality: u8) -> Result<()>"
+            description: "Processes answer, updates card via SM-2, persists"
+            preconditions: "quality in 0..=5, session not complete"
+            postconditions: "Card updated and saved, index advanced"
+
+          - type: "method"
+            name: "LearningSession::get_summary() -> SessionSummary"
+            description: "Generates session completion statistics"
+            preconditions: "Session is complete"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Session orchestration logic is straightforward control flow.
+        Integration tests verify correct interaction between components.
+
+    tests:
+      strategy:
+        approach: "integration"
+        rationale:
+          - "Test complete session lifecycle"
+          - "Verify SM-2 updates occur"
+          - "Ensure persistence after each review"
+
+      implementation:
+        file: "src/session.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_session_initialization() {
+                  let session = LearningSession::new();
+                  assert!(session.queue.len() > 0);
+              }
+
+              #[test]
+              fn test_submit_answer_updates_card() {
+                  let mut session = LearningSession::new();
+                  let initial_card = session.queue.current().unwrap().clone();
+
+                  session.submit_answer(4).unwrap();
+
+                  // Verify card was updated in database
+                  let updated = load_card_progress(initial_card.character.chars().next().unwrap()).unwrap();
+                  assert!(updated.is_some());
+              }
+
+              #[test]
+              fn test_session_completion() {
+                  let mut session = LearningSession::new();
+
+                  while !session.is_complete() {
+                      session.submit_answer(4).unwrap();
+                  }
+
+                  let summary = session.get_summary();
+                  assert!(summary.total_reviews > 0);
+              }
+          }
+
+      coverage:
+        - "Session initializes with due cards"
+        - "Answer submission updates card state"
+        - "Card changes persist to database"
+        - "Session advances through queue"
+        - "Session completion detected correctly"
+        - "Summary statistics are accurate"
+
+    dependencies:
+      depends_on:
+        - task_id: 5
+          reason: "Uses flashcard UI"
+        - task_id: 6
+          reason: "Uses ReviewQueue and SM-2 algorithm"
+        - task_id: 7
+          reason: "Persists card progress"
+
+      depended_upon_by:
+        - task_id: 17
+          reason: "Practice modes extend session flow"
+
+      external: []
+
+  - task:
+      id: 11
+      name: "Handwriting Canvas"
+
+    context:
+      description: |
+        Create a drawing input system for handwriting recognition and practice.
+        Captures mouse/touch strokes with smoothing and renders them with proper
+        line quality. Provides the foundation for handwriting-based learning modes.
+
+      key_points:
+        - "Captures mouse and touch input events"
+        - "Implements distance-based stroke smoothing to reduce noise"
+        - "Renders strokes with proper line caps and joins"
+        - "Provides clear and undo functionality"
+
+    files:
+      - path: "src/ui/widgets/handwriting_canvas.rs"
+        description: "Canvas widget for handwriting input"
+
+    functions:
+      - file: "src/ui/widgets/handwriting_canvas.rs"
+        items:
+          - type: "struct"
+            name: "HandwritingCanvas"
+            description: "Canvas widget capturing drawing input"
+            invariants: "All stroke points have valid coordinates within canvas bounds"
+
+          - type: "method"
+            name: "HandwritingCanvas::handle_input(event: Event) -> EventStatus"
+            description: "Processes mouse/touch events to capture strokes"
+            postconditions: "Stroke points added when dragging, stroke completed on release"
+
+          - type: "method"
+            name: "HandwritingCanvas::smooth_stroke(points: &[Point]) -> Vec<Point>"
+            description: "Applies distance-based smoothing to reduce jitter"
+            preconditions: "points.len() >= 2"
+
+          - type: "method"
+            name: "HandwritingCanvas::clear()"
+            description: "Removes all strokes from canvas"
+            postconditions: "strokes vector is empty"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Input capture and rendering are UI concerns without critical invariants.
+        Manual testing provides adequate verification.
+
+    tests:
+      strategy:
+        approach: "unit tests"
+        rationale:
+          - "Test stroke smoothing algorithm"
+          - "Verify clear functionality"
+          - "Ensure input handling logic"
+
+      implementation:
+        file: "src/ui/widgets/handwriting_canvas.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_smooth_stroke_reduces_points() {
+                  let points: Vec<Point> = (0..100)
+                      .map(|i| Point::new(i as f32, (i as f32).sin()))
+                      .collect();
+
+                  let smoothed = HandwritingCanvas::smooth_stroke(&points);
+                  assert!(smoothed.len() <= points.len());
+              }
+
+              #[test]
+              fn test_clear_removes_strokes() {
+                  let mut canvas = HandwritingCanvas::new();
+                  // Add test strokes
+                  canvas.strokes.push(vec![Point::new(0.0, 0.0)]);
+
+                  canvas.clear();
+                  assert!(canvas.strokes.is_empty());
+              }
+          }
+
+      coverage:
+        - "Stroke capture works for mouse input"
+        - "Stroke capture works for touch input"
+        - "Smoothing reduces noisy input points"
+        - "Clear removes all strokes"
+        - "Canvas renders strokes correctly"
+
+    dependencies:
+      depends_on:
+        - task_id: 2
+          reason: "Uses iced Canvas widget"
+
+      depended_upon_by:
+        - task_id: 16
+          reason: "Recognition uses canvas strokes"
+        - task_id: 17
+          reason: "Practice modes use canvas"
+
+      external:
+        - name: "iced::widget::canvas"
+          type: "module"
+          status: "already exists"
+
+  - task:
+      id: 12
+      name: "Visual Feedback System"
+
+    context:
+      description: |
+        Build educational feedback animations that provide immediate visual responses
+        to user actions. Color-coded feedback and animations help reinforce learning
+        and maintain engagement through clear success/failure indicators.
+
+      key_points:
+        - "Color-coded feedback (green=correct, red=incorrect, yellow=partial)"
+        - "Shake animation for errors using easing functions"
+        - "Immediate response timing (200-500ms)"
+        - "Non-blocking animations that don't interrupt workflow"
+
+    files:
+      - path: "src/ui/animations/feedback.rs"
+        description: "Feedback animation implementations"
+
+    functions:
+      - file: "src/ui/animations/feedback.rs"
+        items:
+          - type: "struct"
+            name: "FeedbackAnimation"
+            description: "Manages visual feedback state and animation"
+            invariants: "animation_progress in [0.0, 1.0], duration > 0"
+
+          - type: "method"
+            name: "FeedbackAnimation::success() -> Self"
+            description: "Creates green success animation"
+
+          - type: "method"
+            name: "FeedbackAnimation::error() -> Self"
+            description: "Creates red error animation with shake"
+
+          - type: "method"
+            name: "FeedbackAnimation::partial() -> Self"
+            description: "Creates yellow partial credit animation"
+
+          - type: "function"
+            name: "shake_easing(t: f32) -> f32"
+            description: "Easing function for shake animation"
+            preconditions: "t in [0.0, 1.0]"
+            postconditions: "Returns displacement value"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Animation logic is primarily visual presentation.
+        Visual testing ensures correct behavior.
+
+    tests:
+      strategy:
+        approach: "unit tests"
+        rationale:
+          - "Test easing function outputs"
+          - "Verify animation timing"
+          - "Ensure state transitions"
+
+      implementation:
+        file: "src/ui/animations/feedback.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_shake_easing_bounds() {
+                  for i in 0..=100 {
+                      let t = i as f32 / 100.0;
+                      let displacement = shake_easing(t);
+                      assert!(displacement.abs() <= 10.0);
+                  }
+              }
+
+              #[test]
+              fn test_animation_duration() {
+                  let anim = FeedbackAnimation::success();
+                  assert!(anim.duration >= 0.2);
+                  assert!(anim.duration <= 0.5);
+              }
+
+              #[test]
+              fn test_color_coding() {
+                  let success = FeedbackAnimation::success();
+                  let error = FeedbackAnimation::error();
+                  let partial = FeedbackAnimation::partial();
+
+                  assert_ne!(success.color, error.color);
+                  assert_ne!(success.color, partial.color);
+              }
+          }
+
+      coverage:
+        - "Easing function produces smooth shake motion"
+        - "Success animation uses green color"
+        - "Error animation uses red color and shake"
+        - "Partial animation uses yellow color"
+        - "Animation completes within specified duration"
+
+    dependencies:
+      depends_on:
+        - task_id: 2
+          reason: "Uses iced animation framework"
+
+      depended_upon_by:
+        - task_id: 9
+          reason: "Learning session shows feedback"
+        - task_id: 17
+          reason: "Practice modes use feedback"
+
+      external: []
+
+  - task:
+      id: 13
+      name: "Katakana Support"
+
+    context:
+      description: |
+        Extend the character data system to support katakana in addition to hiragana.
+        This involves adding katakana character data, updating lookup mechanisms,
+        and providing UI selection between scripts.
+
+      key_points:
+        - "Adds 91 katakana characters (46 basic + 45 dakuten/combinations)"
+        - "Extends character lookup to support both kana scripts"
+        - "Updates UI to allow script selection"
+        - "Maintains separate learning progress for each script"
+
+    files:
+      - path: "data/katakana.ron"
+        description: "RON data file with katakana character metadata"
+      - path: "src/data.rs"
+        description: "Updated character loading for multiple scripts"
+      - path: "src/ui/screens/script_selection.rs"
+        description: "UI for choosing hiragana vs katakana"
+
+    functions:
+      - file: "src/data.rs"
+        items:
+          - type: "enum"
+            name: "Script"
+            description: "Represents Japanese script types"
+
+          - type: "function"
+            name: "load_script_data(script: Script) -> HashMap<char, CharData>"
+            description: "Loads character data for specified script"
+            postconditions: "Returns all characters for given script"
+
+          - type: "function"
+            name: "get_character_for_script(c: char, script: Script) -> Option<&CharData>"
+            description: "Retrieves character data for specific script"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Extension of existing data loading system.
+        Testing ensures correctness.
+
+    tests:
+      strategy:
+        approach: "unit tests"
+        rationale:
+          - "Verify katakana data loads"
+          - "Test script selection logic"
+          - "Ensure separate progress tracking"
+
+      implementation:
+        file: "src/data.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_load_katakana() {
+                  let data = load_script_data(Script::Katakana);
+                  assert_eq!(data.len(), 91);
+                  assert!(data.contains_key(&'ア'));
+                  assert!(data.contains_key(&'ン'));
+              }
+
+              #[test]
+              fn test_script_lookup_hiragana() {
+                  let char_data = get_character_for_script('あ', Script::Hiragana);
+                  assert!(char_data.is_some());
+                  assert_eq!(char_data.unwrap().romaji, "a");
+              }
+
+              #[test]
+              fn test_script_lookup_katakana() {
+                  let char_data = get_character_for_script('ア', Script::Katakana);
+                  assert!(char_data.is_some());
+                  assert_eq!(char_data.unwrap().romaji, "a");
+              }
+
+              #[test]
+              fn test_separate_progress() {
+                  // Verify hiragana and katakana 'a' have separate SM2Cards
+                  let h_card = load_card_progress('あ').unwrap();
+                  let k_card = load_card_progress('ア').unwrap();
+                  // They should be tracked independently
+                  assert!(true);
+              }
+          }
+
+      coverage:
+        - "All 91 katakana characters load successfully"
+        - "Script-specific lookup returns correct data"
+        - "Hiragana and katakana have separate progress"
+        - "UI allows script selection"
+        - "Animations work for katakana"
+
+    dependencies:
+      depends_on:
+        - task_id: 3
+          reason: "Extends character data system"
+        - task_id: 10
+          reason: "Animations must support katakana"
+
+      depended_upon_by: []
+
+      external: []
+
+  - task:
+      id: 14
+      name: "Enhanced UI & Navigation"
+
+    context:
+      description: |
+        Improve the user interface with additional screens and navigation.
+        Adds character list views, practice mode selection, statistics dashboard,
+        and a comprehensive navigation menu for accessing all features.
+
+      key_points:
+        - "Character list with grid layout for browsing"
+        - "Practice mode selection screen"
+        - "Statistics dashboard with progress visualization"
+        - "Navigation menu with screen routing"
+
+    files:
+      - path: "src/ui/screens/character_list.rs"
+        description: "Grid view of all characters"
+      - path: "src/ui/screens/practice_selection.rs"
+        description: "Practice mode chooser"
+      - path: "src/ui/screens/dashboard.rs"
+        description: "Statistics and progress display"
+      - path: "src/ui/navigation.rs"
+        description: "Screen routing logic"
+
+    functions:
+      - file: "src/ui/navigation.rs"
+        items:
+          - type: "enum"
+            name: "Screen"
+            description: "Application screen enumeration"
+
+          - type: "function"
+            name: "navigate(from: Screen, to: Screen) -> Command"
+            description: "Handles screen transitions"
+
+      - file: "src/ui/screens/character_list.rs"
+        items:
+          - type: "method"
+            name: "CharacterListScreen::view() -> Element"
+            description: "Renders grid of character cards"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        UI rendering and navigation are presentation concerns.
+        Manual testing and integration tests provide coverage.
+
+    tests:
+      strategy:
+        approach: "integration"
+        rationale:
+          - "Test screen transitions"
+          - "Verify all screens render"
+          - "Ensure navigation correctness"
+
+      implementation:
+        file: "src/ui/navigation.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_navigation_transitions() {
+                  let from = Screen::Menu;
+                  let to = Screen::CharacterList;
+                  let cmd = navigate(from, to);
+                  // Verify transition is valid
+                  assert!(true);
+              }
+
+              #[test]
+              fn test_all_screens_enumerated() {
+                  // Verify all screens are in enum
+                  let screens = vec![
+                      Screen::Menu,
+                      Screen::Flashcard,
+                      Screen::CharacterList,
+                      Screen::PracticeSelection,
+                      Screen::Dashboard,
+                  ];
+                  assert_eq!(screens.len(), 5);
+              }
+          }
+
+      coverage:
+        - "Character list renders all characters"
+        - "Practice selection shows all modes"
+        - "Dashboard displays statistics correctly"
+        - "Navigation between all screens works"
+        - "Back navigation functions properly"
+
+    dependencies:
+      depends_on:
+        - task_id: 4
+          reason: "Uses CharacterCard widget"
+        - task_id: 5
+          reason: "Extends basic UI"
+        - task_id: 8
+          reason: "Displays statistics"
+
+      depended_upon_by:
+        - task_id: 15
+          reason: "Achievements display in UI"
+        - task_id: 17
+          reason: "Practice modes need selection UI"
+
+      external: []
+
+  - task:
+      id: 15
+      name: "Achievement System"
+
+    context:
+      description: |
+        Add gamification through an achievement system that recognizes milestones
+        and encourages consistent practice. Achievements unlock based on progress
+        metrics and display with celebratory animations.
+
+      key_points:
+        - "Define achievement types (first_character, script_complete, streaks)"
+        - "Implement unlock logic based on Statistics"
+        - "Create visual achievement display UI"
+        - "Show notification animations when unlocked"
+
+    files:
+      - path: "src/achievements.rs"
+        description: "Achievement definitions and unlock logic"
+      - path: "src/ui/screens/achievements.rs"
+        description: "Achievement display UI"
+
+    functions:
+      - file: "src/achievements.rs"
+        items:
+          - type: "struct"
+            name: "Achievement"
+            description: "Represents an unlockable achievement"
+
+          - type: "enum"
+            name: "AchievementType"
+            description: "Types of achievements (FirstChar, Complete, Streak, etc.)"
+
+          - type: "function"
+            name: "check_achievements(stats: &Statistics) -> Vec<Achievement>"
+            description: "Returns newly unlocked achievements"
+            postconditions: "Returns achievements user just qualified for"
+
+          - type: "function"
+            name: "get_all_achievements() -> Vec<Achievement>"
+            description: "Returns all possible achievements with unlock status"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Achievement logic is straightforward conditional checks.
+        Unit tests provide adequate verification.
+
+    tests:
+      strategy:
+        approach: "unit tests"
+        rationale:
+          - "Test achievement unlock conditions"
+          - "Verify all achievements are defined"
+          - "Ensure no duplicate unlocks"
+
+      implementation:
+        file: "src/achievements.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_first_character_unlock() {
+                  let mut stats = Statistics::default();
+                  stats.total_reviews = 1;
+
+                  let unlocked = check_achievements(&stats);
+                  assert!(unlocked.iter().any(|a| matches!(a.achievement_type, AchievementType::FirstChar)));
+              }
+
+              #[test]
+              fn test_streak_achievement() {
+                  let mut stats = Statistics::default();
+                  stats.current_streak = 7;
+
+                  let unlocked = check_achievements(&stats);
+                  assert!(unlocked.iter().any(|a| matches!(a.achievement_type, AchievementType::Streak7)));
+              }
+
+              #[test]
+              fn test_hiragana_complete() {
+                  let mut stats = Statistics::default();
+                  stats.mastered_count = 46;
+
+                  let unlocked = check_achievements(&stats);
+                  assert!(unlocked.iter().any(|a| matches!(a.achievement_type, AchievementType::HiraganaComplete)));
+              }
+          }
+
+      coverage:
+        - "First character reviewed unlocks achievement"
+        - "7-day streak unlocks achievement"
+        - "Completing hiragana unlocks achievement"
+        - "Achievements persist across sessions"
+        - "UI displays locked and unlocked states"
+        - "Notification animation triggers on unlock"
+
+    dependencies:
+      depends_on:
+        - task_id: 8
+          reason: "Uses Statistics for unlock conditions"
+        - task_id: 14
+          reason: "Displays in enhanced UI"
+
+      depended_upon_by: []
+
+      external: []
+
+  - task:
+      id: 16
+      name: "Character Recognition Integration"
+
+    context:
+      description: |
+        Integrate handwriting recognition to validate user-drawn characters.
+        Normalizes stroke data and returns candidate matches with confidence scores
+        for educational feedback.
+
+      key_points:
+        - "Research and integrate hanzi_lookup or alternative library"
+        - "Normalize strokes to 0-1 coordinate range"
+        - "Return top N candidates with confidence scores"
+        - "Validate recognition against expected character"
+
+    files:
+      - path: "src/recognition.rs"
+        description: "Handwriting recognition integration"
+
+    functions:
+      - file: "src/recognition.rs"
+        items:
+          - type: "function"
+            name: "normalize_strokes(strokes: &[Vec<Point>]) -> Vec<Vec<(f32, f32)>>"
+            description: "Normalizes stroke coordinates to [0, 1] range"
+            postconditions: "All coordinates in [0.0, 1.0]"
+
+          - type: "function"
+            name: "recognize_character(strokes: &[Vec<Point>]) -> Vec<(char, f32)>"
+            description: "Returns candidates with confidence scores"
+            postconditions: "Returns up to N candidates sorted by confidence descending"
+
+          - type: "function"
+            name: "validate_recognition(strokes: &[Vec<Point>], expected: char) -> (bool, f32)"
+            description: "Checks if expected character is in top candidates"
+            postconditions: "Returns (is_correct, confidence) tuple"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Recognition uses external library algorithms.
+        Testing validates integration and normalization.
+
+    tests:
+      strategy:
+        approach: "integration"
+        rationale:
+          - "Test stroke normalization"
+          - "Verify recognition returns candidates"
+          - "Ensure validation logic"
+
+      implementation:
+        file: "src/recognition.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_normalize_strokes() {
+                  let strokes = vec![
+                      vec![Point::new(100.0, 200.0), Point::new(300.0, 400.0)]
+                  ];
+
+                  let normalized = normalize_strokes(&strokes);
+                  for stroke in normalized {
+                      for (x, y) in stroke {
+                          assert!(x >= 0.0 && x <= 1.0);
+                          assert!(y >= 0.0 && y <= 1.0);
+                      }
+                  }
+              }
+
+              #[test]
+              fn test_recognition_returns_candidates() {
+                  let strokes = vec![/* test stroke data */];
+                  let candidates = recognize_character(&strokes);
+
+                  assert!(candidates.len() > 0);
+                  assert!(candidates[0].1 >= 0.0 && candidates[0].1 <= 1.0);
+              }
+
+              #[test]
+              fn test_validate_recognition() {
+                  let strokes = vec![/* strokes for 'あ' */];
+                  let (correct, confidence) = validate_recognition(&strokes, 'あ');
+
+                  assert!(confidence >= 0.0 && confidence <= 1.0);
+              }
+          }
+
+      coverage:
+        - "Stroke normalization produces [0, 1] coordinates"
+        - "Recognition returns non-empty candidates"
+        - "Confidence scores are in valid range"
+        - "Validation correctly identifies matches"
+        - "Top N candidates are sorted by confidence"
+
+    dependencies:
+      depends_on:
+        - task_id: 11
+          reason: "Uses HandwritingCanvas strokes"
+
+      depended_upon_by:
+        - task_id: 17
+          reason: "Practice modes use recognition"
+        - task_id: 18
+          reason: "Stroke validation uses recognition"
+
+      external:
+        - name: "hanzi_lookup or alternative"
+          type: "crate"
+          status: "needs implementation"
+
+  - task:
+      id: 17
+      name: "Progressive Practice Modes"
+
+    context:
+      description: |
+        Build multi-stage learning system with progressive difficulty.
+        Starts with passive observation, progresses through guided tracing,
+        and culminates in free recall. Adapts to learner proficiency.
+
+      key_points:
+        - "WatchAnimation: Passive observation mode"
+        - "TraceWithGuide: Ghost character overlay + stroke numbers"
+        - "TraceWithoutGuide: Stroke number hints only"
+        - "FreeDrawing: Full recall, no assistance"
+
+    files:
+      - path: "src/ui/screens/practice_modes.rs"
+        description: "Practice mode implementations"
+      - path: "src/models.rs"
+        description: "PracticeMode enum and state"
+
+    functions:
+      - file: "src/models.rs"
+        items:
+          - type: "enum"
+            name: "PracticeMode"
+            description: "Represents practice difficulty levels"
+
+      - file: "src/ui/screens/practice_modes.rs"
+        items:
+          - type: "struct"
+            name: "WatchAnimationMode"
+            description: "Passive stroke animation viewing"
+
+          - type: "struct"
+            name: "TraceWithGuideMode"
+            description: "Guided tracing with visual overlay"
+
+          - type: "struct"
+            name: "TraceWithoutGuideMode"
+            description: "Tracing with stroke number hints"
+
+          - type: "struct"
+            name: "FreeDrawingMode"
+            description: "Unassisted character drawing"
+
+          - type: "function"
+            name: "should_progress_mode(accuracy: f32, attempts: u32) -> bool"
+            description: "Determines if user should advance to harder mode"
+            preconditions: "accuracy in [0.0, 1.0]"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Practice modes are UI and educational flow logic.
+        User testing validates effectiveness.
+
+    tests:
+      strategy:
+        approach: "integration"
+        rationale:
+          - "Test mode progression logic"
+          - "Verify each mode renders correctly"
+          - "Ensure difficulty increases appropriately"
+
+      implementation:
+        file: "src/ui/screens/practice_modes.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_mode_progression() {
+                  assert!(should_progress_mode(0.9, 5));
+                  assert!(!should_progress_mode(0.5, 5));
+              }
+
+              #[test]
+              fn test_watch_mode() {
+                  let mode = WatchAnimationMode::new('あ');
+                  // Verify mode initializes
+                  assert!(true);
+              }
+
+              #[test]
+              fn test_trace_with_guide() {
+                  let mode = TraceWithGuideMode::new('あ');
+                  // Should have overlay and stroke numbers
+                  assert!(true);
+              }
+
+              #[test]
+              fn test_free_drawing() {
+                  let mode = FreeDrawingMode::new('あ');
+                  // Should have no visual aids
+                  assert!(true);
+              }
+          }
+
+      coverage:
+        - "WatchAnimation displays stroke animation"
+        - "TraceWithGuide shows ghost character overlay"
+        - "TraceWithGuide displays stroke order numbers"
+        - "TraceWithoutGuide shows only stroke numbers"
+        - "FreeDrawing has no visual assistance"
+        - "Mode progression occurs at appropriate accuracy"
+
+    dependencies:
+      depends_on:
+        - task_id: 10
+          reason: "Uses stroke animations"
+        - task_id: 11
+          reason: "Uses handwriting canvas"
+        - task_id: 14
+          reason: "Accessed via practice selection UI"
+
+      depended_upon_by:
+        - task_id: 18
+          reason: "Stroke validation applies to practice modes"
+
+      external: []
+
+  - task:
+      id: 18
+      name: "Stroke Order Validation"
+
+    context:
+      description: |
+        Validate user-drawn strokes against correct stroke order and direction.
+        Provides corrective feedback to teach proper writing technique beyond
+        just character recognition.
+
+      key_points:
+        - "Compare drawn strokes to reference stroke sequence"
+        - "Calculate stroke direction and position accuracy"
+        - "Provide specific corrective feedback"
+        - "Allow mode progression based on stroke accuracy"
+
+    files:
+      - path: "src/validation.rs"
+        description: "Stroke order validation logic"
+
+    functions:
+      - file: "src/validation.rs"
+        items:
+          - type: "function"
+            name: "validate_stroke_order(drawn: &[Vec<Point>], reference: &[Vec<Point>]) -> StrokeValidation"
+            description: "Validates stroke sequence and direction"
+            postconditions: "Returns validation result with per-stroke feedback"
+
+          - type: "struct"
+            name: "StrokeValidation"
+            description: "Validation result with accuracy metrics and feedback"
+
+          - type: "function"
+            name: "calculate_stroke_direction(stroke: &[Point]) -> f32"
+            description: "Calculates primary stroke direction angle"
+            postconditions: "Returns angle in radians [0, 2π)"
+
+          - type: "function"
+            name: "calculate_position_accuracy(drawn: &[Point], reference: &[Point]) -> f32"
+            description: "Measures spatial similarity of strokes"
+            postconditions: "Returns accuracy in [0.0, 1.0]"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Validation is heuristic-based educational feedback.
+        Testing ensures reasonable behavior.
+
+    tests:
+      strategy:
+        approach: "unit tests"
+        rationale:
+          - "Test stroke direction calculation"
+          - "Verify position accuracy metrics"
+          - "Ensure validation provides useful feedback"
+
+      implementation:
+        file: "src/validation.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_calculate_stroke_direction() {
+                  let horizontal = vec![Point::new(0.0, 0.0), Point::new(100.0, 0.0)];
+                  let angle = calculate_stroke_direction(&horizontal);
+                  assert!((angle - 0.0).abs() < 0.1);
+              }
+
+              #[test]
+              fn test_position_accuracy_perfect() {
+                  let stroke = vec![Point::new(0.0, 0.0), Point::new(100.0, 100.0)];
+                  let accuracy = calculate_position_accuracy(&stroke, &stroke);
+                  assert!((accuracy - 1.0).abs() < 0.01);
+              }
+
+              #[test]
+              fn test_stroke_order_correct() {
+                  let drawn = vec![/* correct strokes */];
+                  let reference = vec![/* reference strokes */];
+
+                  let validation = validate_stroke_order(&drawn, &reference);
+                  assert!(validation.is_correct);
+              }
+
+              #[test]
+              fn test_stroke_order_incorrect() {
+                  let drawn = vec![/* reversed strokes */];
+                  let reference = vec![/* reference strokes */];
+
+                  let validation = validate_stroke_order(&drawn, &reference);
+                  assert!(!validation.is_correct);
+                  assert!(!validation.feedback.is_empty());
+              }
+          }
+
+      coverage:
+        - "Direction calculation works for horizontal/vertical strokes"
+        - "Position accuracy is 1.0 for identical strokes"
+        - "Validation detects correct stroke order"
+        - "Validation detects incorrect stroke order"
+        - "Feedback messages are informative"
+        - "Validation handles partial stroke sets"
+
+    dependencies:
+      depends_on:
+        - task_id: 11
+          reason: "Validates canvas strokes"
+        - task_id: 16
+          reason: "Uses recognition for character matching"
+
+      depended_upon_by:
+        - task_id: 17
+          reason: "Practice modes use validation feedback"
+
+      external: []
+
+  - task:
+      id: 19
+      name: "Advanced Statistics & Graphs"
+
+    context:
+      description: |
+        Enhance progress visualization with time-series data and graphical representations.
+        Provides charts, heatmaps, and trend analysis to help users understand their
+        learning progress over time.
+
+      key_points:
+        - "Time-series data structures for daily/weekly stats"
+        - "Progress charts using Canvas rendering"
+        - "Accuracy trends and review heatmap"
+        - "Circular progress indicators for completion"
+
+    files:
+      - path: "src/statistics/advanced.rs"
+        description: "Time-series statistics and aggregation"
+      - path: "src/ui/charts.rs"
+        description: "Chart rendering with Canvas"
+
+    functions:
+      - file: "src/statistics/advanced.rs"
+        items:
+          - type: "struct"
+            name: "TimeSeriesStats"
+            description: "Daily/weekly aggregated statistics"
+
+          - type: "function"
+            name: "get_daily_stats(days: u32) -> Vec<DailyStats>"
+            description: "Returns statistics for last N days"
+            postconditions: "Returns up to N days of stats"
+
+          - type: "function"
+            name: "calculate_accuracy_trend() -> Vec<(Date, f32)>"
+            description: "Calculates accuracy over time"
+            postconditions: "Returns time series of accuracy values"
+
+      - file: "src/ui/charts.rs"
+        items:
+          - type: "function"
+            name: "draw_line_chart(data: &[(Date, f32)]) -> Canvas"
+            description: "Renders line chart on canvas"
+
+          - type: "function"
+            name: "draw_heatmap(data: &[DailyStats]) -> Canvas"
+            description: "Renders review activity heatmap"
+
+          - type: "function"
+            name: "draw_progress_ring(completed: f32) -> Canvas"
+            description: "Renders circular progress indicator"
+            preconditions: "completed in [0.0, 1.0]"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Statistics aggregation and visualization are presentation logic.
+        Testing ensures correct calculations.
+
+    tests:
+      strategy:
+        approach: "unit tests"
+        rationale:
+          - "Test time-series aggregation"
+          - "Verify trend calculations"
+          - "Ensure chart rendering works"
+
+      implementation:
+        file: "src/statistics/advanced.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_get_daily_stats() {
+                  let stats = get_daily_stats(7);
+                  assert!(stats.len() <= 7);
+              }
+
+              #[test]
+              fn test_accuracy_trend() {
+                  let trend = calculate_accuracy_trend();
+                  for (_, accuracy) in trend {
+                      assert!(accuracy >= 0.0 && accuracy <= 1.0);
+                  }
+              }
+
+              #[test]
+              fn test_progress_ring_bounds() {
+                  // Should not panic for valid inputs
+                  draw_progress_ring(0.0);
+                  draw_progress_ring(0.5);
+                  draw_progress_ring(1.0);
+              }
+          }
+
+      coverage:
+        - "Daily stats aggregation is correct"
+        - "Accuracy trend calculation works"
+        - "Line charts render properly"
+        - "Heatmaps display review activity"
+        - "Progress rings show completion percentage"
+        - "Charts handle empty data gracefully"
+
+    dependencies:
+      depends_on:
+        - task_id: 8
+          reason: "Extends basic statistics"
+        - task_id: 14
+          reason: "Charts display in dashboard"
+
+      depended_upon_by: []
+
+      external:
+        - name: "iced::widget::canvas"
+          type: "module"
+          status: "already exists"
+
+  - task:
+      id: 20
+      name: "FSRS Algorithm (Optional)"
+
+    context:
+      description: |
+        Implement Free Spaced Repetition Scheduler (FSRS) as an advanced alternative to SM-2.
+        FSRS uses more sophisticated modeling of memory dynamics with difficulty, stability,
+        and retrievability parameters for more accurate scheduling.
+
+      key_points:
+        - "FSRSCard with difficulty, stability, retrievability parameters"
+        - "Implements FSRS-4.5 scheduling formulas"
+        - "Provides algorithm selection in settings"
+        - "Migration path from SM-2 to FSRS format"
+
+    files:
+      - path: "src/models.rs"
+        description: "FSRSCard structure"
+      - path: "src/scheduler/fsrs.rs"
+        description: "FSRS algorithm implementation"
+
+    functions:
+      - file: "src/models.rs"
+        items:
+          - type: "struct"
+            name: "FSRSCard"
+            description: "Card with FSRS scheduling parameters"
+            invariants: |
+              - difficulty in [1, 10]
+              - stability > 0
+              - retrievability in [0, 1]
+
+      - file: "src/scheduler/fsrs.rs"
+        items:
+          - type: "method"
+            name: "FSRSCard::review(rating: Rating) -> Self"
+            description: "Updates card using FSRS formulas"
+            preconditions: "rating is Again, Hard, Good, or Easy"
+            postconditions: "Parameters updated according to FSRS-4.5"
+
+          - type: "function"
+            name: "migrate_sm2_to_fsrs(sm2_card: &SM2Card) -> FSRSCard"
+            description: "Converts SM-2 card data to FSRS format"
+
+    formal_verification:
+      needed: true
+      level: "Basic"
+      explanation: |
+        FSRS has complex mathematical formulas that must be implemented correctly
+        to ensure optimal scheduling. Property-based testing verifies invariants.
+
+      properties:
+        - name: "Difficulty bounds"
+          formal_statement: "∀ rating: review(rating).difficulty ∈ [1, 10]"
+
+        - name: "Stability positivity"
+          formal_statement: "∀ rating: review(rating).stability > 0"
+
+        - name: "Retrievability bounds"
+          formal_statement: "∀ rating: review(rating).retrievability ∈ [0, 1]"
+
+      strategy:
+        - "Property-based testing with proptest"
+        - "Comparison testing against reference FSRS implementation"
+        - "Long-term simulation to verify convergence"
+
+    tests:
+      strategy:
+        approach: "mixed"
+        rationale:
+          - "Unit tests for formula correctness"
+          - "Property tests for invariants"
+          - "Integration tests for migration"
+
+      implementation:
+        file: "src/scheduler/fsrs.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_fsrs_review() {
+                  let card = FSRSCard::new("あ".to_string());
+                  let reviewed = card.review(Rating::Good);
+
+                  assert!(reviewed.difficulty >= 1.0 && reviewed.difficulty <= 10.0);
+                  assert!(reviewed.stability > 0.0);
+                  assert!(reviewed.retrievability >= 0.0 && reviewed.retrievability <= 1.0);
+              }
+
+              #[test]
+              fn test_sm2_migration() {
+                  let sm2_card = SM2Card::new("あ".to_string());
+                  let fsrs_card = migrate_sm2_to_fsrs(&sm2_card);
+
+                  assert!(fsrs_card.difficulty > 0.0);
+                  assert!(fsrs_card.stability > 0.0);
+              }
+          }
+
+          #[cfg(test)]
+          mod property_tests {
+              use super::*;
+              use proptest::prelude::*;
+
+              proptest! {
+                  #[test]
+                  fn prop_difficulty_bounds(rating in prop::sample::select(vec![Rating::Again, Rating::Hard, Rating::Good, Rating::Easy])) {
+                      let card = FSRSCard::new("test".to_string());
+                      let reviewed = card.review(rating);
+                      prop_assert!(reviewed.difficulty >= 1.0 && reviewed.difficulty <= 10.0);
+                  }
+
+                  #[test]
+                  fn prop_stability_positive(rating in prop::sample::select(vec![Rating::Again, Rating::Hard, Rating::Good, Rating::Easy])) {
+                      let card = FSRSCard::new("test".to_string());
+                      let reviewed = card.review(rating);
+                      prop_assert!(reviewed.stability > 0.0);
+                  }
+              }
+          }
+
+      coverage:
+        - "FSRS formulas implemented correctly"
+        - "All parameters stay within valid bounds"
+        - "Migration from SM-2 preserves learning progress"
+        - "Algorithm selection persists in settings"
+        - "FSRS scheduling produces reasonable intervals"
+
+    dependencies:
+      depends_on:
+        - task_id: 6
+          reason: "Replaces/extends SM-2 algorithm"
+
+      depended_upon_by: []
+
+      external:
+        - name: "proptest"
+          type: "crate"
+          status: "already imported for task 6"
+
+  - task:
+      id: 21
+      name: "Export/Import Functionality"
+
+    context:
+      description: |
+        Add data portability through export/import functionality. Allows users to
+        back up their progress, transfer data between devices, or migrate to other
+        applications via JSON format.
+
+      key_points:
+        - "Export progress to JSON format"
+        - "Import with validation and error handling"
+        - "Backup/restore functionality"
+        - "Cross-device synchronization format"
+
+    files:
+      - path: "src/export.rs"
+        description: "Export/import logic"
+      - path: "src/ui/screens/settings.rs"
+        description: "Settings screen with export/import buttons"
+
+    functions:
+      - file: "src/export.rs"
+        items:
+          - type: "function"
+            name: "export_progress() -> Result<String>"
+            description: "Exports all user data to JSON string"
+            postconditions: "Returns valid JSON representation of all cards and stats"
+
+          - type: "function"
+            name: "import_progress(json: &str) -> Result<ImportSummary>"
+            description: "Imports data from JSON with validation"
+            preconditions: "json is valid JSON string"
+            postconditions: "Data imported and validated, returns summary of changes"
+
+          - type: "function"
+            name: "validate_import_data(data: &ImportData) -> Result<()>"
+            description: "Validates imported data before applying"
+            postconditions: "Returns error if data is invalid or incompatible"
+
+          - type: "function"
+            name: "create_backup() -> Result<PathBuf>"
+            description: "Creates timestamped backup file"
+            postconditions: "Backup file written to platform backup directory"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Export/import is primarily serialization and file I/O.
+        Testing ensures data integrity.
+
+    tests:
+      strategy:
+        approach: "integration"
+        rationale:
+          - "Test export/import round-trip"
+          - "Verify validation catches invalid data"
+          - "Ensure backward compatibility"
+
+      implementation:
+        file: "src/export.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_export_import_roundtrip() {
+                  // Create test data
+                  let card = SM2Card::new("あ".to_string());
+                  save_card_progress(&card).unwrap();
+
+                  // Export
+                  let json = export_progress().unwrap();
+
+                  // Import
+                  let summary = import_progress(&json).unwrap();
+                  assert!(summary.cards_imported > 0);
+
+                  // Verify data preserved
+                  let loaded = load_card_progress('あ').unwrap();
+                  assert!(loaded.is_some());
+              }
+
+              #[test]
+              fn test_validate_rejects_invalid() {
+                  let invalid_json = r#"{"invalid": "data"}"#;
+                  let result = import_progress(invalid_json);
+                  assert!(result.is_err());
+              }
+
+              #[test]
+              fn test_backup_creation() {
+                  let backup_path = create_backup().unwrap();
+                  assert!(backup_path.exists());
+              }
+          }
+
+      coverage:
+        - "Export produces valid JSON"
+        - "Import restores all data correctly"
+        - "Round-trip preserves data integrity"
+        - "Validation rejects malformed data"
+        - "Backup files are created successfully"
+        - "Import handles version mismatches gracefully"
+
+    dependencies:
+      depends_on:
+        - task_id: 7
+          reason: "Exports persisted data"
+
+      depended_upon_by: []
+
+      external:
+        - name: "serde_json"
+          type: "crate"
+          status: "needs implementation"
+
+  - task:
+      id: 22
+      name: "Accessibility Improvements"
+
+    context:
+      description: |
+        Ensure the application meets WCAG 2.1 Level AA accessibility standards.
+        Improves usability for users with visual impairments, motor difficulties,
+        and those using assistive technologies.
+
+      key_points:
+        - "Verify color contrast ratios (4.5:1 minimum for text)"
+        - "Add keyboard navigation support for all features"
+        - "Implement touch-friendly targets (48x48px minimum)"
+        - "Test with screen readers where applicable"
+
+    files:
+      - path: "src/ui/accessibility.rs"
+        description: "Accessibility utilities and helpers"
+      - path: "src/ui/theme.rs"
+        description: "Theme with WCAG-compliant colors"
+
+    functions:
+      - file: "src/ui/accessibility.rs"
+        items:
+          - type: "function"
+            name: "verify_contrast_ratio(fg: Color, bg: Color) -> f32"
+            description: "Calculates WCAG contrast ratio"
+            postconditions: "Returns ratio >= 1.0"
+
+          - type: "function"
+            name: "ensure_minimum_touch_target(size: Size) -> Size"
+            description: "Ensures touch targets meet 48x48px minimum"
+            postconditions: "Returns size with both dimensions >= 48"
+
+      - file: "src/ui/theme.rs"
+        items:
+          - type: "function"
+            name: "get_accessible_theme() -> Theme"
+            description: "Returns theme with WCAG AA compliant colors"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Accessibility is a design and testing concern.
+        Automated and manual testing verify compliance.
+
+    tests:
+      strategy:
+        approach: "unit tests"
+        rationale:
+          - "Test contrast ratio calculations"
+          - "Verify touch target sizes"
+          - "Ensure keyboard navigation paths"
+
+      implementation:
+        file: "src/ui/accessibility.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_contrast_ratio_compliant() {
+                  let fg = Color::from_rgb(0.0, 0.0, 0.0); // Black
+                  let bg = Color::from_rgb(1.0, 1.0, 1.0); // White
+
+                  let ratio = verify_contrast_ratio(fg, bg);
+                  assert!(ratio >= 4.5);
+              }
+
+              #[test]
+              fn test_contrast_ratio_noncompliant() {
+                  let fg = Color::from_rgb(0.5, 0.5, 0.5);
+                  let bg = Color::from_rgb(0.6, 0.6, 0.6);
+
+                  let ratio = verify_contrast_ratio(fg, bg);
+                  assert!(ratio < 4.5);
+              }
+
+              #[test]
+              fn test_minimum_touch_target() {
+                  let small = Size::new(30.0, 30.0);
+                  let enlarged = ensure_minimum_touch_target(small);
+
+                  assert!(enlarged.width >= 48.0);
+                  assert!(enlarged.height >= 48.0);
+              }
+          }
+
+      coverage:
+        - "All text has 4.5:1 contrast ratio minimum"
+        - "Interactive elements are keyboard accessible"
+        - "Touch targets are at least 48x48px"
+        - "Focus indicators are visible"
+        - "Color is not the only means of conveying information"
+
+    dependencies:
+      depends_on:
+        - task_id: 14
+          reason: "Applies to all UI elements"
+
+      depended_upon_by: []
+
+      external: []
+
+  - task:
+      id: 23
+      name: "Sound Effects"
+
+    context:
+      description: |
+        Add audio feedback to enhance the learning experience. Provides auditory
+        reinforcement for correct/incorrect answers and optional stroke drawing sounds.
+        Includes volume controls in settings.
+
+      key_points:
+        - "Integrate audio playback library"
+        - "Success/error sound effects"
+        - "Optional stroke drawing sounds"
+        - "Volume controls in settings"
+
+    files:
+      - path: "src/audio.rs"
+        description: "Audio playback and management"
+      - path: "assets/sounds/success.ogg"
+        description: "Success sound effect"
+      - path: "assets/sounds/error.ogg"
+        description: "Error sound effect"
+
+    functions:
+      - file: "src/audio.rs"
+        items:
+          - type: "function"
+            name: "init_audio_system() -> Result<AudioSystem>"
+            description: "Initializes audio playback system"
+
+          - type: "function"
+            name: "play_sound(sound: Sound, volume: f32)"
+            description: "Plays sound effect at specified volume"
+            preconditions: "volume in [0.0, 1.0]"
+
+          - type: "enum"
+            name: "Sound"
+            description: "Available sound effects"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Audio playback is handled by external library.
+        Testing ensures sounds play correctly.
+
+    tests:
+      strategy:
+        approach: "integration"
+        rationale:
+          - "Test audio system initialization"
+          - "Verify sounds load and play"
+          - "Ensure volume control works"
+
+      implementation:
+        file: "src/audio.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_audio_init() {
+                  let audio = init_audio_system();
+                  assert!(audio.is_ok());
+              }
+
+              #[test]
+              fn test_volume_bounds() {
+                  // Should not panic for valid volumes
+                  play_sound(Sound::Success, 0.0);
+                  play_sound(Sound::Success, 0.5);
+                  play_sound(Sound::Success, 1.0);
+              }
+          }
+
+      coverage:
+        - "Audio system initializes successfully"
+        - "Success sound plays"
+        - "Error sound plays"
+        - "Volume control affects playback"
+        - "Sounds can be muted"
+        - "Audio settings persist across sessions"
+
+    dependencies:
+      depends_on:
+        - task_id: 2
+          reason: "Requires audio library dependency"
+
+      depended_upon_by: []
+
+      external:
+        - name: "rodio or kira"
+          type: "crate"
+          status: "needs implementation"
+
+  - task:
+      id: 24
+      name: "Themes & Customization"
+
+    context:
+      description: |
+        Add visual customization options including light/dark themes, custom color
+        schemes, and font size settings. Enhances user comfort and accessibility.
+
+      key_points:
+        - "Light/dark theme support"
+        - "Custom color scheme selection"
+        - "Adjustable font sizes"
+        - "Preferences screen for settings"
+
+    files:
+      - path: "src/ui/theme.rs"
+        description: "Theme definitions and switching"
+      - path: "src/ui/screens/preferences.rs"
+        description: "Preferences/settings UI"
+
+    functions:
+      - file: "src/ui/theme.rs"
+        items:
+          - type: "enum"
+            name: "ThemeMode"
+            description: "Light, Dark, or System theme modes"
+
+          - type: "struct"
+            name: "ColorScheme"
+            description: "Customizable color palette"
+
+          - type: "function"
+            name: "apply_theme(mode: ThemeMode) -> Theme"
+            description: "Applies selected theme"
+
+          - type: "function"
+            name: "get_font_size(size: FontSizePreference) -> f32"
+            description: "Returns font size for preference level"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Theming is presentation logic.
+        Visual testing ensures correct appearance.
+
+    tests:
+      strategy:
+        approach: "unit tests"
+        rationale:
+          - "Test theme switching"
+          - "Verify color schemes are valid"
+          - "Ensure font size calculations"
+
+      implementation:
+        file: "src/ui/theme.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_theme_switching() {
+                  let light = apply_theme(ThemeMode::Light);
+                  let dark = apply_theme(ThemeMode::Dark);
+
+                  assert_ne!(light.background, dark.background);
+              }
+
+              #[test]
+              fn test_font_size_preferences() {
+                  let small = get_font_size(FontSizePreference::Small);
+                  let large = get_font_size(FontSizePreference::Large);
+
+                  assert!(large > small);
+              }
+          }
+
+      coverage:
+        - "Light theme applies correctly"
+        - "Dark theme applies correctly"
+        - "System theme follows OS preference"
+        - "Custom color schemes save and load"
+        - "Font size preferences persist"
+        - "All UI elements respect theme"
+
+    dependencies:
+      depends_on:
+        - task_id: 14
+          reason: "Themes apply to all UI"
+
+      depended_upon_by: []
+
+      external: []
+
+  - task:
+      id: 25
+      name: "Performance Optimization"
+
+    context:
+      description: |
+        Optimize rendering performance and data access patterns. Improves
+        application responsiveness through caching, batching, and efficient
+        resource sharing.
+
+      key_points:
+        - "Canvas geometry caching for static elements"
+        - "Batch database operations"
+        - "Arc<T> for shared character data"
+        - "Profile and optimize animation frame rates"
+
+    files:
+      - path: "src/performance.rs"
+        description: "Performance optimization utilities"
+      - path: "src/ui/cache.rs"
+        description: "Rendering cache management"
+
+    functions:
+      - file: "src/ui/cache.rs"
+        items:
+          - type: "struct"
+            name: "GeometryCache"
+            description: "Caches pre-computed Canvas geometry"
+
+          - type: "method"
+            name: "GeometryCache::get_or_insert(key: &str, builder: F) -> &Geometry"
+            description: "Returns cached geometry or computes and caches it"
+
+      - file: "src/performance.rs"
+        items:
+          - type: "function"
+            name: "batch_database_writes(operations: Vec<DbOp>) -> Result<()>"
+            description: "Executes multiple database operations in single transaction"
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Performance optimization is an implementation detail.
+        Profiling and benchmarking verify improvements.
+
+    tests:
+      strategy:
+        approach: "integration"
+        rationale:
+          - "Benchmark before/after optimization"
+          - "Verify caching correctness"
+          - "Ensure batching doesn't break atomicity"
+
+      implementation:
+        file: "src/performance.rs"
+        location: "in existing test module"
+        code: |
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn test_geometry_cache() {
+                  let mut cache = GeometryCache::new();
+
+                  let geom1 = cache.get_or_insert("key", || { /* build geometry */ });
+                  let geom2 = cache.get_or_insert("key", || { /* build geometry */ });
+
+                  // Should return same reference
+                  assert!(std::ptr::eq(geom1, geom2));
+              }
+
+              #[test]
+              fn test_batch_writes() {
+                  let ops = vec![/* database operations */];
+                  let result = batch_database_writes(ops);
+                  assert!(result.is_ok());
+              }
+          }
+
+      coverage:
+        - "Geometry caching reduces redundant computation"
+        - "Database batching improves write performance"
+        - "Character data sharing reduces memory"
+        - "Animation frame rate is consistent 60fps"
+        - "No performance regressions in critical paths"
+
+    dependencies:
+      depends_on:
+        - task_id: 2
+          reason: "Optimizes existing code"
+
+      depended_upon_by: []
+
+      external: []
+
+  - task:
+      id: 26
+      name: "Testing Suite"
+
+    context:
+      description: |
+        Create comprehensive test coverage across all major systems. Ensures
+        correctness, prevents regressions, and validates critical algorithms
+        like SM-2 and FSRS.
+
+      key_points:
+        - "Unit tests for SM-2 and FSRS algorithms"
+        - "ReviewQueue priority and state management tests"
+        - "Integration tests for learning sessions"
+        - "Database persistence and migration tests"
+        - "Stroke path parsing and rendering validation"
+
+    files:
+      - path: "tests/algorithm_tests.rs"
+        description: "SM-2 and FSRS algorithm tests"
+      - path: "tests/session_tests.rs"
+        description: "Learning session integration tests"
+      - path: "tests/persistence_tests.rs"
+        description: "Database tests"
+
+    functions: []
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Testing suite itself doesn't require verification.
+        Achieves goal through comprehensive test coverage.
+
+    tests:
+      strategy:
+        approach: "mixed"
+        rationale:
+          - "Unit tests for individual components"
+          - "Integration tests for system interactions"
+          - "Property-based tests for algorithms"
+
+      implementation:
+        file: "tests/comprehensive_suite.rs"
+        location: "create new"
+        code: |
+          // Algorithm tests
+          mod sm2_tests {
+              // See Task 6 tests
+          }
+
+          mod fsrs_tests {
+              // See Task 20 tests
+          }
+
+          // Integration tests
+          mod session_tests {
+              // See Task 9 tests
+          }
+
+          mod persistence_tests {
+              // See Task 7 tests
+          }
+
+          // Stroke rendering tests
+          mod stroke_tests {
+              // See Task 10 tests
+          }
+
+      coverage:
+        - "All algorithms have >90% code coverage"
+        - "Integration tests cover main user flows"
+        - "Edge cases and error paths tested"
+        - "Property-based tests verify invariants"
+        - "Database operations tested with transactions"
+
+    dependencies:
+      depends_on:
+        - task_id: 2-25
+          reason: "Tests all implemented features"
+
+      depended_upon_by: []
+
+      external:
+        - name: "proptest"
+          type: "crate"
+          status: "already imported"
+
+  - task:
+      id: 27
+      name: "Documentation"
+
+    context:
+      description: |
+        Write comprehensive user and developer documentation. Helps users learn
+        the application features and assists developers in understanding and
+        contributing to the codebase.
+
+      key_points:
+        - "User guide with screenshots"
+        - "Architecture documentation"
+        - "API documentation for key modules"
+        - "Contributing guidelines"
+
+    files:
+      - path: "docs/user_guide.md"
+        description: "End-user documentation"
+      - path: "docs/architecture.md"
+        description: "System architecture overview"
+      - path: "CONTRIBUTING.md"
+        description: "Contribution guidelines"
+
+    functions: []
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Documentation doesn't require verification.
+        Review ensures quality and accuracy.
+
+    tests:
+      strategy:
+        approach: "integration"
+        rationale:
+          - "Verify doc examples compile and run"
+          - "Check API documentation completeness"
+
+      implementation:
+        file: "tests/doc_tests.rs"
+        location: "create new"
+        code: |
+          #[test]
+          fn test_readme_examples() {
+              // Verify examples in README compile
+          }
+
+      coverage:
+        - "User guide covers all features"
+        - "Architecture diagrams are up-to-date"
+        - "All public APIs have documentation"
+        - "Contributing guide is clear"
+        - "Code examples work"
+
+    dependencies:
+      depends_on:
+        - task_id: 2-26
+          reason: "Documents all features"
+
+      depended_upon_by: []
+
+      external: []
+
+  - task:
+      id: 28
+      name: "Deployment & Distribution"
+
+    context:
+      description: |
+        Prepare cross-platform releases with optimized builds and distribution
+        packages. Sets up CI/CD for automated builds and releases.
+
+      key_points:
+        - "Optimized release builds (LTO, strip symbols)"
+        - "Linux AppImage packaging"
+        - "macOS application bundle"
+        - "Windows installer (WiX/NSIS)"
+        - "CI/CD pipeline for automated builds"
+
+    files:
+      - path: ".github/workflows/release.yml"
+        description: "GitHub Actions CI/CD pipeline"
+      - path: "packaging/linux/AppImage.yml"
+        description: "AppImage configuration"
+      - path: "packaging/macos/Info.plist"
+        description: "macOS bundle configuration"
+      - path: "packaging/windows/installer.nsi"
+        description: "NSIS installer script"
+
+    functions: []
+
+    formal_verification:
+      needed: false
+      level: "None"
+      explanation: |
+        Deployment configuration doesn't require verification.
+        Testing ensures packages work on target platforms.
+
+    tests:
+      strategy:
+        approach: "integration"
+        rationale:
+          - "Test release builds on each platform"
+          - "Verify installers work"
+          - "Ensure CI/CD pipeline runs"
+
+      implementation:
+        file: "tests/deployment_tests.rs"
+        location: "create new"
+        code: |
+          #[test]
+          fn test_release_build_optimizations() {
+              // Verify LTO and optimizations are enabled
+          }
+
+      coverage:
+        - "Release builds compile successfully"
+        - "Linux AppImage runs on Ubuntu/Debian/Fedora"
+        - "macOS bundle opens without issues"
+        - "Windows installer completes installation"
+        - "CI/CD pipeline builds all platforms"
+        - "Artifacts uploaded to releases"
+
+    dependencies:
+      depends_on:
+        - task_id: 2-27
+          reason: "Deploys complete application"
+
+      depended_upon_by: []
+
+      external:
+        - name: "GitHub Actions"
+          type: "service"
+          status: "needs configuration"
+        - name: "AppImageTool"
+          type: "tool"
+          status: "needs configuration"
+
