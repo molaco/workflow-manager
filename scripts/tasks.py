@@ -8,6 +8,162 @@
 # ]
 # ///
 
+"""
+Multi-Agent Task Planning Orchestrator
+======================================
+
+WORKFLOW ARCHITECTURE:
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            STEP 1: MAIN ORCHESTRATOR                        │
+│                         (Generate tasks_overview.yaml)                      │
+│                                                                             │
+│  Input: IMPL.md + tasks_overview_template.yaml                             │
+│  Output: tasks_overview.yaml (high-level task breakdown)                   │
+│  Description: Analyzes implementation doc and creates strategic task plan  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     STEP 2: BATCH PLANNING & EXECUTION                      │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────┐    │
+│  │  Planning Agent (Optional)                                        │    │
+│  │  - Analyzes task dependencies                                     │    │
+│  │  - Creates optimal execution batches                              │    │
+│  │  - Maximizes parallelization                                      │    │
+│  │  Alternative: Simple fixed-size batching (--batch-size N)         │    │
+│  └───────────────────────────────────────────────────────────────────┘    │
+│                                      │                                      │
+│                                      ▼                                      │
+│  ┌───────────────────────────────────────────────────────────────────┐    │
+│  │                    SUBORCHESTRATORS                               │    │
+│  │              (One per task, runs in batches)                      │    │
+│  │                                                                   │    │
+│  │  For each task, spawns 4 specialized agents in parallel:         │    │
+│  │                                                                   │    │
+│  │    ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │    │
+│  │    │ Files Agent  │  │Formal Agent  │  │Functions Agt │         │    │
+│  │    │              │  │              │  │              │         │    │
+│  │    │ Identifies   │  │ Determines   │  │ Specifies    │         │    │
+│  │    │ all files    │  │ if formal    │  │ functions,   │         │    │
+│  │    │ to create/   │  │ verification │  │ structs,     │         │    │
+│  │    │ modify       │  │ is needed    │  │ traits, etc  │         │    │
+│  │    └──────────────┘  └──────────────┘  └──────────────┘         │    │
+│  │                                                                   │    │
+│  │    ┌──────────────┐                                              │    │
+│  │    │ Tests Agent  │                                              │    │
+│  │    │              │                                              │    │
+│  │    │ Designs test │                                              │    │
+│  │    │ strategy &   │                                              │    │
+│  │    │ implements   │                                              │    │
+│  │    └──────────────┘                                              │    │
+│  │           │                                                       │    │
+│  │           ▼                                                       │    │
+│  │    ┌─────────────────────────────────────────────────┐          │    │
+│  │    │     Integration Agent                           │          │    │
+│  │    │     - Combines all agent outputs                │          │    │
+│  │    │     - Produces complete task specification      │          │    │
+│  │    └─────────────────────────────────────────────────┘          │    │
+│  └───────────────────────────────────────────────────────────────────┘    │
+│                                                                             │
+│  Output: tasks.yaml (detailed specifications for all tasks)                │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      STEP 3: REVIEW & VALIDATION                            │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────┐    │
+│  │          COORDINATOR FUNCTION (step3_review_tasks)                │    │
+│  │          - Parses tasks_overview.yaml and tasks.yaml              │    │
+│  │          - Matches overview tasks with detailed tasks             │    │
+│  │          - Creates batches (configurable size)                    │    │
+│  │          - Spawns suborchestrators sequentially                   │    │
+│  └───────────────────────────────────────────────────────────────────┘    │
+│                                      │                                      │
+│                                      ▼                                      │
+│  ┌───────────────────────────────────────────────────────────────────┐    │
+│  │            REVIEW SUBORCHESTRATORS (one per batch)                │    │
+│  │            Each suborchestrator receives:                         │    │
+│  │              - IMPL.md (implementation requirements)              │    │
+│  │              - tasks_overview.yaml (full content)                 │    │
+│  │              - task_template.yaml (template structure)            │    │
+│  │              - Task ID/name list for its batch                    │    │
+│  │                                                                   │    │
+│  │            For each task in batch:                                │    │
+│  │              1. Extracts task overview from tasks_overview.yaml   │    │
+│  │              2. Invokes @reviewer agent with:                     │    │
+│  │                 - Task overview YAML                              │    │
+│  │                 - Instructions to read detailed spec from         │    │
+│  │                   tasks.yaml (using Read tool)                    │    │
+│  │                 - IMPL.md context                                 │    │
+│  │              3. Coordinates ALL @reviewer agents IN PARALLEL      │    │
+│  │                                                                   │    │
+│  │            Each @reviewer validates:                              │    │
+│  │              - Completeness                                       │    │
+│  │              - Consistency with overview                          │    │
+│  │              - Correctness of approach                            │    │
+│  │              - Test coverage                                      │    │
+│  │              - Template adherence                                 │    │
+│  │                                                                   │    │
+│  │            Returns JSON array of review results                   │    │
+│  └───────────────────────────────────────────────────────────────────┘    │
+│                                      │                                      │
+│                                      ▼                                      │
+│  ┌───────────────────────────────────────────────────────────────────┐    │
+│  │        REPORT GENERATOR (step3_main_orchestrator_report)          │    │
+│  │        - Collects all review results from batches                 │    │
+│  │        - Generates approval/revision summary                      │    │
+│  │        - Saves task_review_report.txt                             │    │
+│  └───────────────────────────────────────────────────────────────────┘    │
+│                                                                             │
+│  Output: task_review_report.txt (validation results)                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+PARALLELIZATION STRATEGY:
+- Step 1: Single agent (sequential)
+- Step 2: Batches run sequentially, tasks within batch run in parallel
+  - Each task spawns a suborchestrator with 4 sub-agents (files, functions, formal, tests)
+  - Sub-agents run in parallel, suborchestrator combines outputs
+- Step 3: Batches run sequentially, reviewers within batch run in parallel
+  - Coordinator function spawns suborchestrators sequentially (one per batch)
+  - Each suborchestrator coordinates @reviewer agents in parallel for its batch
+  - Report generator collects all results
+  - Batch size configurable with --batch-size (default: 5)
+
+AGENT DESCRIPTIONS:
+┌──────────────────────────┬────────────────────────────────────────────────┐
+│ Component                │ Description                                    │
+├──────────────────────────┼────────────────────────────────────────────────┤
+│ STEP 1                   │                                                │
+│   Overview Agent         │ Top-level planner that breaks IMPL.md into    │
+│                          │ strategic tasks (generates tasks_overview.yaml)│
+├──────────────────────────┼────────────────────────────────────────────────┤
+│ STEP 2                   │                                                │
+│   Planning Agent         │ (Optional) Analyzes dependencies & creates    │
+│   (optional)             │ execution batches based on task dependencies  │
+│                          │                                                │
+│   Task Suborchestrator   │ Coordinates 4 sub-agents to expand one task   │
+│   (one per task)         │ from overview to detailed specification       │
+│                          │                                                │
+│   @files sub-agent       │ Identifies files to create/modify with paths  │
+│   @functions sub-agent   │ Specifies functions, structs, traits to impl  │
+│   @formal sub-agent      │ Determines if formal verification is needed   │
+│   @tests sub-agent       │ Designs test strategy and implements tests    │
+├──────────────────────────┼────────────────────────────────────────────────┤
+│ STEP 3                   │                                                │
+│   Coordinator Function   │ Parses files, creates batches, collects results│
+│                          │                                                │
+│   Review Suborchestrator │ Coordinates @reviewer agents for one batch    │
+│   (one per batch)        │ Receives high-level context + task list       │
+│                          │                                                │
+│   @reviewer sub-agent    │ Validates one task's detailed spec against    │
+│   (one per task)         │ its overview and IMPL.md requirements         │
+│                          │                                                │
+│   Report Generator       │ Collects all results and generates final report│
+└──────────────────────────┴────────────────────────────────────────────────┘
+"""
+
 import asyncio
 import argparse
 import json
@@ -20,24 +176,20 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     AssistantMessage,
     TextBlock,
+    ThinkingBlock,
     ResultMessage,
+    AgentDefinition,
+    query,
 )
 
 # Load environment variables
 load_dotenv()
 
 
-def load_templates() -> tuple[str, str]:
-    """Load YAML templates from DOCS/TEMPLATES/"""
-    base_path = Path(__file__).parent.parent / "DOCS" / "TEMPLATES"
-
-    with open(base_path / "tasks_overview_template.yaml", "r") as f:
-        overview_template = f.read()
-
-    with open(base_path / "task_template.yaml", "r") as f:
-        task_template = f.read()
-
-    return overview_template, task_template
+def load_template(template_path: Path) -> str:
+    """Load a YAML template from the given path."""
+    with open(template_path, "r") as f:
+        return f.read()
 
 
 def load_impl_md() -> str:
@@ -95,6 +247,19 @@ async def extract_text_response(client: ClaudeSDKClient) -> str:
     response_parts = []
 
     async for msg in client.receive_response():
+        if isinstance(msg, AssistantMessage):
+            for block in msg.content:
+                if isinstance(block, TextBlock):
+                    response_parts.append(block.text)
+
+    return "\n".join(response_parts)
+
+
+async def extract_text_from_query(prompt: str, options: ClaudeAgentOptions) -> str:
+    """Extract text from query() response."""
+    response_parts = []
+
+    async for msg in query(prompt=prompt, options=options):
         if isinstance(msg, AssistantMessage):
             for block in msg.content:
                 if isinstance(block, TextBlock):
@@ -167,55 +332,14 @@ Make sure to just give your response. You must not create or write any files jus
 # =============================================================================
 
 
-async def spawn_specialized_agent(
-    task_overview_yaml: str,
-    task_template: str,
-    agent_type: str,
-    agent_prompt: str,
-    task_id: Any,
-) -> str:
-    """
-    Spawn a specialized agent (files, functions, formal, tests).
-    task_overview_yaml: Pre-serialized YAML string for efficiency.
-    """
-    print(f"\n[Task {task_id}] Spawning {agent_type} agent...")
-
-    prompt = f"""You are a {agent_type} specialist working on task expansion.
-
-Task Overview:
-```yaml
-{task_overview_yaml}
-```
-
-Task Template Section to Fill:
-```yaml
-{task_template}
-```
-
-{agent_prompt}
-
-Output only the YAML section you're responsible for, no markdown or extra text."""
-
-    options = ClaudeAgentOptions(
-        system_prompt=f"You are a {agent_type} specification expert.",
-        allowed_tools=["Read", "Grep", "Glob"],
-        permission_mode="bypassPermissions",
-    )
-
-    async with ClaudeSDKClient(options=options) as client:
-        await client.query(prompt)
-        response = await extract_text_response(client)
-
-    return response
-
-
 async def suborchestrator_expand_task(
     task_overview: Dict[str, Any],
     task_template: str,
     debug: bool = False,
 ) -> str:
     """
-    Suborchestrator spawns 4 specialized agents and combines their outputs.
+    Suborchestrator uses Claude with defined sub-agents to expand task.
+    Claude intelligently delegates to specialized agents as needed.
     """
     task_id = task_overview.get("task", {}).get("id", "?")
     task_name = task_overview.get("task", {}).get("name", "Unknown")
@@ -223,21 +347,41 @@ async def suborchestrator_expand_task(
     print(f"\n[Task {task_id}] Suborchestrator: {task_name}")
 
     # Pre-serialize task_overview once for efficiency
-    task_overview_yaml = yaml.dump(task_overview, default_flow_style=False, sort_keys=False)
+    task_overview_yaml = yaml.dump(
+        task_overview, default_flow_style=False, sort_keys=False
+    )
 
-    # Define specialized agent prompts
-    agent_specs = {
-        "files": """Identify all files that will be created or modified for this task.
+    # Define specialized sub-agents
+    agents = {
+        "files": AgentDefinition(
+            description="Specialist that identifies all files to be created or modified",
+            prompt="""You are a files identification specialist.
+
+Identify all files that will be created or modified for the task.
 For each file, provide:
 - path: Full path to the file
 - description: Brief description of the file's role
 
+IMPORTANT: Use literal block syntax (|) for multi-line descriptions!
+
 Output format:
 files:
   - path: "path/to/file.rs"
-    description: "Description here"
-""",
-        "functions": """Identify all functions, structs, enums, traits, and other items to be implemented.
+    description: "Brief single-line description"
+  - path: "path/to/complex_file.rs"
+    description: |
+      Multi-line description
+      with more details.
+
+Output valid YAML only, no markdown.""",
+            tools=["Read", "Grep", "Glob"],
+            model="sonnet",
+        ),
+        "functions": AgentDefinition(
+            description="Specialist that specifies functions, structs, traits, and other code items",
+            prompt="""You are a functions specification specialist.
+
+Identify all functions, structs, enums, traits, and other items to be implemented.
 For each item, provide:
 - type: enum_variant|struct|trait_impl|method|constant|function|module_declaration
 - name: Full qualified name or signature
@@ -248,15 +392,32 @@ For each item, provide:
 
 Group items by file.
 
+IMPORTANT: Use literal block syntax (|) for multi-line strings!
+
 Output format:
 functions:
   - file: "path/to/file.rs"
     items:
       - type: "function"
         name: "function_name"
-        description: "Description"
-""",
-        "formal": """Determine if formal verification is needed for this task.
+        description: |
+          Brief description here.
+          Can span multiple lines.
+        preconditions: |
+          - Condition 1
+          - Condition 2
+        postconditions: |
+          - Outcome 1
+
+Output valid YAML only, no markdown.""",
+            tools=["Read", "Grep", "Glob"],
+            model="sonnet",
+        ),
+        "formal": AgentDefinition(
+            description="Specialist that determines formal verification requirements",
+            prompt="""You are a formal verification specialist.
+
+Determine if formal verification is needed for the task.
 Provide:
 - needed: true or false
 - level: None|Basic|Critical
@@ -270,12 +431,22 @@ formal_verification:
   level: "None"
   explanation: |
     Explanation here
-""",
-        "tests": """Design comprehensive tests for this task.
+
+Output valid YAML only, no markdown.""",
+            tools=["Read"],
+            model="sonnet",
+        ),
+        "tests": AgentDefinition(
+            description="Specialist that designs test strategy and implements test code",
+            prompt="""You are a testing specialist.
+
+Design comprehensive tests for the task.
 Provide:
 - strategy: approach and rationale
 - implementation: Complete test code in Rust
 - coverage: List of behaviors tested
+
+CRITICAL: ALL code blocks MUST use literal block syntax (|) - this is mandatory!
 
 Output format:
 tests:
@@ -293,88 +464,235 @@ tests:
       }
   coverage:
     - "Behavior 1"
-""",
+
+Output valid YAML only, no markdown.""",
+            tools=["Read", "Grep"],
+            model="sonnet",
+        ),
     }
 
-    # Spawn agents in parallel (they work independently)
-    agent_coros = [
-        spawn_specialized_agent(task_overview_yaml, task_template, agent_type, agent_prompt, task_id)
-        for agent_type, agent_prompt in agent_specs.items()
-    ]
-    agent_outputs_list = await asyncio.gather(*agent_coros)
+    # System prompt for suborchestrator (main instructions)
+    system_prompt = f"""Your task is to expand Task {task_id} ("{task_name}") from a high-level overview into a complete, detailed specification.
 
-    # Map outputs back to agent types
-    agent_outputs = dict(zip(agent_specs.keys(), agent_outputs_list))
+## OBJECTIVE
+Transform the task overview below into a complete task specification that matches the task_template structure by delegating to specialized agents.
 
-    # Combine outputs into complete task
-    print(f"\n[Task {task_id}] Combining agent outputs into complete task...")
+IMPORTANT: You are in the PLANNING phase. DO NOT create, write, or modify any files. Your sole purpose is to OUTPUT a YAML specification that describes what should be implemented.
 
-    combined_prompt = f"""Combine the following agent outputs into a complete task specification.
-
-Task Overview:
+## INPUT: TASK OVERVIEW (High-level)
+This is the current state of Task {task_id} - a strategic description of WHAT needs to be done and WHY:
 ```yaml
 {task_overview_yaml}
 ```
 
-Files Agent Output:
-```yaml
-{agent_outputs['files']}
-```
-
-Functions Agent Output:
-```yaml
-{agent_outputs['functions']}
-```
-
-Formal Verification Agent Output:
-```yaml
-{agent_outputs['formal']}
-```
-
-Tests Agent Output:
-```yaml
-{agent_outputs['tests']}
-```
-
-Task Template Structure:
+## OUTPUT TARGET: TASK TEMPLATE (Detailed structure)
+Your goal is to produce a complete YAML document following this template structure:
 ```yaml
 {task_template}
 ```
 
-Combine all outputs into a single, complete task YAML following the task_template structure. Include:
-- task id and name from overview
-- context section (expand from overview description)
-- files section (from files agent)
-- functions section (from functions agent)
-- formal_verification section (from formal agent)
-- tests section (from tests agent)
-- dependencies section (from overview)
+## YOUR SPECIALIZED AGENTS
+You have 4 sub-agents available to help you fill out different sections of the task_template:
 
-Output valid YAML only, no markdown."""
+1. **@files agent** → Fills the `files:` section
+   - Identifies all files to create/modify
+   - Provides paths and descriptions
+
+2. **@functions agent** → Fills the `functions:` section
+   - Specifies all code items to implement (functions, structs, traits, etc.)
+   - Groups by file with detailed specifications
+
+3. **@formal agent** → Fills the `formal_verification:` section
+   - Determines if formal verification is needed
+   - Specifies verification strategy if applicable
+
+4. **@tests agent** → Fills the `tests:` section
+   - Designs test strategy and rationale
+   - Provides complete test implementation code
+
+## WORKFLOW
+1. Delegate to @files, @functions, @formal, and @tests agents (you can call them in parallel or sequentially)
+2. Review each agent's output for completeness
+3. Ask follow-up questions to any agent if their output is unclear or incomplete
+4. Combine all agent outputs into the final task specification
+5. Ensure the output follows the task_template structure exactly
+
+## QUALITY STANDARDS
+- All file paths must be complete and valid
+- Function specifications must include clear descriptions
+- Test coverage must be comprehensive
+- Dependencies must be clearly identified
+- YAML output must be valid and follow the template structure exactly
+
+## YAML FORMATTING REQUIREMENTS (CRITICAL!)
+When combining sub-agent outputs into the final YAML, you MUST follow these rules:
+
+1. **All code blocks MUST use literal block syntax with pipe (|)**:
+   ✓ CORRECT:
+   code: |
+     fn example() {{
+       // code here
+     }}
+
+   ✗ WRONG (breaks YAML parsing):
+   code: fn example() {{ ... }}
+   code: "fn example() {{ ... }}"
+
+2. **Multi-line strings MUST use literal block syntax (| or |-)**:
+   ✓ CORRECT:
+   description: |
+     This is a multi-line
+     description with details.
+
+   ✗ WRONG:
+   description: This is a multi-line\ndescription
+
+3. **Preserve exact literal block format from sub-agent responses**:
+   - When @tests agent outputs `code: |`, keep the `|`
+   - When @functions agent outputs multi-line descriptions with `|`, keep the `|`
+   - NEVER convert literal blocks to inline strings
+
+4. **Special characters require literal blocks**:
+   - Code containing: {{ }} : " ' # [ ]
+   - SVG paths: "M 0 0 L 1 1"
+   - Test code with #[test] attributes
+   - Any Rust code, especially with macros
+
+5. **Example of CORRECT final output**:
+   tests:
+     implementation:
+       code: |
+         #[cfg(test)]
+         mod tests {{
+           #[test]
+           fn test_something() {{
+             assert_eq!(2 + 2, 4);
+           }}
+         }}
+
+## IMPORTANT REQUIREMENTS
+- Preserve task id ({task_id}) and name ("{task_name}") from the overview
+- Expand the context section based on the overview's description
+- Include the dependencies section from the overview
+- All sections must be complete and valid YAML
+- Output ONLY the final YAML, no markdown code blocks or commentary
+- DO NOT create, write, or modify any files - this is a planning phase only
+- Your job is to OUTPUT the specification, not to implement it"""
+
+    # Short query prompt
+    query_prompt = f"""Expand Task {task_id} ("{task_name}") by coordinating with your specialized agents.
+
+IMPORTANT: Run all agents in parallel for maximum efficiency:
+- Invoke @files, @functions, @formal, and @tests agents simultaneously
+- Wait for all agents to complete
+- Then combine their outputs into the complete task specification in YAML format."""
 
     options = ClaudeAgentOptions(
-        system_prompt="You are a task integration specialist. Combine agent outputs into valid YAML.",
-        allowed_tools=["Read"],
+        allowed_tools=["Read", "Grep", "Glob"],
+        system_prompt=system_prompt,
+        agents=agents,
         permission_mode="bypassPermissions",
+        include_partial_messages=True,  # Enable streaming of partial messages for better visibility
     )
 
-    async with ClaudeSDKClient(options=options) as client:
-        await client.query(combined_prompt)
-        combined_output = await extract_text_response(client)
+    # Execute suborchestrator with sub-agents
+    response_parts = []
+    async for msg in query(prompt=query_prompt, options=options):
+        if isinstance(msg, AssistantMessage):
+            for block in msg.content:
+                if isinstance(block, TextBlock):
+                    response_parts.append(block.text)
+                    # Print streaming output in debug mode
+                    if debug:
+                        print(block.text)
+                    # Print progress indicator for agent delegation (always shown)
+                    # Detect agent invocations by looking for @agent_name syntax
+                    text_lower = block.text.lower()
+                    if "@files" in block.text:  # Use original text to preserve @ symbol
+                        print(f"[Task {task_id}] → Delegating to @files agent...")
+                    elif "@functions" in block.text:
+                        print(f"[Task {task_id}] → Delegating to @functions agent...")
+                    elif "@formal" in block.text:
+                        print(f"[Task {task_id}] → Delegating to @formal agent...")
+                    elif "@tests" in block.text:
+                        print(f"[Task {task_id}] → Delegating to @tests agent...")
+                elif isinstance(block, ThinkingBlock):
+                    # Print thinking blocks in debug mode
+                    if debug:
+                        print(f"\n[Task {task_id}] 💭 Thinking:")
+                        print(block.thinking)
+                        print()
 
+    combined_output = "\n".join(response_parts)
     combined_output = clean_yaml_response(combined_output)
 
     print(f"\n[Task {task_id}] Expansion complete")
 
-    # Print the task YAML only in debug mode
+    # Print the final suborchestrator response only in debug mode
     if debug:
         print(f"\n{'='*80}")
-        print(f"TASK {task_id}: {task_name}")
-        print(f"{'='*80}\n")
+        print(f"[Task {task_id}] FINAL SPECIFICATION: {task_name}")
+        print(f"{'='*80}")
         print(combined_output)
-        print(f"\n{'='*80}\n")
+        print(f"{'='*80}\n")
 
     return combined_output
+
+
+def generate_execution_plan_simple(
+    tasks: List[Dict[str, Any]],
+    batch_size: int = 5,
+) -> str:
+    """
+    Generate a simple execution plan by chunking tasks into fixed-size batches.
+    Ignores dependencies - just splits tasks into batches of specified size.
+
+    Args:
+        tasks: List of task documents
+        batch_size: Maximum number of tasks per batch (default: 5)
+
+    Returns:
+        execution_plan.yaml as a string
+    """
+    print("\n" + "=" * 80)
+    print(f"BATCH PLANNING: Simple batching with size={batch_size}")
+    print("=" * 80 + "\n")
+
+    # Create batches
+    batches = []
+    for i in range(0, len(tasks), batch_size):
+        batch_tasks = tasks[i : i + batch_size]
+
+        batch_def = {
+            "batch_id": len(batches) + 1,
+            "description": f"Batch {len(batches) + 1} - Tasks {i + 1} to {min(i + batch_size, len(tasks))}",
+            "strategy": "sequential",
+            "tasks": [
+                {
+                    "task_id": task.get("task", {}).get("id"),
+                    "task_name": task.get("task", {}).get("name", "Unknown"),
+                    "reason": f"Part of batch {len(batches) + 1}",
+                }
+                for task in batch_tasks
+            ],
+            "parallelization_rationale": f"Fixed batch size of {batch_size} tasks running in parallel",
+        }
+        batches.append(batch_def)
+
+    plan = {
+        "execution_plan": {
+            "total_tasks": len(tasks),
+            "total_batches": len(batches),
+            "batches": batches,
+            "dependencies_summary": {
+                "critical_path": [],
+                "parallelization_potential": "high" if len(batches) > 1 else "low",
+                "parallelization_explanation": f"Tasks split into {len(batches)} fixed-size batches of up to {batch_size} tasks each",
+            },
+        }
+    }
+
+    return yaml.dump(plan, default_flow_style=False, sort_keys=False)
 
 
 async def generate_execution_plan(
@@ -508,7 +826,9 @@ def parse_execution_plan(
                 if task_id in task_by_id:
                     batch_tasks.append(task_by_id[task_id])
                 else:
-                    print(f"      ⚠ Warning: Task {task_id} not found in tasks_overview")
+                    print(
+                        f"      ⚠ Warning: Task {task_id} not found in tasks_overview"
+                    )
 
             if batch_tasks:
                 batches.append(batch_tasks)
@@ -591,6 +911,8 @@ async def step2_expand_all_tasks(
     project_root: Path,
     stream_to_file: bool = False,
     debug: bool = False,
+    simple_batching: bool = False,
+    batch_size: int = 5,
 ) -> str:
     """
     For each task in overview, spawn a suborchestrator to expand it.
@@ -600,6 +922,8 @@ async def step2_expand_all_tasks(
         stream_to_file: If True, write tasks to file immediately to reduce memory usage.
                        Useful for large projects with many tasks.
         debug: If True, print detailed debug information including batches and task YAML.
+        simple_batching: If True, use simple fixed-size batching instead of AI dependency analysis.
+        batch_size: Size of batches when using simple_batching (default: 5).
     """
     print("\n" + "=" * 80)
     print("STEP 2: Suborchestrators - Expand Tasks")
@@ -613,16 +937,19 @@ async def step2_expand_all_tasks(
 
     print(f"Found {len(tasks)} tasks to expand\n")
 
-    # Generate execution plan using AI agent
-    execution_plan_yaml = await generate_execution_plan(tasks_overview_yaml)
+    # Generate execution plan - either simple or AI-based
+    if simple_batching:
+        execution_plan_yaml = generate_execution_plan_simple(tasks, batch_size)
+    else:
+        execution_plan_yaml = await generate_execution_plan(tasks_overview_yaml)
 
     # Print execution plan only in debug mode
     if debug:
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("EXECUTION PLAN")
-        print("="*80 + "\n")
+        print("=" * 80 + "\n")
         print(execution_plan_yaml)
-        print("\n" + "="*80 + "\n")
+        print("\n" + "=" * 80 + "\n")
 
     # Parse execution plan into batches
     batches = parse_execution_plan(execution_plan_yaml, tasks, debug)
@@ -650,11 +977,13 @@ async def step2_expand_all_tasks(
 
     try:
         for batch_num, batch in enumerate(batches, 1):
-            print(f"→ Executing Batch {batch_num}/{len(batches)}")
+            print(f"\n→ Executing Batch {batch_num}/{len(batches)}")
 
             if len(batch) == 1:
                 # Single task - run directly (YAML printed inside suborchestrator)
-                expanded = await suborchestrator_expand_task(batch[0], task_template, debug)
+                expanded = await suborchestrator_expand_task(
+                    batch[0], task_template, debug
+                )
                 if stream_to_file:
                     if batch_num > 1:
                         file_handle.write("\n---\n")
@@ -664,15 +993,15 @@ async def step2_expand_all_tasks(
                     all_expanded.append(expanded)
             else:
                 # Multiple tasks - run in parallel (YAML printed inside each suborchestrator as they complete)
-                print(f"  Running {len(batch)} tasks in parallel...")
+                print(f"  Running {len(batch)} tasks in parallel...\n")
                 tasks_coros = [
                     suborchestrator_expand_task(task_doc, task_template, debug)
                     for task_doc in batch
                 ]
                 expanded_batch = await asyncio.gather(*tasks_coros)
                 if stream_to_file:
-                    for expanded in expanded_batch:
-                        if batch_num > 1 or expanded_batch.index(expanded) > 0:
+                    for i, expanded in enumerate(expanded_batch):
+                        if batch_num > 1 or i > 0:
                             file_handle.write("\n---\n")
                         file_handle.write(expanded)
                     file_handle.flush()
@@ -699,22 +1028,50 @@ async def step2_expand_all_tasks(
 # =============================================================================
 
 
-async def spawn_reviewer_agent(
-    overview_yaml: str,
-    detailed_yaml: str,
+async def review_suborchestrator(
+    batch: List[Dict[str, Any]],
     impl_md: str,
-    task_id: Any,
-) -> Dict[str, Any]:
+    tasks_overview_yaml: str,
+    task_template: str,
+    batch_num: int,
+    debug: bool = False,
+) -> List[Dict[str, Any]]:
     """
-    Spawn a reviewer agent to validate a task group.
-    Pre-serialized YAML strings passed for efficiency.
-    Returns: {"success": bool, "issues": list, "summary": str}
+    Suborchestrator agent that coordinates @reviewer sub-agents for a batch of tasks.
+
+    This is an AI agent (not just a function) that receives high-level context about
+    the review workflow and delegates detailed validation to @reviewer sub-agents.
+
+    Args:
+        batch: List of task groups (each with 'overview' and 'detailed') - used for task IDs only
+        impl_md: Implementation document content (full context)
+        tasks_overview_yaml: Full tasks_overview.yaml content (full context)
+        task_template: task_template.yaml structure (full context)
+        batch_num: Batch number for logging
+        debug: Enable debug output
+
+    Returns:
+        List of review results as dicts (JSON array format)
+
+    Flow:
+        1. Receives high-level Step 3 workflow context
+        2. For each task in batch, invokes @reviewer with task-specific details
+        3. @reviewer agents run IN PARALLEL
+        4. Collects and synthesizes all results into JSON array
     """
-    print(f"  → Reviewing task {task_id}...")
+    print(f"[Batch {batch_num}] Suborchestrator starting...")
 
-    system_prompt = """You are an implementation plan reviewer.
+    # Define the reviewer agent
+    reviewer_agent = AgentDefinition(
+        description="Specialist that validates individual task specifications against requirements",
+        prompt="""You are an implementation plan reviewer.
 
-Your job is to validate that the detailed task specification matches the overview and aligns with the IMPL.md requirements.
+Your job is to validate that a detailed task specification (from tasks.yaml) matches its overview (from tasks_overview.yaml) and aligns with the IMPL.md requirements.
+
+You will receive:
+1. Implementation requirements (IMPL.md)
+2. Task overview YAML (high-level strategic description)
+3. Detailed task specification YAML (complete implementation spec)
 
 Check for:
 1. Completeness: All key components from overview are specified in detail
@@ -722,80 +1079,217 @@ Check for:
 3. Correctness: Implementation approach makes sense for the requirements
 4. Testability: Tests adequately cover the functionality
 5. Dependencies: External dependencies are properly identified
+6. Template adherence: Detailed spec follows the task_template structure
 
-Report any issues found. If everything looks good, confirm that."""
-
-    prompt = f"""Review this task implementation plan.
-
-# Implementation Requirements (IMPL.md):
-```
-{impl_md}
-```
-
-# Task Overview:
-```yaml
-{overview_yaml}
-```
-
-# Detailed Task Specification:
-```yaml
-{detailed_yaml}
-```
-
-Review the detailed specification against the overview and requirements. Report:
-1. Is the detailed spec complete?
-2. Does it match the overview's intent?
-3. Are there any issues or concerns?
-4. Overall assessment: APPROVED or NEEDS_REVISION
+Report any issues found. If everything looks good, confirm that.
 
 Format your response as:
 ASSESSMENT: [APPROVED|NEEDS_REVISION]
 ISSUES: [List any issues, or "None"]
-SUMMARY: [Brief summary]"""
-
-    options = ClaudeAgentOptions(
-        system_prompt=system_prompt,
-        allowed_tools=["Read"],
-        permission_mode="bypassPermissions",
+SUMMARY: [Brief summary]""",
+        tools=["Read"],
+        model="sonnet",
     )
 
-    async with ClaudeSDKClient(options=options) as client:
-        await client.query(prompt)
-        response = await extract_text_response(client)
+    # Build task list for suborchestrator
+    task_list = []
+    for group in batch:
+        task_id = group["overview"].get("task", {}).get("id")
+        task_name = group["overview"].get("task", {}).get("name", "Unknown")
+        task_list.append(
+            {
+                "task_id": task_id,
+                "task_name": task_name,
+            }
+        )
 
-    # Parse reviewer response
-    approved = "APPROVED" in response and "NEEDS_REVISION" not in response
+    # System prompt for suborchestrator
+    system_prompt = f"""You are a review suborchestrator coordinating Step 3: Review & Validation.
 
-    # Extract issues (simple parsing)
-    issues = []
-    if "ISSUES:" in response:
-        issues_text = response.split("ISSUES:")[1].split("SUMMARY:")[0].strip()
-        if issues_text and issues_text.lower() != "none":
-            issues = [issues_text]
+## YOUR ROLE
+Coordinate the @reviewer agent to validate all {len(task_list)} tasks in your batch.
 
-    # Extract summary
-    summary = response
-    if "SUMMARY:" in response:
-        summary = response.split("SUMMARY:")[1].strip()
+## STEP 3 WORKFLOW (Review & Validation)
+This is the final validation step in the multi-agent task planning workflow:
+1. Each task has both an overview (tasks_overview.yaml) and detailed spec (tasks.yaml)
+2. Your job is to validate that detailed specs match their overviews and align with IMPL.md
+3. You coordinate @reviewer agents in parallel for efficiency
+4. You collect and synthesize all review results into a JSON report
 
-    return {
-        "task_id": task_id,
-        "success": approved,
-        "issues": issues,
-        "summary": summary,
-    }
+## AVAILABLE CONTEXT
+You have access to:
+- Implementation requirements (IMPL.md)
+- Task overview structure (tasks_overview.yaml)
+- Task template structure (task_template.yaml)
+- Individual task details (provided when you invoke @reviewer)
+
+## YOUR AGENT
+**@reviewer** - Validates individual task specifications
+- Input: Task overview + detailed spec + IMPL.md context
+- Output: ASSESSMENT, ISSUES, SUMMARY
+
+## WORKFLOW
+1. For each task in your batch, invoke @reviewer agent with:
+   - The task's overview YAML (from tasks_overview.yaml)
+   - The task's detailed specification YAML (from tasks.yaml)
+   - Reference to IMPL.md for requirements context
+2. Run ALL @reviewer invocations in parallel for efficiency
+3. Parse each reviewer's response to extract ASSESSMENT, ISSUES, and SUMMARY
+4. Combine all results into a JSON array
+
+## OUTPUT FORMAT
+Output ONLY a valid JSON array with this exact structure:
+[
+  {{
+    "task_id": <task_id_number>,
+    "success": <true|false>,
+    "issues": [<list of issue strings, or empty array>],
+    "summary": "<brief summary string>"
+  }},
+  ...
+]
+
+IMPORTANT:
+- Convert ASSESSMENT to success boolean (APPROVED=true, NEEDS_REVISION=false)
+- Output ONLY the JSON array, no markdown code blocks, no extra commentary
+"""
+
+    # Build query prompt - suborchestrator gets high-level context, not all task details
+    task_summary = "\n".join(
+        [f"  - Task {t['task_id']}: {t['task_name']}" for t in task_list]
+    )
+
+    query_prompt = f"""Coordinate review of all {len(task_list)} tasks in your batch.
+
+## CONTEXT FOR STEP 3 WORKFLOW
+
+### Implementation Requirements (IMPL.md):
+```
+{impl_md}
+```
+
+### Tasks Overview Structure (tasks_overview.yaml):
+```yaml
+{tasks_overview_yaml}
+```
+
+### Expected Task Template Structure (task_template.yaml):
+```yaml
+{task_template}
+```
+
+## YOUR BATCH
+Review these tasks:
+{task_summary}
+
+## INSTRUCTIONS
+For EACH task above:
+1. Extract the task's overview from tasks_overview.yaml (you have it above)
+2. Extract the task's detailed spec from tasks.yaml (use Read tool if needed)
+3. Invoke @reviewer with both the overview and detailed spec
+4. Parse the reviewer's response
+
+Run ALL @reviewer agents in PARALLEL, then combine results into JSON array.
+
+IMPORTANT: Each @reviewer needs the specific task's overview and detailed YAML - delegate the task details to them, don't try to process everything yourself."""
+
+    options = ClaudeAgentOptions(
+        allowed_tools=["Read"],
+        system_prompt=system_prompt,
+        agents={"reviewer": reviewer_agent},
+        permission_mode="bypassPermissions",
+        include_partial_messages=True,
+    )
+
+    # Execute suborchestrator
+    response_parts = []
+    async for msg in query(prompt=query_prompt, options=options):
+        if isinstance(msg, AssistantMessage):
+            for block in msg.content:
+                if isinstance(block, TextBlock):
+                    response_parts.append(block.text)
+                    if debug:
+                        print(block.text)
+                    # Show delegation progress
+                    if "@reviewer" in block.text:
+                        print(f"[Batch {batch_num}] → Delegating to @reviewer agent...")
+
+    combined_output = "\n".join(response_parts)
+
+    if debug:
+        print(f"\n[Batch {batch_num}] Raw suborchestrator output:")
+        print(combined_output)
+        print()
+
+    # Parse JSON response
+    try:
+        # Clean potential markdown code blocks
+        if "```json" in combined_output:
+            json_str = combined_output.split("```json")[1].split("```")[0].strip()
+        elif "```" in combined_output:
+            json_str = combined_output.split("```")[1].split("```")[0].strip()
+        else:
+            json_str = combined_output.strip()
+
+        results = json.loads(json_str)
+
+        print(f"[Batch {batch_num}] ✓ Parsed {len(results)} review results")
+
+        return results
+
+    except json.JSONDecodeError as e:
+        print(f"⚠ Warning: Failed to parse JSON from suborchestrator: {e}")
+        print(f"Attempted to parse: {json_str[:200]}...\n")
+
+        # Fallback: return failed results for this batch
+        return [
+            {
+                "task_id": t["task_id"],
+                "success": False,
+                "issues": ["Failed to parse suborchestrator response"],
+                "summary": "Review failed due to JSON parsing error",
+            }
+            for t in task_list
+        ]
 
 
 async def step3_review_tasks(
     tasks_overview_yaml: str,
     tasks_yaml: str,
     impl_md: str,
+    task_template: str,
+    batch_size: int = 5,
+    debug: bool = False,
 ) -> List[Dict[str, Any]]:
     """
-    Parse both YAMLs, group corresponding tasks, and spawn reviewer agents.
+    Coordinator function (not an AI agent) that orchestrates the review process.
+
+    This function handles file parsing, batch creation, and sequential execution
+    of review suborchestrators. It is not an AI agent itself - it's a standard
+    Python function that spawns AI agents (suborchestrators).
+
+    Args:
+        tasks_overview_yaml: Full tasks_overview.yaml content
+        tasks_yaml: Full tasks.yaml content
+        impl_md: Implementation document content
+        task_template: task_template.yaml structure for validation
+        batch_size: Number of tasks to review per batch (default: 5)
+        debug: Enable debug output
+
+    Returns:
+        List of all review results from all batches
+
+    Flow:
+        1. Parse and match overview tasks with detailed tasks
+        2. Create batches of N tasks
+        3. For each batch sequentially:
+           - Spawn review_suborchestrator (AI agent)
+           - Suborchestrator coordinates @reviewer agents in parallel
+           - Collect batch results
+        4. Return all results combined
     """
     print("\n" + "=" * 80)
-    print("STEP 3: Reviewer Agents - Validate Tasks")
+    print("STEP 3: Batched Review with Suborchestrators")
     print("=" * 80 + "\n")
 
     overview_tasks = parse_tasks_overview(tasks_overview_yaml)
@@ -805,17 +1299,18 @@ async def step3_review_tasks(
         f"Matching {len(overview_tasks)} overview tasks with {len(detailed_tasks)} detailed tasks\n"
     )
 
-    # Group tasks by ID
+    # Build lookup dict for O(1) access
+    detailed_map = {
+        det.get("task", {}).get("id"): det
+        for det in detailed_tasks
+        if det.get("task", {}).get("id")
+    }
+
+    # Group tasks by ID (pair overview with detailed)
     task_groups = []
     for overview in overview_tasks:
         overview_id = overview.get("task", {}).get("id")
-
-        # Find matching detailed task
-        detailed = None
-        for det in detailed_tasks:
-            if det.get("task", {}).get("id") == overview_id:
-                detailed = det
-                break
+        detailed = detailed_map.get(overview_id)
 
         if detailed:
             task_groups.append(
@@ -827,26 +1322,42 @@ async def step3_review_tasks(
         else:
             print(f"⚠ Warning: No detailed task found for overview task {overview_id}")
 
-    # Spawn reviewer agents in parallel (critical performance optimization)
-    print(f"Spawning {len(task_groups)} reviewer agents in parallel...\n")
+    # Create batches
+    batches = []
+    for i in range(0, len(task_groups), batch_size):
+        batches.append(task_groups[i : i + batch_size])
 
-    review_coros = [
-        spawn_reviewer_agent(
-            overview_yaml=yaml.dump(group["overview"], default_flow_style=False, sort_keys=False),
-            detailed_yaml=yaml.dump(group["detailed"], default_flow_style=False, sort_keys=False),
+    print(f"Created {len(batches)} batch(es) with batch_size={batch_size}\n")
+
+    # Process each batch with a suborchestrator
+    all_review_results = []
+
+    for batch_num, batch in enumerate(batches, 1):
+        print(f"\n→ Processing Review Batch {batch_num}/{len(batches)}")
+        task_ids = [g["overview"].get("task", {}).get("id") for g in batch]
+        print(f"  Tasks in batch: {task_ids}\n")
+
+        batch_results = await review_suborchestrator(
+            batch=batch,
             impl_md=impl_md,
-            task_id=group["overview"].get("task", {}).get("id", "?")
+            tasks_overview_yaml=tasks_overview_yaml,
+            task_template=task_template,
+            batch_num=batch_num,
+            debug=debug,
         )
-        for group in task_groups
-    ]
-    review_results = await asyncio.gather(*review_coros)
 
-    return review_results
+        all_review_results.extend(batch_results)
+        print(f"✓ Batch {batch_num} review complete\n")
+
+    return all_review_results
 
 
 async def step3_main_orchestrator_report(review_results: List[Dict[str, Any]]):
     """
-    Main orchestrator collects all reviewer results and generates final report.
+    Report generator function (not an AI agent) that produces final review summary.
+
+    This is a standard Python function that takes all review results and generates
+    a human-readable report file. It does not use AI - just data processing.
     """
     print("\n" + "=" * 80)
     print("FINAL REPORT: Main Orchestrator Summary")
@@ -935,12 +1446,54 @@ async def main():
         action="store_true",
         help="Enable debug output (prints batches, task YAML, etc.)",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Use simple fixed-size batching with specified size (e.g., --batch-size 5). If not specified, uses AI dependency analysis.",
+    )
+    parser.add_argument(
+        "--tasks-overview-template",
+        type=str,
+        help="Path to tasks_overview_template.yaml (required for step 1)",
+    )
+    parser.add_argument(
+        "--task-template",
+        type=str,
+        help="Path to task_template.yaml (required for steps 2 and 3)",
+    )
 
     args = parser.parse_args()
 
-    # Load templates
-    print("Loading templates...")
-    overview_template, task_template = load_templates()
+    # Load templates based on which step is running
+    overview_template = None
+    task_template = None
+
+    # Load overview template if needed (step 1 or all)
+    if args.step in ["1", "all"]:
+        if not args.tasks_overview_template:
+            print("Error: --tasks-overview-template is required for step 1")
+            return
+        overview_template_path = Path(args.tasks_overview_template)
+        if not overview_template_path.exists():
+            print(
+                f"Error: tasks_overview_template.yaml not found at {overview_template_path}"
+            )
+            return
+        print("Loading tasks_overview_template...")
+        overview_template = load_template(overview_template_path)
+
+    # Load task template if needed (step 2, 3, or all)
+    if args.step in ["2", "3", "all"]:
+        if not args.task_template:
+            print("Error: --task-template is required for steps 2 and 3")
+            return
+        task_template_path = Path(args.task_template)
+        if not task_template_path.exists():
+            print(f"Error: task_template.yaml not found at {task_template_path}")
+            return
+        print("Loading task_template...")
+        task_template = load_template(task_template_path)
 
     project_root = Path(__file__).parent.parent
 
@@ -989,9 +1542,18 @@ async def main():
     if args.step in ["2", "all"]:
         # Step 2: Expand tasks
         # Use streaming mode for large projects (reduces memory usage)
+        # If --batch-size is specified, use simple batching; otherwise use AI dependency analysis
+        simple_batching = args.batch_size is not None
+        batch_size = args.batch_size if simple_batching else 5
+
         tasks_yaml = await step2_expand_all_tasks(
-            tasks_overview_yaml, task_template, project_root,
-            stream_to_file=args.stream, debug=args.debug
+            tasks_overview_yaml,
+            task_template,
+            project_root,
+            stream_to_file=args.stream,
+            debug=args.debug,
+            simple_batching=simple_batching,
+            batch_size=batch_size,
         )
 
         # Only save if we actually generated tasks and not streaming
@@ -1024,8 +1586,16 @@ async def main():
 
     if args.step in ["3", "all"]:
         # Step 3: Review tasks
+        # Use same batch_size as step2 if specified, otherwise default to 5
+        review_batch_size = args.batch_size if args.batch_size is not None else 5
+
         review_results = await step3_review_tasks(
-            tasks_overview_yaml, tasks_yaml, impl_md
+            tasks_overview_yaml,
+            tasks_yaml,
+            impl_md,
+            task_template,
+            batch_size=review_batch_size,
+            debug=args.debug,
         )
         await step3_main_orchestrator_report(review_results)
 
