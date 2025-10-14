@@ -1,0 +1,10 @@
+[package]
+name = "{{WORKFLOW_NAME}}"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+workflow-manager-sdk = { path = "{{WORKSPACE_PATH}}/workflow-manager-sdk" }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"

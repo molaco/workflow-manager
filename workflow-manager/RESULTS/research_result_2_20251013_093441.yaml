@@ -1,0 +1,485 @@
+workflow_execution_system_analysis:
+  overview: |
+    The workflow execution system in src/lib.rs implements a sophisticated five-phase research pipeline
+    with support for selective phase execution, checkpointing, concurrency control, and error recovery.
+    It uses an async architecture built on tokio, futures, and Claude Agent SDK.
+
+  architecture:
+    type: "Multi-phase sequential pipeline with checkpoint/resume capability"
+    runtime: "Tokio async runtime"
+    communication: "Message-passing via tokio::sync::mpsc channels"
+    concurrency: "Controlled via Arc<Semaphore> and FuturesUnordered"
+    
+  five_phase_workflow:
+    phase_0_analyze:
+      name: "Codebase Analysis"
+      location: "src/lib.rs:145-178"
+      purpose: "Analyze codebase structure, dependencies, and architecture patterns"
+      inputs:
+        - codebase_dir: "Optional<PathBuf> - defaults to current directory"
+      outputs:
+        - analysis_yaml: "codebase_analysis_<timestamp>.yaml"
+        - codebase_analysis: "Option<CodebaseAnalysis> (serde_yaml::Value)"
+      process:
+        - "Constructs detailed analysis prompt requesting file stats, directory structure, entry points, dependencies, architecture patterns"
+        - "Creates ClaudeAgentOptions with tools: [Read, Glob, Grep, Bash]"
+        - "Streams responses from Claude agent"
+        - "Extracts YAML from response using extract_yaml() helper (src/lib.rs:746-758)"
+        - "Parses into flexible serde_yaml::Value (allows any structure)"
+        - "Saves to timestamped file for checkpointing"
+      dependencies: []
+      tools_used: ["Read", "Glob", "Grep", "Bash"]
+      system_prompt: "You are a codebase analyst. Provide concise structural analysis."
+      
+    phase_1_generate:
+      name: "Research Prompt Generation"
+      location: "src/lib.rs:180-219"
+      purpose: "Generate targeted research prompts based on objective and codebase analysis"
+      inputs:
+        - objective: "String - user's research objective"
+        - codebase_analysis: "CodebaseAnalysis from Phase 0 or loaded from file"
+        - system_prompt: "Custom prompt writer instructions"
+        - output_style: "Desired output format specification"
+      outputs:
+        - prompts_yaml: "research_prompts_<timestamp>.yaml"
+        - prompts_data: "Option<PromptsData> containing Vec<ResearchPrompt>"
+      process:
+        - "Builds composite system prompt: prompt_writer + codebase_analysis_yaml + output_style"
+        - "Creates ClaudeAgentOptions with tools: [Read, Glob, Grep]"
+        - "Queries Claude with 'Generate research prompts for: {objective}'"
+        - "Extracts and parses YAML response into PromptsData structure"
+        - "Saves prompts to timestamped file for checkpointing"
+      dependencies: ["Phase 0 (or --analysis-file)"]
+      data_flow: "codebase_analysis → generate_prompts() → prompts_data"
+      tools_used: ["Read", "Glob", "Grep"]
+      
+    phase_2_research:
+      name: "Research Execution"
+      location: "src/lib.rs:221-304"
+      purpose: "Execute research prompts concurrently with controlled parallelism"
+      inputs:
+        - prompts_data: "PromptsData from Phase 1 or loaded from file"
+        - batch_size: "usize - controls concurrency level"
+      outputs:
+        - individual_results: "./RESULTS/research_result_{N}_{timestamp}.yaml (one per prompt)"
+        - results_index: "./RESULTS/research_results_{timestamp}.yaml (metadata)"
+        - research_results: "Vec<ResearchResult>"
+      process:
+        - "Creates ./RESULTS directory if missing"
+        - "Creates Arc<Semaphore> with capacity = batch_size for concurrency control"
+        - "Generates shared timestamp for all results"
+        - "Pushes all prompts to FuturesUnordered for concurrent execution"
+        - "Each task: acquires semaphore permit, executes prompt, reports progress, releases permit"
+        - "Collects results as they complete (fail-fast on first error)"
+        - "Saves aggregated results index to YAML file"
+      concurrency_model:
+        structure: "FuturesUnordered<Future<ResearchResult>>"
+        control: "Arc<Semaphore> with configurable permits"
+        behavior: "Up to batch_size tasks execute concurrently, others wait for permits"
+        failure: "Fail-fast - first error aborts all remaining tasks"
+      dependencies: ["Phase 1 (or --prompts-file)"]
+      data_flow: "prompts_data → FuturesUnordered → research_results"
+      system_prompt: "preset: claude_code + 'Output research findings as yaml only'"
+      tools_used: ["All default Claude Code tools"]
+      
+    phase_3_validate:
+      name: "YAML Validation & Repair"
+      location: "src/lib.rs:306-422"
+      purpose: "Validate YAML syntax and repair errors in a loop until all files are valid"
+      inputs:
+        - research_results: "Vec<ResearchResult> from Phase 2, or --results-file, or --results-dir"
+        - batch_size: "usize - controls fix concurrency"
+      outputs:
+        - fixed_yaml_files: "Overwrites invalid YAML files in place"
+      process:
+        - "Determines file list from research_results, results_dir, or results_file"
+        - "Initial validation: runs all files through validate_yaml_file() concurrently"
+        - "Collects files_with_errors: Vec<(file, error_message)>"
+        - "Loop until files_with_errors.is_empty():"
+        - "  1. Take current batch of errors"
+        - "  2. Fix all in parallel with execute_fix_yaml() using semaphore"
+        - "  3. Re-validate all fixed files"
+        - "  4. Repopulate files_with_errors with any still-invalid files"
+        - "Reports success when all files validate"
+      validation_mechanism:
+        tool: "Python script ./SCRIPTS/check_yaml.py via tokio::process::Command"
+        invocation: "uv run ./SCRIPTS/check_yaml.py <file>"
+        success_criteria: "exit code 0, no '❌' in output, no 'Error' in output"
+        output: "(file_path, is_valid, combined_stdout_stderr)"
+      repair_mechanism:
+        approach: "Query Claude with broken YAML and validation error"
+        prompt: "Fix the following YAML file with validation errors. Output ONLY corrected YAML."
+        system_prompt: "preset: claude_code + 'You are a YAML expert'"
+        extraction: "extract_yaml() to get fixed content from response"
+        persistence: "Overwrites original file in place"
+      concurrency_model:
+        structure: "FuturesUnordered<Future<()>> for parallel fixing"
+        control: "Arc<Semaphore> with batch_size permits"
+        loop: "Iterative fix-validate-check cycle until convergence"
+      dependencies: ["Phase 2 (or --results-file or --results-dir)"]
+      data_flow: "research_results → files_with_errors → fix loop → validated files"
+      error_handling: "Continues fixing until all files valid or error occurs"
+      
+    phase_4_synthesize:
+      name: "Documentation Synthesis"
+      location: "src/lib.rs:424-452"
+      purpose: "Combine all research results into comprehensive documentation"
+      inputs:
+        - research_results: "Vec<ResearchResult> from previous phases or loaded"
+        - output_path: "Optional<PathBuf> - defaults to research_output_{timestamp}.md"
+        - batch_size: "Not used in lib.rs (simplified implementation)"
+      outputs:
+        - final_documentation: "Markdown file at output_path"
+      process:
+        - "Reads all result files from research_results"
+        - "Combines findings into single combined_findings string"
+        - "Constructs final synthesis prompt with instructions:"
+        - "  - Add introduction and overview"
+        - "  - Ensure logical flow"
+        - "  - Include table of contents"
+        - "  - Add actionable recommendations"
+        - "  - Save to output_path"
+        - "Streams synthesis response to user via progress messages"
+      note: |
+        lib.rs uses simplified single-pass synthesis.
+        examples/new_research_agent.rs implements sophisticated Map-Reduce synthesis:
+        - Map phase: Parallel summarization of each result (src/examples:594-630)
+        - Reduce phase: Iterative pairwise combination until single document (src/examples:715-749)
+        - Final polish: Comprehensive documentation generation (src/examples:777-829)
+      dependencies: ["Phase 2 or Phase 3 (must have research_results populated)"]
+      data_flow: "research_results → combined_findings → final_documentation"
+      system_prompt: "preset: claude_code + 'You are a technical writer creating final documentation'"
+
+  workflow_config:
+    structure: "src/lib.rs:33-46"
+    purpose: "Centralized configuration for selective phase execution and checkpointing"
+    fields:
+      objective: "String - research objective"
+      system_prompt: "String - custom prompt writer instructions"
+      output_style: "String - desired output format"
+      output_path: "Option<PathBuf> - final documentation path"
+      batch_size: "usize - concurrency control (default: 1)"
+      phases: "Vec<usize> - which phases to execute [0,1,2,3,4]"
+      analysis_file: "Option<String> - resume from saved analysis"
+      prompts_file: "Option<String> - resume from saved prompts"
+      results_file: "Option<String> - resume from saved results"
+      codebase_dir: "Option<PathBuf> - override codebase directory"
+      results_dir: "Option<String> - Phase 3 specific: validate all YAML in directory"
+    selective_execution:
+      mechanism: "config.phases.contains(&N) checks before each phase"
+      example_1: "phases: [0,1,2,3,4] - full workflow"
+      example_2: "phases: [2,3,4] + prompts_file - skip analysis and prompt generation"
+      example_3: "phases: [3] + results_dir - only validate/fix YAML in directory"
+      example_4: "phases: [4] + results_file - only synthesize from existing results"
+    checkpointing:
+      phase_0: "Saves codebase_analysis_{timestamp}.yaml, can resume with --analysis-file"
+      phase_1: "Saves research_prompts_{timestamp}.yaml, can resume with --prompts-file"
+      phase_2: "Saves individual results + research_results_{timestamp}.yaml, can resume with --results-file"
+      phase_3: "No checkpoint (modifies files in place)"
+      phase_4: "No checkpoint (final output)"
+
+  phase_dependencies:
+    dependency_chain:
+      - "Phase 0 → Phase 1: codebase_analysis required"
+      - "Phase 1 → Phase 2: prompts_data required"
+      - "Phase 2 → Phase 3: research_results required"
+      - "Phase 2 or 3 → Phase 4: research_results required"
+    bypass_mechanisms:
+      phase_1_bypass: "src/lib.rs:95-102 - load prompts_data from --prompts-file"
+      phase_0_bypass: "src/lib.rs:78-85 - load codebase_analysis from --analysis-file"
+      phase_2_bypass: "src/lib.rs:112-119 - load research_results from --results-file"
+      phase_3_alternate_input: "src/lib.rs:316-321 - use --results-dir instead of research_results"
+    enforcement:
+      location: "src/lib.rs:191-193, 232-234, 434-436"
+      mechanism: "ok_or_else() returns error if required data is None"
+      error_messages:
+        - "Phase 0 must run before Phase 1, or provide analysis_file"
+        - "Phase 1 must run before Phase 2, or provide prompts_file"
+        - "No research results to synthesize"
+    data_flow_diagram: |
+      Phase 0 (analyze) → codebase_analysis (Option) ──┐
+                                                        ├→ Phase 1 (generate) → prompts_data (Option)
+      --analysis-file ──────────────────────────────────┘                              │
+                                                                                        ↓
+                                                     ┌────────────────────────────────────
+                                                     │
+                                                     └→ Phase 2 (research) → research_results (Vec)
+      --prompts-file ──────────────────────────────────┘                              │
+                                                                                       ├→ Phase 3 (validate)
+      --results-file / --results-dir ───────────────────────────────────────────────────┘        │
+                                                                                                  ↓
+                                                                                          Phase 4 (synthesize)
+
+  error_handling_strategy:
+    philosophy: "Fail-fast with granular progress reporting"
+    mechanism: "Result<()> return type with ? operator for early exit"
+    
+    phase_level_errors:
+      location: "src/lib.rs:72-77, 89-94, 106-111, 123-128, 133-138"
+      pattern: |
+        if let Err(e) = execute_phase_N(...).await {
+            let _ = progress_tx.send(WorkflowProgress::WorkflowFailed { error: e.to_string() }).await;
+            return Err(e);
+        }
+      behavior: "First phase error aborts workflow, sends WorkflowFailed message"
+      
+    task_level_errors:
+      phase_2_research: "src/lib.rs:266-280"
+      phase_3_validation: "src/lib.rs:387-401"
+      pattern: |
+        match &result {
+            Ok(_) => send TaskCompleted,
+            Err(e) => send TaskFailed { error: e.to_string() }
+        }
+        result  // Propagate error, aborting workflow
+      behavior: "First task error aborts phase, sends TaskFailed message"
+      
+    validation_loop_errors:
+      location: "src/lib.rs:351-418"
+      behavior: "Loop continues until all files valid or error occurs in fix/validate"
+      recovery: "Multiple fix attempts via iterative loop, but single failure aborts"
+      
+    progress_reporting:
+      location: "src/lib.rs:49-59"
+      mechanism: "tokio::sync::mpsc channel for async message passing"
+      message_types:
+        - "PhaseStarted { phase: usize, name: String }"
+        - "PhaseProgress { phase: usize, message: String }"
+        - "PhaseCompleted { phase: usize }"
+        - "TaskStarted { phase: usize, task_id: usize, description: String }"
+        - "TaskProgress { phase: usize, task_id: usize, message: String }"
+        - "TaskCompleted { phase: usize, task_id: usize }"
+        - "TaskFailed { phase: usize, task_id: usize, error: String }"
+        - "WorkflowCompleted"
+        - "WorkflowFailed { error: String }"
+      usage: "Sent via progress_tx.send() at key points, consumed by caller (e.g., main.rs)"
+      benefits: "Enables real-time monitoring, UI updates, logging without blocking workflow"
+
+  concurrency_control:
+    mechanism: "Arc<Semaphore> + FuturesUnordered for bounded parallelism"
+    
+    semaphore_pattern:
+      creation: "let sem = Arc::new(Semaphore::new(batch_size));"
+      cloning: "let sem = sem.clone(); // Arc increment for each task"
+      acquisition: "let _permit = sem.acquire().await?; // Blocks if no permits available"
+      release: "// Automatic when _permit drops at end of task"
+      
+    phase_2_concurrency:
+      location: "src/lib.rs:240-289"
+      structure: |
+        let sem = Arc::new(Semaphore::new(config.batch_size));
+        let mut tasks = FuturesUnordered::new();
+        for prompt in prompts {
+            let sem_clone = sem.clone();
+            tasks.push(async move {
+                let _permit = sem_clone.acquire().await?;
+                execute_research_prompt(...).await
+            });
+        }
+        while let Some(result) = tasks.next().await {
+            research_results.push(result?);
+        }
+      behavior: |
+        - All N prompts pushed to FuturesUnordered immediately
+        - Only batch_size tasks acquire permits and execute concurrently
+        - Remaining tasks wait until permits available
+        - Results collected as they complete (unordered)
+        - First error aborts all remaining tasks via fail-fast
+        
+    phase_3_concurrency:
+      validation: "src/lib.rs:336-348 - all files validated concurrently (no semaphore)"
+      fixing: "src/lib.rs:366-409 - controlled by semaphore with batch_size"
+      loop_structure: |
+        loop {
+            if files_with_errors.is_empty() { break; }
+            let sem = Arc::new(Semaphore::new(config.batch_size));
+            let mut fix_tasks = FuturesUnordered::new();
+            for (file, error) in current_batch {
+                let sem_clone = sem.clone();
+                fix_tasks.push(async move {
+                    let _permit = sem_clone.acquire().await?;
+                    execute_fix_yaml(&file, &error).await
+                });
+            }
+            while let Some(result) = fix_tasks.next().await { result?; }
+            // Re-validate sequentially
+            for file in current_batch { validate and repopulate errors }
+        }
+        
+    futures_unordered:
+      purpose: "Collect and poll multiple futures concurrently without ordering guarantees"
+      behavior: "Acts as a stream of results, yielding whenever any future completes"
+      advantage: "Efficient for independent tasks - no need to wait for specific task completion"
+      
+    concurrency_tuning:
+      batch_size_1: "Sequential execution (one task at a time)"
+      batch_size_N: "N tasks execute concurrently"
+      batch_size_unlimited: "Not recommended - would spawn all tasks immediately (resource exhaustion)"
+      trade_offs: "Higher batch_size = faster completion but higher resource usage and API rate limits"
+
+  complete_workflow_lifecycle:
+    full_execution_example:
+      command: |
+        cargo run -- \
+          --input "How does authentication work?" \
+          --system-prompt prompts/writer.md \
+          --append prompts/style.md \
+          --output docs/auth_guide.md \
+          --batch-size 3
+      execution_flow:
+        1_initialization:
+          - "Parse WorkflowConfig from arguments"
+          - "Create progress channel: tokio::sync::mpsc"
+          - "Spawn progress listener (or ignore messages)"
+          - "Initialize: codebase_analysis = None, prompts_data = None, research_results = []"
+          
+        2_phase_0:
+          - "Send PhaseStarted { phase: 0, name: 'Analyzing Codebase' }"
+          - "Determine codebase_path (args or current_dir)"
+          - "Send PhaseProgress { phase: 0, message: 'Analyzing codebase at: ...' }"
+          - "Create ClaudeAgentOptions with [Read, Glob, Grep, Bash] tools"
+          - "Stream Claude responses, collecting text"
+          - "Extract YAML from response"
+          - "Parse into CodebaseAnalysis (serde_yaml::Value)"
+          - "Save to codebase_analysis_20250101_120000.yaml"
+          - "Send PhaseProgress { phase: 0, message: 'Analysis saved to: ...' }"
+          - "Set codebase_analysis = Some(analysis)"
+          - "Send PhaseCompleted { phase: 0 }"
+          
+        3_phase_1:
+          - "Send PhaseStarted { phase: 1, name: 'Generating Research Prompts' }"
+          - "Retrieve codebase_analysis or error"
+          - "Build composite system prompt: writer + analysis + style"
+          - "Send PhaseProgress { phase: 1, message: 'Generating research prompts...' }"
+          - "Query Claude with objective"
+          - "Stream responses, extract YAML"
+          - "Parse into PromptsData { objective, prompts: Vec<ResearchPrompt> }"
+          - "Save to research_prompts_20250101_120001.yaml"
+          - "Send PhaseProgress { phase: 1, message: 'Generated 5 prompts, saved to: ...' }"
+          - "Set prompts_data = Some(prompts)"
+          - "Send PhaseCompleted { phase: 1 }"
+          
+        4_phase_2:
+          - "Send PhaseStarted { phase: 2, name: 'Executing Research' }"
+          - "Retrieve prompts_data or error"
+          - "Create ./RESULTS directory"
+          - "Create timestamp: 20250101_120002"
+          - "Create semaphore: Arc::new(Semaphore::new(3))"
+          - "Send PhaseProgress { phase: 2, message: 'Executing 5 research prompts (concurrency: 3)' }"
+          - "Push 5 tasks to FuturesUnordered:"
+          - "  Task 1: acquire permit, send TaskStarted, execute_research_prompt, send TaskCompleted/Failed"
+          - "  Task 2: acquire permit (blocks if 3 running), send TaskStarted, execute, send TaskCompleted/Failed"
+          - "  ... (tasks 3-5)"
+          - "Collect results as they complete:"
+          - "  - research_result_1_20250101_120002.yaml"
+          - "  - research_result_2_20250101_120002.yaml"
+          - "  - ... (5 files)"
+          - "Populate research_results: Vec<ResearchResult>"
+          - "Save research_results_20250101_120003.yaml"
+          - "Send PhaseProgress { phase: 2, message: 'Results saved to: ...' }"
+          - "Send PhaseCompleted { phase: 2 }"
+          
+        5_phase_3:
+          - "Send PhaseStarted { phase: 3, name: 'Validating YAML' }"
+          - "Extract file list from research_results: [result_1.yaml, result_2.yaml, ...]"
+          - "Send PhaseProgress { phase: 3, message: 'Validating 5 files' }"
+          - "Validate all 5 files concurrently (no semaphore)"
+          - "Collect files_with_errors: [(result_2.yaml, 'mapping error'), (result_4.yaml, 'syntax error')]"
+          - "Loop iteration 1:"
+          - "  Send PhaseProgress { phase: 3, message: 'Fixing 2 files with errors' }"
+          - "  Create semaphore: Arc::new(Semaphore::new(3))"
+          - "  Push 2 fix tasks to FuturesUnordered"
+          - "  Send TaskStarted { phase: 3, task_id: 1, description: 'Fixing result_2.yaml' }"
+          - "  Send TaskStarted { phase: 3, task_id: 2, description: 'Fixing result_4.yaml' }"
+          - "  Execute fixes concurrently, overwrite files"
+          - "  Send TaskCompleted for each"
+          - "  Re-validate result_2.yaml, result_4.yaml"
+          - "  Result: result_4.yaml still invalid, repopulate files_with_errors: [(result_4.yaml, 'new error')]"
+          - "Loop iteration 2:"
+          - "  Send PhaseProgress { phase: 3, message: 'Fixing 1 files with errors' }"
+          - "  Fix result_4.yaml"
+          - "  Send TaskCompleted"
+          - "  Re-validate: all valid now"
+          - "  files_with_errors empty, break loop"
+          - "Send PhaseProgress { phase: 3, message: 'All files validated successfully' }"
+          - "Send PhaseCompleted { phase: 3 }"
+          
+        6_phase_4:
+          - "Send PhaseStarted { phase: 4, name: 'Synthesizing Documentation' }"
+          - "Send PhaseProgress { phase: 4, message: 'Synthesizing documentation...' }"
+          - "Read all 5 result files"
+          - "Combine into single combined_findings string"
+          - "Construct synthesis prompt with instructions"
+          - "Query Claude, stream response"
+          - "Send PhaseProgress { phase: 4, message: <chunks of generated doc> }"
+          - "Claude uses Write tool to create docs/auth_guide.md"
+          - "Send PhaseProgress { phase: 4, message: 'Documentation saved to: docs/auth_guide.md' }"
+          - "Send PhaseCompleted { phase: 4 }"
+          
+        7_completion:
+          - "Send WorkflowCompleted"
+          - "Return Ok(())"
+          
+    partial_execution_example:
+      command: |
+        cargo run -- \
+          --phases 2,3,4 \
+          --prompts-file research_prompts_20250101_120001.yaml \
+          --output docs/auth_guide.md \
+          --batch-size 3
+      execution_flow:
+        - "Skip Phase 0 (config.phases.contains(&0) == false)"
+        - "Skip Phase 1 (config.phases.contains(&1) == false)"
+        - "Load prompts_data from research_prompts_20250101_120001.yaml (src/lib.rs:95-102)"
+        - "Execute Phase 2 (research)"
+        - "Execute Phase 3 (validate)"
+        - "Execute Phase 4 (synthesize)"
+        - "Send WorkflowCompleted"
+        
+    error_recovery_example:
+      scenario: "Phase 2 task 3 fails due to network error"
+      execution_flow:
+        - "Phase 0, 1 complete successfully"
+        - "Phase 2 starts, spawns 5 tasks"
+        - "Tasks 1, 2 start executing (batch_size = 2)"
+        - "Task 1 completes, send TaskCompleted, task 3 starts"
+        - "Task 3 fails with network error"
+        - "Send TaskFailed { phase: 2, task_id: 3, error: 'Network error' }"
+        - "Propagate error up to execute_phase_2"
+        - "execute_phase_2 returns Err(e)"
+        - "run_workflow catches error (src/lib.rs:106-111)"
+        - "Send WorkflowFailed { error: 'Network error' }"
+        - "Return Err(e) from run_workflow"
+        - "Tasks 2, 4, 5 cancelled (futures dropped)"
+      recovery:
+        - "User examines error message"
+        - "User fixes network issue"
+        - "User re-runs with: --phases 2,3,4 --prompts-file <saved_prompts>"
+        - "Workflow resumes from Phase 2"
+
+  key_implementation_details:
+    async_streaming:
+      purpose: "Incrementally process Claude responses without blocking"
+      pattern: |
+        let stream = query(&prompt, options).await?;
+        let mut stream = Box::pin(stream);
+        while let Some(message) = stream.next().await {
+            match message? {
+                Message::Assistant { message, .. } => {
+                    for block in &message.content {
+                        if let ContentBlock::Text { text } = block {
+                            // Process text incrementally
+                        }
+                    }
+                }
+                Message::Result { .. } => break,
+                _ => {}
+            }
+        }
+      benefits: "Memory efficient, enables real-time progress display"
+      
+    yaml_extraction:
+      location: "src/lib.rs:746-758"
+      purpose: "Extract YAML from markdown code blocks or raw text"
+      logic: |
+        if text contains "

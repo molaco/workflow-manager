@@ -1,0 +1,81 @@
+use clap::Parser;
+use workflow_manager_sdk::{WorkflowDefinition, claude_agent_sdk};
+use anyhow::Result;
+
+#[derive(Parser, Debug, Clone, WorkflowDefinition)]
+#[workflow(
+    id = "{{WORKFLOW_ID}}",
+    name = "{{WORKFLOW_NAME_DISPLAY}}",
+    description = "Your workflow description here"
+)]
+struct Args {
+    /// Input file to process
+    #[arg(short, long)]
+    #[field(
+        label = "Input File",
+        description = "[FILE PATH] File to process (e.g., 'data.json')",
+        type = "file_path"
+    )]
+    input: String,
+
+    /// Output directory
+    #[arg(short, long, default_value = "./output")]
+    #[field(
+        label = "Output Directory",
+        description = "[FILE PATH] Where to save results",
+        type = "file_path"
+    )]
+    output: String,
+
+    /// Batch size for parallel processing
+    #[arg(short, long, default_value = "3")]
+    #[field(
+        label = "Batch Size",
+        description = "[NUMBER] Concurrent tasks (1-10)",
+        type = "number",
+        min = "1",
+        max = "10"
+    )]
+    batch_size: usize,
+
+    // Hidden flag for metadata export (handled by macro)
+    #[arg(long, hide = true)]
+    workflow_metadata: bool,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+
+    // Handle metadata request from TUI
+    if args.workflow_metadata {
+        args.print_metadata();
+        return Ok(());
+    }
+
+    println!("🚀 Starting {{WORKFLOW_NAME_DISPLAY}}");
+    println!("   Input: {}", args.input);
+    println!("   Output: {}", args.output);
+    println!("   Batch Size: {}", args.batch_size);
+
+    // Your workflow logic here
+    run_workflow(args).await
+}
+
+async fn run_workflow(args: Args) -> Result<()> {
+    // Example: Use claude-agent-sdk
+    use claude_agent_sdk::{query, ClaudeAgentOptions};
+
+    let prompt = format!("Process this file: {}", args.input);
+
+    let options = ClaudeAgentOptions::builder()
+        .system_prompt("You are a helpful assistant".to_string())
+        .build();
+
+    let _stream = query(&prompt, Some(options)).await?;
+
+    // TODO: Add your workflow logic here
+    println!("✓ Workflow completed successfully!");
+
+    Ok(())
+}

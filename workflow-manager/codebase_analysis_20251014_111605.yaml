@@ -1,0 +1,222 @@
+file_counts:
+  rust_source: 14
+  markdown: 3
+  toml_config: 1
+  yaml_data: 2
+total_lines_of_code: 7942
+file_breakdown:
+  source_files:
+  - src/main.rs (2279 lines - TUI application)
+  - src/lib.rs (3 lines - module exports)
+  - src/discovery.rs (211 lines - workflow discovery)
+  binary_executables:
+  - src/bin/research_agent.rs (1273 lines)
+  - src/bin/hooks_demo.rs (286 lines)
+  - src/bin/demo_multiphase.rs (194 lines)
+  - src/bin/simple_query.rs (124 lines)
+  - src/bin/simple_echo.rs (93 lines)
+  examples:
+  - examples/tasks_agent.rs (52017 lines)
+  - examples/new_research_agent.rs (38249 lines)
+  - examples/test2.rs (24091 lines)
+  - examples/research_agent.rs (9524 lines)
+  - examples/test_discovery.rs (1810 lines)
+  - examples/test_workflow.rs (1305 lines)
+  test_vs_source:
+    source_files: 11 (main + bins + examples)
+    test_files: 3 (test_* in examples/)
+    ratio: ~73% implementation, ~27% test/demo
+root: /home/molaco/Documents/japanese/workflow-manager/
+structure:
+  src/:
+    purpose: Core application code
+    contents:
+    - main.rs (TUI implementation with ratatui)
+    - lib.rs (library entry point)
+    - discovery.rs (workflow binary discovery)
+    - bin/ (executable binaries - 5 workflow demos)
+  examples/:
+    purpose: Example workflow implementations and tests
+    contents: 6 example workflow programs demonstrating various features
+  templates/:
+    purpose: Workflow project templates
+    contents:
+    - workflow-template/src/ (starter template for new workflows)
+  RESULTS/:
+    purpose: Workflow execution outputs
+    contents: research_result YAML files (timestamped)
+  TRASH/:
+    purpose: Deprecated/archived code
+special_directories:
+- examples/ (workflow demonstrations)
+- templates/workflow-template/ (project scaffolding)
+- RESULTS/ (runtime outputs)
+- src/bin/ (multiple binary targets)
+main_executables:
+- src/main.rs: TUI workflow manager application (default-run)
+- src/bin/research_agent.rs: Research workflow agent
+- src/bin/demo_multiphase.rs: Multi-phase workflow demo
+- src/bin/hooks_demo.rs: Workflow hooks demonstration
+- src/bin/simple_echo.rs: Simple echo workflow
+- src/bin/simple_query.rs: Simple query workflow
+build_configuration:
+  manifest: Cargo.toml
+  package_name: workflow-manager
+  version: 0.1.0
+  edition: '2021'
+  default_run: workflow-manager
+dependencies:
+  local_path_dependencies:
+  - claude-agent-sdk (../claude-agent-sdk-rust)
+  - workflow-manager-sdk (../workflow-manager-sdk)
+  workspace_dependencies:
+  - tokio (async runtime)
+  - serde/serde_json/serde_yaml (serialization)
+  - anyhow (error handling)
+  - chrono (timestamps)
+  direct_dependencies:
+  - ratatui (v0.28 - TUI framework)
+  - crossterm (v0.28 - terminal control)
+  - clap (v4 - CLI parsing)
+  - reqwest (v0.11 - HTTP client)
+  - dotenv (v0.15 - environment variables)
+  - fuzzy-matcher (v0.3 - fuzzy search)
+  - directories (v5.0 - system paths)
+  - futures (v0.3 - async utilities)
+ci_cd: No CI/CD configuration found (.github/workflows absent)
+documentation:
+- PROMPT.md (feature request/bug description)
+- IMPL.md (implementation plan for complex workflows)
+- TUI_VIEWS.md (ASCII mockups of TUI views)
+external_frameworks:
+  ui_framework: ratatui (terminal UI)
+  terminal_backend: crossterm
+  async_runtime: tokio
+  http_client: reqwest
+  ai_sdk: claude-agent-sdk (local dependency)
+internal_structure:
+  core_modules:
+  - workflow_manager (main crate)
+  - workflow_manager_sdk (external local crate)
+  - discovery (workflow binary discovery)
+  workspace_structure: Multi-crate workspace with path dependencies
+dependency_scope:
+  workflow_orchestration: workflow-manager-sdk
+  ai_agents: claude-agent-sdk-rust
+  terminal_ui: ratatui + crossterm
+  serialization: serde ecosystem
+  file_system: directories, std::fs
+project_type: Application (TUI) with multiple binary targets
+architecture_style:
+  primary: Terminal User Interface Application
+  secondary: Workflow Orchestration System
+  pattern: Plugin-based workflow discovery + State machine UI
+module_organization:
+  style: Modular with separation of concerns
+  layers:
+  - presentation: TUI views (main.rs - 2279 lines)
+  - business_logic: Workflow execution + discovery
+  - integration: Binary workflow discovery via --workflow-metadata flag
+  - data: YAML results + JSON history persistence
+architectural_patterns:
+- Plugin architecture (discovers workflow binaries dynamically)
+- Event-driven UI (ratatui event loop)
+- 'State machine pattern (View enum: WorkflowList, WorkflowDetail, WorkflowEdit, WorkflowRunning)'
+- Process supervision (spawns workflow binaries, captures stdout/stderr)
+- Structured logging (parses WorkflowLog JSON events from stderr)
+- Hierarchical progress tracking (Phase → Task → Agent hierarchy)
+notable_features:
+- File browser with fuzzy search
+- Tab completion for file paths
+- Field value history persistence
+- Real-time workflow execution monitoring
+- Collapsible hierarchical output view
+- Auto-discovery of workflow binaries via metadata extraction
+core_modules:
+  tui_application:
+    file: src/main.rs
+    lines: 2279
+    responsibilities:
+    - Multi-view state management (4 views)
+    - File browser with fuzzy search
+    - Tab completion and history
+    - Workflow execution and real-time monitoring
+    - Hierarchical phase/task/agent tracking
+    key_types:
+    - App (main application state)
+    - View (enum: WorkflowList, WorkflowDetail, WorkflowEdit, WorkflowRunning)
+    - WorkflowPhase/WorkflowTask/WorkflowAgent (execution hierarchy)
+    - WorkflowHistory (persistent field values)
+  workflow_discovery:
+    file: src/discovery.rs
+    lines: 211
+    responsibilities:
+    - Scan directories for workflow binaries
+    - Extract metadata via --workflow-metadata flag
+    - Build command strings from field values
+    key_types:
+    - DiscoveredWorkflow
+    - extract_workflow_metadata()
+    - build_workflow_command()
+workflow_binaries:
+  research_agent:
+    file: src/bin/research_agent.rs
+    lines: 1273
+    purpose: Full-featured research workflow with multi-phase execution
+  demo_multiphase:
+    file: src/bin/demo_multiphase.rs
+    lines: 194
+    purpose: Demonstrates multi-phase workflow pattern
+  hooks_demo:
+    file: src/bin/hooks_demo.rs
+    lines: 286
+    purpose: Shows workflow lifecycle hooks
+  simple_query:
+    file: src/bin/simple_query.rs
+    lines: 124
+    purpose: Basic query workflow example
+  simple_echo:
+    file: src/bin/simple_echo.rs
+    lines: 93
+    purpose: Minimal workflow demonstration
+public_apis:
+  workflow_metadata_protocol:
+    invocation: <binary> --workflow-metadata
+    output: JSON (FullWorkflowMetadata struct)
+    fields:
+    - metadata: WorkflowMetadata (id, name, description)
+    - fields: Vec<FieldSchema> (input field definitions)
+  structured_logging_protocol:
+    format: __WF_EVENT__:<JSON>
+    output_stream: stderr
+    event_types:
+    - PhaseStarted/Completed/Failed
+    - TaskStarted/Progress/Completed/Failed
+    - AgentStarted/Message/Completed/Failed
+    - StateFileCreated
+data_persistence:
+  history_file:
+    path: $HOME/.local/share/workflow-manager/workflow-manager/history.json
+    format: JSON
+    structure: workflow_id → field_name → Vec<String> (recent values)
+  workflow_results:
+    directory: RESULTS/
+    format: YAML
+    naming: research_result_{n}_{timestamp}.yaml
+integration_points:
+- Spawns workflow binaries via std::process::Command
+- Parses structured JSON logs from stderr
+- Captures stdout for regular output
+- Reads/writes history to user data directory
+- Template directory for new workflow projects
+project_purpose: "Terminal-based workflow orchestration system that discovers and manages \nexecutable workflow binaries. Features a rich TUI with real-time progress \ntracking, hierarchical execution visualization (phases/tasks/agents), \nfile browser, tab completion, and persistent field history.\n"
+technology_stack: Rust + ratatui + tokio + claude-agent-sdk
+maturity: Active development (v0.1.0)
+key_insights:
+- Plugin-based architecture enables dynamic workflow discovery
+- Structured logging protocol provides real-time execution insights
+- Heavy TUI implementation (2279 LOC in main.rs)
+- Multi-binary crate structure (1 main app + 5 workflow demos)
+- Depends on sibling crates in parent directory workspace
+- No CI/CD yet - early development stage
+- Examples directory contains substantial code (127K+ lines)

@@ -1,0 +1,15 @@
+[package]
+name = "workflow-manager-sdk"
+version = "0.1.0"
+edition = "2021"
+description = "SDK for creating workflow-manager workflows"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Re-export the macro
+workflow-manager-macros = { path = "../workflow-manager-macros" }
+
+# Re-export claude-agent-sdk for convenience
+claude-agent-sdk = { path = "../claude-agent-sdk-rust" }
