@@ -15,9 +15,9 @@ use crate::chat::ChatInterface;
 
 impl App {
     pub fn new() -> Self {
-        let workflows = load_workflows();
+        let workflows = crate::utils::load_workflows();
         let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
-        let history = load_history();
+        let history = crate::utils::load_history();
 
         // Create tokio runtime for async operations
         let tokio_runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
@@ -718,7 +718,7 @@ impl App {
                                             }
                                         }
                                     }
-                                    let _ = save_history(&self.history);
+                                    let _ = crate::utils::save_history(&self.history);
                                 }
                             } else {
                                 output.push(format!("❌ Workflow failed with exit code: {:?}", tab.exit_code));
@@ -1680,7 +1680,7 @@ impl App {
             }
 
             // Save history to file
-            let _ = save_history(&self.history);
+            let _ = crate::utils::save_history(&self.history);
         }
     }
 
@@ -1988,62 +1988,3 @@ impl App {
     }
 }
 
-// Import utility functions that App methods depend on
-use anyhow::Result;
-use directories::ProjectDirs;
-
-fn history_file_path() -> PathBuf {
-    if let Some(proj_dirs) = ProjectDirs::from("com", "workflow-manager", "workflow-manager") {
-        proj_dirs.data_dir().join("history.json")
-    } else {
-        PathBuf::from(".workflow-manager-history.json")
-    }
-}
-
-fn load_history() -> WorkflowHistory {
-    let path = history_file_path();
-    if path.exists() {
-        if let Ok(json) = std::fs::read_to_string(&path) {
-            if let Ok(history) = serde_json::from_str(&json) {
-                return history;
-            }
-        }
-    }
-    WorkflowHistory {
-        workflows: HashMap::new(),
-    }
-}
-
-fn save_history(history: &WorkflowHistory) -> Result<()> {
-    let path = history_file_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(history)?;
-    std::fs::write(path, json)?;
-    Ok(())
-}
-
-fn load_workflows() -> Vec<Workflow> {
-    use workflow_manager_sdk::WorkflowInfo;
-
-    let mut workflows = Vec::new();
-
-    // Load built-in workflows
-    workflows.extend(crate::discovery::discover_workflows().into_iter().map(|dw| {
-        Workflow {
-            info: WorkflowInfo {
-                id: dw.metadata.id.clone(),
-                name: dw.metadata.name.clone(),
-                description: dw.metadata.description.clone(),
-                status: WorkflowStatus::NotStarted,
-                metadata: dw.metadata,
-                fields: dw.fields,
-                progress_messages: vec![],
-            },
-            source: WorkflowSource::BuiltIn,
-        }
-    }));
-
-    workflows
-}
