@@ -112,6 +112,7 @@ struct WorkflowTab {
     selected_phase: usize,
     selected_task: Option<String>,
     selected_agent: Option<String>,
+    agent_scroll_offsets: HashMap<String, usize>,  // agent_id -> scroll offset
 
     // Session persistence
     saved_logs: Option<Vec<String>>,
@@ -306,6 +307,7 @@ impl App {
                             selected_phase: 0,
                             selected_task: None,
                             selected_agent: None,
+                            agent_scroll_offsets: HashMap::new(),
                             saved_logs: None,
                         };
 
@@ -560,6 +562,259 @@ impl App {
         }
     }
 
+    // Tab navigation methods
+    fn navigate_tab_down(&mut self) {
+        if self.open_tabs.is_empty() {
+            return;
+        }
+        let tab = &mut self.open_tabs[self.active_tab_idx];
+
+        if let Ok(phases) = tab.workflow_phases.lock() {
+            if phases.is_empty() {
+                return;
+            }
+
+            let mut just_exited_agent = false;
+
+            // If agent is selected, try to move to next agent
+            if let Some(ref agent_id) = tab.selected_agent.clone() {
+                if let Some(ref task_id) = tab.selected_task {
+                    if let Some(phase) = phases.get(tab.selected_phase) {
+                        if let Some(task) = phase.tasks.iter().find(|t| &t.id == task_id) {
+                            if let Some(agent_idx) = task.agents.iter().position(|a| &a.id == agent_id) {
+                                if agent_idx + 1 < task.agents.len() {
+                                    // Move to next agent in same task
+                                    tab.selected_agent = Some(task.agents[agent_idx + 1].id.clone());
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+                // No next agent, move to next task
+                tab.selected_agent = None;
+                just_exited_agent = true;
+            }
+
+            // If task is selected, try to move to next task or dive into agents
+            if let Some(ref task_id) = tab.selected_task.clone() {
+                if let Some(phase) = phases.get(tab.selected_phase) {
+                    if let Some(task_idx) = phase.tasks.iter().position(|t| &t.id == task_id) {
+                        let task = &phase.tasks[task_idx];
+
+                        // If task is expanded and has agents, dive into first agent (but only if we didn't just exit an agent)
+                        if !just_exited_agent && tab.expanded_tasks.contains(task_id) && !task.agents.is_empty() {
+                            tab.selected_agent = Some(task.agents[0].id.clone());
+                            return;
+                        }
+
+                        // Move to next task in same phase
+                        if task_idx + 1 < phase.tasks.len() {
+                            tab.selected_task = Some(phase.tasks[task_idx + 1].id.clone());
+                            return;
+                        }
+                    }
+                }
+                // No next task in this phase, move to next phase
+                tab.selected_task = None;
+                if tab.selected_phase + 1 < phases.len() {
+                    tab.selected_phase += 1;
+                }
+                return;
+            }
+
+            // Navigate phases or dive into tasks
+            let phase = &phases[tab.selected_phase];
+
+            // If current phase is expanded and has tasks, dive into first task
+            if tab.expanded_phases.contains(&tab.selected_phase) && !phase.tasks.is_empty() {
+                tab.selected_task = Some(phase.tasks[0].id.clone());
+                return;
+            }
+
+            // Move to next phase
+            if tab.selected_phase + 1 < phases.len() {
+                tab.selected_phase += 1;
+            }
+        }
+    }
+
+    fn navigate_tab_up(&mut self) {
+        if self.open_tabs.is_empty() {
+            return;
+        }
+        let tab = &mut self.open_tabs[self.active_tab_idx];
+
+        if let Ok(phases) = tab.workflow_phases.lock() {
+            if phases.is_empty() {
+                return;
+            }
+
+            // If agent is selected, try to move to previous agent
+            if let Some(ref agent_id) = tab.selected_agent.clone() {
+                if let Some(ref task_id) = tab.selected_task {
+                    if let Some(phase) = phases.get(tab.selected_phase) {
+                        if let Some(task) = phase.tasks.iter().find(|t| &t.id == task_id) {
+                            if let Some(agent_idx) = task.agents.iter().position(|a| &a.id == agent_id) {
+                                if agent_idx > 0 {
+                                    // Move to previous agent
+                                    tab.selected_agent = Some(task.agents[agent_idx - 1].id.clone());
+                                    return;
+                                } else {
+                                    // Move back to task level
+                                    tab.selected_agent = None;
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If task is selected, try to move to previous task
+            if let Some(ref task_id) = tab.selected_task.clone() {
+                if let Some(phase) = phases.get(tab.selected_phase) {
+                    if let Some(task_idx) = phase.tasks.iter().position(|t| &t.id == task_id) {
+                        if task_idx > 0 {
+                            // Move to previous task
+                            let prev_task = &phase.tasks[task_idx - 1];
+                            tab.selected_task = Some(prev_task.id.clone());
+
+                            // If previous task is expanded and has agents, select last agent
+                            if tab.expanded_tasks.contains(&prev_task.id) && !prev_task.agents.is_empty() {
+                                tab.selected_agent = Some(prev_task.agents.last().unwrap().id.clone());
+                            }
+                            return;
+                        } else {
+                            // Move back to phase level
+                            tab.selected_task = None;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // Navigate phases
+            if tab.selected_phase > 0 {
+                tab.selected_phase -= 1;
+
+                // If moving to previous phase that's expanded with tasks, select last task
+                if let Some(phase) = phases.get(tab.selected_phase) {
+                    if tab.expanded_phases.contains(&tab.selected_phase) && !phase.tasks.is_empty() {
+                        let last_task = phase.tasks.last().unwrap();
+                        tab.selected_task = Some(last_task.id.clone());
+
+                        // If last task is expanded with agents, select last agent
+                        if tab.expanded_tasks.contains(&last_task.id) && !last_task.agents.is_empty() {
+                            tab.selected_agent = Some(last_task.agents.last().unwrap().id.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn toggle_tab_item(&mut self) {
+        if self.open_tabs.is_empty() {
+            return;
+        }
+        let tab = &mut self.open_tabs[self.active_tab_idx];
+
+        // If agent is selected, toggle agent expansion
+        if let Some(ref agent_id) = tab.selected_agent {
+            if tab.expanded_agents.contains(agent_id) {
+                tab.expanded_agents.remove(agent_id);
+            } else {
+                tab.expanded_agents.insert(agent_id.clone());
+            }
+        }
+        // If task is selected, toggle task expansion
+        else if let Some(ref task_id) = tab.selected_task {
+            if tab.expanded_tasks.contains(task_id) {
+                tab.expanded_tasks.remove(task_id);
+            } else {
+                tab.expanded_tasks.insert(task_id.clone());
+            }
+        }
+        // Otherwise, toggle phase expansion
+        else {
+            if tab.expanded_phases.contains(&tab.selected_phase) {
+                tab.expanded_phases.remove(&tab.selected_phase);
+            } else {
+                tab.expanded_phases.insert(tab.selected_phase);
+            }
+        }
+    }
+
+    fn toggle_tab_expand_all(&mut self) {
+        if self.open_tabs.is_empty() {
+            return;
+        }
+        let tab = &mut self.open_tabs[self.active_tab_idx];
+
+        if let Ok(phases) = tab.workflow_phases.lock() {
+            let all_expanded = phases.iter().all(|p| tab.expanded_phases.contains(&p.id));
+
+            if all_expanded {
+                // Collapse all
+                tab.expanded_phases.clear();
+                tab.expanded_tasks.clear();
+                tab.expanded_agents.clear();
+            } else {
+                // Expand all
+                for phase in phases.iter() {
+                    tab.expanded_phases.insert(phase.id);
+                    for task in &phase.tasks {
+                        tab.expanded_tasks.insert(task.id.clone());
+                        for agent in &task.agents {
+                            tab.expanded_agents.insert(agent.id.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn scroll_agent_messages_up(&mut self) {
+        if self.open_tabs.is_empty() {
+            return;
+        }
+        let tab = &mut self.open_tabs[self.active_tab_idx];
+
+        if let Some(ref agent_id) = tab.selected_agent {
+            let offset = tab.agent_scroll_offsets.entry(agent_id.clone()).or_insert(0);
+            if *offset > 0 {
+                *offset -= 1;
+            }
+        }
+    }
+
+    fn scroll_agent_messages_down(&mut self) {
+        if self.open_tabs.is_empty() {
+            return;
+        }
+        let tab = &mut self.open_tabs[self.active_tab_idx];
+
+        if let Some(ref agent_id) = tab.selected_agent {
+            // Find the agent to check message count
+            if let Ok(phases) = tab.workflow_phases.lock() {
+                for phase in phases.iter() {
+                    for task in &phase.tasks {
+                        if let Some(agent) = task.agents.iter().find(|a| &a.id == agent_id) {
+                            let offset = tab.agent_scroll_offsets.entry(agent_id.clone()).or_insert(0);
+                            let window_size = 5;
+                            let max_offset = agent.messages.len().saturating_sub(window_size);
+                            if *offset < max_offset {
+                                *offset += 1;
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Poll all running tabs for process status (output is read by threads)
     fn poll_all_tabs(&mut self) {
         for tab in &mut self.open_tabs {
@@ -656,6 +911,26 @@ impl App {
             // Load latest values from history (overrides defaults)
             self.load_latest_values_from_history(self.selected);
         }
+    }
+
+    fn edit_current_tab(&mut self) {
+        if self.open_tabs.is_empty() {
+            return;
+        }
+
+        let tab = &self.open_tabs[self.active_tab_idx];
+        let workflow_idx = tab.workflow_idx;
+
+        // Switch to edit view with the tab's current field values
+        self.current_view = View::WorkflowEdit(workflow_idx);
+        self.edit_field_index = 0;
+        self.is_editing = false;
+
+        // Load the tab's current field values
+        self.field_values = tab.field_values.clone();
+
+        // Keep track that we're editing from a tab
+        self.in_new_tab_flow = true;
     }
 
     fn start_editing_field(&mut self) {
@@ -855,6 +1130,95 @@ impl App {
                 *counter
             };
 
+            // Build the workflow binary first
+            let build_output = Command::new("cargo")
+                .args(&["build", "--bin", workflow_id])
+                .current_dir("..")
+                .output();
+
+            match build_output {
+                Ok(output) if !output.status.success() => {
+                    // Build failed - create tab with error
+                    let tab_id = format!("{}_{}", workflow.info.id, chrono::Local::now().format("%Y%m%d_%H%M%S"));
+                    let mut tab = WorkflowTab {
+                        id: tab_id,
+                        workflow_idx: idx,
+                        workflow_name: workflow.info.name.clone(),
+                        instance_number,
+                        start_time: Some(chrono::Local::now()),
+                        status: WorkflowStatus::Failed,
+                        child_process: None,
+                        exit_code: None,
+                        workflow_phases: Arc::new(Mutex::new(Vec::new())),
+                        workflow_output: Arc::new(Mutex::new(Vec::new())),
+                        field_values: self.field_values.clone(),
+                        scroll_offset: 0,
+                        expanded_phases: HashSet::new(),
+                        expanded_tasks: HashSet::new(),
+                        expanded_agents: HashSet::new(),
+                        selected_phase: 0,
+                        selected_task: None,
+                        selected_agent: None,
+                        agent_scroll_offsets: HashMap::new(),
+                        saved_logs: None,
+                    };
+
+                    if let Ok(mut output_vec) = tab.workflow_output.lock() {
+                        output_vec.push(format!("❌ Build failed for workflow: {}", workflow_id));
+                        output_vec.push(String::new());
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        for line in stderr.lines() {
+                            output_vec.push(line.to_string());
+                        }
+                    }
+
+                    self.open_tabs.push(tab);
+                    self.active_tab_idx = self.open_tabs.len() - 1;
+                    self.current_view = View::Tabs;
+                    self.in_new_tab_flow = false;
+                    return;
+                }
+                Err(e) => {
+                    // Cargo command failed to run
+                    let tab_id = format!("{}_{}", workflow.info.id, chrono::Local::now().format("%Y%m%d_%H%M%S"));
+                    let mut tab = WorkflowTab {
+                        id: tab_id,
+                        workflow_idx: idx,
+                        workflow_name: workflow.info.name.clone(),
+                        instance_number,
+                        start_time: Some(chrono::Local::now()),
+                        status: WorkflowStatus::Failed,
+                        child_process: None,
+                        exit_code: None,
+                        workflow_phases: Arc::new(Mutex::new(Vec::new())),
+                        workflow_output: Arc::new(Mutex::new(Vec::new())),
+                        field_values: self.field_values.clone(),
+                        scroll_offset: 0,
+                        expanded_phases: HashSet::new(),
+                        expanded_tasks: HashSet::new(),
+                        expanded_agents: HashSet::new(),
+                        selected_phase: 0,
+                        selected_task: None,
+                        selected_agent: None,
+                        agent_scroll_offsets: HashMap::new(),
+                        saved_logs: None,
+                    };
+
+                    if let Ok(mut output_vec) = tab.workflow_output.lock() {
+                        output_vec.push(format!("❌ Failed to run cargo build: {}", e));
+                    }
+
+                    self.open_tabs.push(tab);
+                    self.active_tab_idx = self.open_tabs.len() - 1;
+                    self.current_view = View::Tabs;
+                    self.in_new_tab_flow = false;
+                    return;
+                }
+                _ => {
+                    // Build succeeded, continue
+                }
+            }
+
             // Build command arguments from field values
             let mut args = Vec::new();
             for field in &workflow.info.fields {
@@ -898,6 +1262,7 @@ impl App {
                 selected_phase: 0,
                 selected_task: None,
                 selected_agent: None,
+                agent_scroll_offsets: HashMap::new(),
                 saved_logs: None,
             };
 
@@ -1151,8 +1516,8 @@ impl App {
         if let View::WorkflowEdit(idx) = self.current_view {
             if let Some(workflow) = self.workflows.get(idx) {
                 if let Some(field) = workflow.info.fields.get(self.edit_field_index) {
-                    // Only open for file_path fields
-                    if matches!(field.field_type, FieldType::FilePath { .. }) {
+                    // Only open for file_path and state_file fields
+                    if matches!(field.field_type, FieldType::FilePath { .. } | FieldType::StateFile { .. }) {
                         self.show_file_browser = true;
                         self.file_browser_search.clear();
                         self.load_file_browser_items();
@@ -1448,6 +1813,8 @@ impl App {
                 return;
             }
 
+            let mut just_exited_agent = false;
+
             // If we're on an agent, try to move to next agent in same task
             if let Some(ref agent_id) = self.selected_agent {
                 let phase = &phases[self.selected_phase];
@@ -1462,14 +1829,15 @@ impl App {
                 }
                 // No more agents, move to next task
                 self.selected_agent = None;
+                just_exited_agent = true;
             }
 
             // If we're on a task, try to move to next task in same phase or first agent if expanded
             if let Some(ref task_id) = self.selected_task {
                 let phase = &phases[self.selected_phase];
 
-                // Check if task is expanded and has agents
-                if self.expanded_tasks.contains(task_id) {
+                // Check if task is expanded and has agents (but only if we didn't just exit an agent)
+                if !just_exited_agent && self.expanded_tasks.contains(task_id) {
                     if let Some(task) = phase.tasks.iter().find(|t| &t.id == task_id) {
                         if !task.agents.is_empty() {
                             self.selected_agent = Some(task.agents[0].id.clone());
@@ -1615,6 +1983,70 @@ impl App {
                 self.expanded_phases.clear();
                 self.expanded_tasks.clear();
                 self.expanded_agents.clear();
+            }
+        }
+    }
+
+    fn update_workflow_scroll(&mut self, viewport_height: usize) {
+        // Calculate which line the selected item is on and adjust scroll to keep it visible
+        if let Ok(phases) = self.workflow_phases.lock() {
+            let mut current_line = 0;
+            let mut selected_line = 0;
+
+            for phase in phases.iter() {
+                // Check if this phase is selected
+                if self.selected_phase == phase.id && self.selected_task.is_none() && self.selected_agent.is_none() {
+                    selected_line = current_line;
+                }
+                current_line += 1; // Phase header
+
+                if self.expanded_phases.contains(&phase.id) {
+                    for task in &phase.tasks {
+                        // Check if this task is selected
+                        if self.selected_phase == phase.id && Some(&task.id) == self.selected_task.as_ref() && self.selected_agent.is_none() {
+                            selected_line = current_line;
+                        }
+                        current_line += 1; // Task header
+
+                        if self.expanded_tasks.contains(&task.id) {
+                            // Count task messages
+                            current_line += task.messages.len();
+
+                            for agent in &task.agents {
+                                // Check if this agent is selected
+                                if Some(&agent.id) == self.selected_agent.as_ref() {
+                                    selected_line = current_line;
+                                }
+                                current_line += 1; // Agent header
+
+                                if self.expanded_agents.contains(&agent.id) {
+                                    current_line += agent.messages.len();
+                                }
+                            }
+                        }
+                    }
+
+                    // Count output files
+                    if !phase.output_files.is_empty() {
+                        current_line += 1; // "Output files:" header
+                        current_line += phase.output_files.len();
+                    }
+                }
+
+                current_line += 1; // Empty line after phase
+            }
+
+            // Adjust scroll offset to keep selected line visible
+            // Leave some padding at top and bottom
+            let padding = 2;
+            let visible_lines = viewport_height.saturating_sub(2); // Account for borders
+
+            if selected_line < self.workflow_scroll_offset + padding {
+                // Selected line is above visible area, scroll up
+                self.workflow_scroll_offset = selected_line.saturating_sub(padding);
+            } else if selected_line >= self.workflow_scroll_offset + visible_lines.saturating_sub(padding) {
+                // Selected line is below visible area, scroll down
+                self.workflow_scroll_offset = selected_line.saturating_sub(visible_lines.saturating_sub(padding).saturating_sub(1));
             }
         }
     }
@@ -1933,7 +2365,7 @@ fn run_app<B: ratatui::backend::Backend>(
                                     if let Some(workflow) = app.workflows.get(idx) {
                                         if let Some(field) = workflow.info.fields.get(app.edit_field_index) {
                                             match field.field_type {
-                                                FieldType::FilePath { .. } => {
+                                                FieldType::FilePath { .. } | FieldType::StateFile { .. } => {
                                                     app.complete_path();
                                                 }
                                                 FieldType::Text | FieldType::Number { .. } => {
@@ -1960,28 +2392,67 @@ fn run_app<B: ratatui::backend::Backend>(
                             KeyCode::Down | KeyCode::Char('j') => {
                                 if matches!(app.current_view, View::WorkflowRunning(_)) {
                                     app.navigate_workflow_down();
+                                    app.update_workflow_scroll(30); // Estimate viewport height
+                                } else if matches!(app.current_view, View::Tabs) {
+                                    app.navigate_tab_down();
                                 } else {
                                     app.next();
                                 }
                             }
-                            KeyCode::Up | KeyCode::Char('k') => {
+                            KeyCode::Up => {
                                 if matches!(app.current_view, View::WorkflowRunning(_)) {
                                     app.navigate_workflow_up();
+                                    app.update_workflow_scroll(30); // Estimate viewport height
+                                } else if matches!(app.current_view, View::Tabs) {
+                                    app.navigate_tab_up();
                                 } else {
                                     app.previous();
+                                }
+                            }
+                            KeyCode::Char('k') => {
+                                if matches!(app.current_view, View::WorkflowRunning(_)) {
+                                    app.navigate_workflow_up();
+                                    app.update_workflow_scroll(30); // Estimate viewport height
+                                } else if matches!(app.current_view, View::Tabs) {
+                                    app.navigate_tab_up();
+                                } else {
+                                    app.previous();
+                                }
+                            }
+                            KeyCode::Char('K') => {
+                                // K: Kill workflow (in Tabs view)
+                                if matches!(app.current_view, View::Tabs) {
+                                    app.kill_current_tab();
                                 }
                             }
                             KeyCode::Enter => {
                                 match app.current_view {
                                     View::WorkflowList => app.view_workflow(),
                                     View::WorkflowEdit(_) => app.start_editing_field(),
-                                    View::WorkflowRunning(_) => app.toggle_selected_item(),
+                                    View::WorkflowRunning(_) => {
+                                        app.toggle_selected_item();
+                                        app.update_workflow_scroll(30); // Estimate viewport height
+                                    }
+                                    View::Tabs => app.toggle_tab_item(),
                                     _ => {}
                                 }
                             }
                             KeyCode::Char(' ') => {
                                 if matches!(app.current_view, View::WorkflowRunning(_)) {
                                     app.toggle_expand_all();
+                                    app.update_workflow_scroll(30); // Estimate viewport height
+                                } else if matches!(app.current_view, View::Tabs) {
+                                    app.toggle_tab_expand_all();
+                                }
+                            }
+                            KeyCode::PageUp | KeyCode::Left | KeyCode::Char('h') => {
+                                if matches!(app.current_view, View::Tabs) {
+                                    app.scroll_agent_messages_up();
+                                }
+                            }
+                            KeyCode::PageDown | KeyCode::Right => {
+                                if matches!(app.current_view, View::Tabs) {
+                                    app.scroll_agent_messages_down();
                                 }
                             }
                             KeyCode::Char('v') => {
@@ -1992,12 +2463,17 @@ fn run_app<B: ratatui::backend::Backend>(
                             KeyCode::Char('e') | KeyCode::Char('E') => {
                                 if matches!(app.current_view, View::WorkflowDetail(_)) {
                                     app.edit_workflow();
+                                } else if matches!(app.current_view, View::Tabs) {
+                                    app.edit_current_tab();
                                 }
                             }
                             KeyCode::Char('l') | KeyCode::Char('L') => {
                                 match app.current_view {
                                     View::WorkflowDetail(_) | View::WorkflowEdit(_) => {
                                         app.launch_workflow_in_tab();
+                                    }
+                                    View::Tabs => {
+                                        app.scroll_agent_messages_down();
                                     }
                                     _ => {}
                                 }
@@ -2050,12 +2526,6 @@ fn run_app<B: ratatui::backend::Backend>(
                                 // C: Close tab (in Tabs view)
                                 if matches!(app.current_view, View::Tabs) {
                                     app.close_current_tab();
-                                }
-                            }
-                            KeyCode::Char('k') | KeyCode::Char('K') => {
-                                // K: Kill workflow (in Tabs view)
-                                if matches!(app.current_view, View::Tabs) {
-                                    app.kill_current_tab();
                                 }
                             }
                             KeyCode::Char('r') | KeyCode::Char('R') => {
@@ -2406,8 +2876,11 @@ fn render_workflow_edit(f: &mut Frame, area: Rect, app: &App, idx: usize) {
                         .collect())
                     .unwrap_or_default();
 
-                // Field is required if any selected phase matches required_phases
-                required_phases.iter().any(|p| selected_phases.contains(p))
+                // Field is required if the EARLIEST selected phase needs this field
+                // (e.g., phases "1,2,3,4" only needs requirements for phase 1)
+                selected_phases.iter().min()
+                    .map(|min_phase| required_phases.contains(min_phase))
+                    .unwrap_or(false)
             } else {
                 field.required
             };
@@ -2690,7 +3163,8 @@ fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize) {
         .block(Block::default()
             .borders(Borders::ALL)
             .title(title)
-            .style(Style::default().fg(Color::White)));
+            .style(Style::default().fg(Color::White)))
+        .scroll((app.workflow_scroll_offset as u16, 0));
 
     f.render_widget(paragraph, area);
 }
@@ -2753,18 +3227,22 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
             Span::raw(" Quit"),
         ]),
         View::Tabs => Line::from(vec![
+            Span::styled("[↑↓/jk]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Navigate  "),
+            Span::styled("[←→/hl]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Scroll Agent  "),
+            Span::styled("[Enter]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Expand  "),
+            Span::styled("[Space]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Toggle All  "),
             Span::styled("[Tab]", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" Next Tab  "),
-            Span::styled("[Shift+Tab]", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" Prev Tab  "),
-            Span::styled("[Ctrl+T]", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" New  "),
-            Span::styled("[C]", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" Close  "),
-            Span::styled("[K]", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" Kill  "),
+            Span::raw(" Switch  "),
+            Span::styled("[E]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Edit  "),
             Span::styled("[R]", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(" Rerun  "),
+            Span::styled("[C]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Close  "),
             Span::styled("[Q]", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(" Quit"),
         ]),
@@ -3113,60 +3591,240 @@ fn render_close_confirmation(f: &mut Frame, area: Rect) {
     f.render_widget(paragraph, popup_area);
 }
 
-fn render_tab_content(f: &mut Frame, area: Rect, app: &App, tab: &WorkflowTab) {
-    // Reuse the existing workflow running view, but use tab's state
-    // This is a simplified version - full implementation will adapt render_workflow_running
-
+fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowTab) {
     let title = format!(" {} #{} ", tab.workflow_name, tab.instance_number);
 
-    let mut lines = vec![];
+    let mut lines: Vec<Line> = Vec::new();
 
-    // Show status
-    let status_text = match tab.status {
-        WorkflowStatus::Running => "Running...",
-        WorkflowStatus::Completed => "Completed ✓",
-        WorkflowStatus::Failed => "Failed ✗",
-        WorkflowStatus::NotStarted => "Not Started",
+    // Display hierarchical phase/task/agent structure
+    let phases_snapshot: Vec<WorkflowPhase> = if let Ok(phases) = tab.workflow_phases.lock() {
+        phases.clone()
+    } else {
+        Vec::new()
     };
-    lines.push(Line::from(vec![
-        Span::styled("Status: ", Style::default().fg(Color::Cyan)),
-        Span::styled(status_text, Style::default().fg(Color::White)),
-    ]));
-    lines.push(Line::from(""));
 
-    // Show phases (simplified for now)
-    if let Ok(phases) = tab.workflow_phases.lock() {
-        for phase in phases.iter() {
+    if !phases_snapshot.is_empty() {
+        for phase in &phases_snapshot {
+            // Phase header
             let phase_icon = match phase.status {
-                PhaseStatus::Running => "◉",
+                PhaseStatus::NotStarted => "○",
+                PhaseStatus::Running => "▶",
                 PhaseStatus::Completed => "✓",
                 PhaseStatus::Failed => "✗",
-                PhaseStatus::NotStarted => "○",
+            };
+            let phase_color = match phase.status {
+                PhaseStatus::NotStarted => Color::Gray,
+                PhaseStatus::Running => Color::Yellow,
+                PhaseStatus::Completed => Color::Green,
+                PhaseStatus::Failed => Color::Red,
             };
 
-            lines.push(Line::from(vec![
-                Span::styled(format!("{} ", phase_icon), Style::default().fg(Color::Yellow)),
-                Span::styled(format!("Phase {}: {}", phase.id, phase.name), Style::default().fg(Color::Cyan)),
-            ]));
-        }
-    }
+            let is_expanded = tab.expanded_phases.contains(&phase.id);
+            let expand_icon = if is_expanded { "▼" } else { "▶" };
+            let is_selected = tab.selected_phase == phase.id && tab.selected_task.is_none() && tab.selected_agent.is_none();
 
-    // Show output
-    if let Ok(output) = tab.workflow_output.lock() {
-        if !output.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled("Output:", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))));
-            for line in output.iter().skip(tab.scroll_offset).take(area.height as usize - lines.len() - 5) {
+            let mut phase_spans = vec![
+                Span::styled(format!("{} ", phase_icon), Style::default().fg(phase_color)),
+                Span::styled(format!("{} ", expand_icon), Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    format!("Phase {}: {}", phase.id, phase.name),
+                    if is_selected {
+                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                    } else {
+                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                    }
+                ),
+            ];
+
+            // Show last task message if collapsed
+            if !is_expanded && !phase.tasks.is_empty() {
+                if let Some(last_task) = phase.tasks.last() {
+                    if let Some(last_msg) = last_task.messages.last() {
+                        let preview = if last_msg.len() > 40 {
+                            format!(" - {}...", &last_msg[..40])
+                        } else {
+                            format!(" - {}", last_msg)
+                        };
+                        phase_spans.push(Span::styled(preview, Style::default().fg(Color::DarkGray)));
+                    }
+                }
+            }
+
+            lines.push(Line::from(phase_spans));
+
+            if is_expanded {
+                // Display tasks
+                for task in &phase.tasks {
+                    let task_icon = match task.status {
+                        TaskStatus::NotStarted => "○",
+                        TaskStatus::Running => "▶",
+                        TaskStatus::Completed => "✓",
+                        TaskStatus::Failed => "✗",
+                    };
+                    let task_color = match task.status {
+                        TaskStatus::NotStarted => Color::Gray,
+                        TaskStatus::Running => Color::Yellow,
+                        TaskStatus::Completed => Color::Green,
+                        TaskStatus::Failed => Color::Red,
+                    };
+
+                    let task_expanded = tab.expanded_tasks.contains(&task.id);
+                    let task_expand_icon = if task_expanded { "▼" } else { "▶" };
+                    let is_task_selected = tab.selected_phase == phase.id &&
+                                          Some(&task.id) == tab.selected_task.as_ref() &&
+                                          tab.selected_agent.is_none();
+
+                    let mut task_spans = vec![
+                        Span::raw("  "),
+                        Span::styled(format!("{} ", task_icon), Style::default().fg(task_color)),
+                        Span::styled(format!("{} ", task_expand_icon), Style::default().fg(Color::Cyan)),
+                        Span::styled(
+                            &task.description,
+                            if is_task_selected {
+                                Style::default().fg(Color::White).add_modifier(Modifier::REVERSED)
+                            } else {
+                                Style::default().fg(Color::White)
+                            }
+                        ),
+                    ];
+
+                    // Show last message if collapsed
+                    if !task_expanded && !task.messages.is_empty() {
+                        if let Some(last_msg) = task.messages.last() {
+                            let preview = if last_msg.len() > 30 {
+                                format!(" - {}...", &last_msg[..30])
+                            } else {
+                                format!(" - {}", last_msg)
+                            };
+                            task_spans.push(Span::styled(preview, Style::default().fg(Color::DarkGray)));
+                        }
+                    }
+
+                    lines.push(Line::from(task_spans));
+
+                    if task_expanded {
+                        // Display task messages
+                        for msg in &task.messages {
+                            lines.push(Line::from(vec![
+                                Span::raw("    "),
+                                Span::styled(msg, Style::default().fg(Color::Gray)),
+                            ]));
+                        }
+
+                        // Display agents
+                        for agent in &task.agents {
+                            let agent_icon = match agent.status {
+                                AgentStatus::NotStarted => "○",
+                                AgentStatus::Running => "▶",
+                                AgentStatus::Completed => "✓",
+                                AgentStatus::Failed => "✗",
+                            };
+                            let agent_color = match agent.status {
+                                AgentStatus::NotStarted => Color::Gray,
+                                AgentStatus::Running => Color::Yellow,
+                                AgentStatus::Completed => Color::Green,
+                                AgentStatus::Failed => Color::Red,
+                            };
+
+                            let agent_expanded = tab.expanded_agents.contains(&agent.id);
+                            let agent_expand_icon = if agent_expanded { "▼" } else { "▶" };
+                            let is_agent_selected = Some(&agent.id) == tab.selected_agent.as_ref();
+
+                            let agent_spans = vec![
+                                Span::raw("    "),
+                                Span::styled(format!("{} ", agent_icon), Style::default().fg(agent_color)),
+                                Span::styled(format!("{} ", agent_expand_icon), Style::default().fg(Color::Cyan)),
+                                Span::styled(
+                                    format!("@{}", agent.name),
+                                    if is_agent_selected {
+                                        Style::default().fg(Color::Magenta).add_modifier(Modifier::REVERSED)
+                                    } else {
+                                        Style::default().fg(Color::Magenta)
+                                    }
+                                ),
+                            ];
+
+                            // Show last line when collapsed
+                            let mut agent_line_spans = agent_spans;
+                            if !agent_expanded && !agent.messages.is_empty() {
+                                if let Some(last_msg) = agent.messages.last() {
+                                    let preview = if last_msg.len() > 50 {
+                                        format!(" - {}...", &last_msg[..50])
+                                    } else {
+                                        format!(" - {}", last_msg)
+                                    };
+                                    agent_line_spans.push(Span::styled(preview, Style::default().fg(Color::DarkGray)));
+                                }
+                            }
+                            lines.push(Line::from(agent_line_spans));
+
+                            if agent_expanded {
+                                // Display scrollable 5-line window of agent messages
+                                let window_size = 5;
+                                let total_messages = agent.messages.len();
+
+                                if total_messages > 0 {
+                                    // Default to showing the LAST 5 messages (most recent)
+                                    let default_offset = total_messages.saturating_sub(window_size);
+                                    let scroll_offset = tab.agent_scroll_offsets.get(&agent.id).copied().unwrap_or(default_offset);
+
+                                    let start = scroll_offset.min(total_messages.saturating_sub(1));
+                                    let end = (start + window_size).min(total_messages);
+
+                                    for msg in &agent.messages[start..end] {
+                                        lines.push(Line::from(vec![
+                                            Span::raw("      "),
+                                            Span::styled(msg, Style::default().fg(Color::DarkGray)),
+                                        ]));
+                                    }
+
+                                    // Show scroll indicator if there are more messages
+                                    if total_messages > window_size {
+                                        let indicator = format!("      [Showing {}-{} of {}]",
+                                            start + 1, end, total_messages);
+                                        lines.push(Line::from(vec![
+                                            Span::styled(indicator, Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC)),
+                                        ]));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Display output files
+                if !phase.output_files.is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled("Output files:", Style::default().fg(Color::Cyan)),
+                    ]));
+                    for (path, desc) in &phase.output_files {
+                        lines.push(Line::from(vec![
+                            Span::raw("    "),
+                            Span::styled("📄 ", Style::default().fg(Color::Green)),
+                            Span::styled(path, Style::default().fg(Color::Yellow)),
+                            Span::raw(" - "),
+                            Span::styled(desc, Style::default().fg(Color::Gray)),
+                        ]));
+                    }
+                }
+            }
+        }
+    } else {
+        // No phases yet - show output
+        if let Ok(output) = tab.workflow_output.lock() {
+            for line in output.iter() {
                 lines.push(Line::from(line.clone()));
             }
         }
     }
 
-    let paragraph = Paragraph::new(lines)
+    let content = Paragraph::new(lines)
         .block(Block::default()
             .borders(Borders::ALL)
             .title(title)
-            .style(Style::default().fg(Color::White)));
+            .style(Style::default().fg(Color::White)))
+        .scroll((tab.scroll_offset as u16, 0));
 
-    f.render_widget(paragraph, area);
+    f.render_widget(content, area);
 }

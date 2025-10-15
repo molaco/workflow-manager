@@ -1,750 +1,1202 @@
-# Implementation Plan: Complex Workflow Support
+# Workflow Manager: MCP Integration & API Architecture Specification
 
-## Overview
+## Table of Contents
+1. [Introduction](#introduction)
+2. [Current Architecture](#current-architecture)
+3. [Proposed Service API](#proposed-service-api)
+4. [MCP Server Implementation](#mcp-server-implementation)
+5. [Type System Status](#type-system-status)
+6. [Critical Gaps](#critical-gaps)
+7. [Recommended Architecture Evolution](#recommended-architecture-evolution)
+8. [Implementation Roadmap](#implementation-roadmap)
+9. [API Readiness Assessment](#api-readiness-assessment)
+10. [Actionable Recommendations](#actionable-recommendations)
 
-Transform the workflow manager from supporting simple single-execution workflows to supporting complex, multi-phase, stateful workflows with hierarchical logging and real-time progress tracking.
+## Introduction
 
-## Goals
+This document provides a comprehensive specification for integrating the Workflow Manager with the Model Context Protocol (MCP) and evolving its architecture to support API-driven execution. The Workflow Manager currently operates as a TUI application with process-based workflow execution, and this specification outlines the path to expose its functionality through MCP tools and future HTTP/WebSocket APIs.
 
-1. Support multi-phase workflows (like research_agent, tasks_agent)
-2. Enable resumability from any phase using saved state files
-3. Provide hierarchical log viewing (phases → tasks → agents)
-4. Display real-time progress with expand/collapse functionality
-5. Track concurrent execution with batch processing
+### Purpose
 
-## Architecture
+- Define the architecture for MCP integration using in-process patterns
+- Specify a service layer (`WorkflowRuntime`) to unify TUI and MCP execution models
+- Identify type system limitations blocking API readiness
+- Provide a phased implementation roadmap with time estimates
 
-### Core Concepts
+### Scope
 
-**Phase-based Execution:**
-- Workflows have multiple phases (0, 1, 2, 3, 4)
-- Each phase can be run independently
-- Phases communicate via intermediate YAML files
-- User can resume from any phase using `--phases` flag
+This specification covers:
+- Current architecture analysis and execution model
+- Service API design for workflow discovery, execution, and monitoring
+- MCP server implementation patterns and tool definitions
+- Type system gaps requiring refactoring
+- Production hardening requirements (resource controls, persistence, multi-tenancy)
 
-**Structured Logging:**
-- Workflows emit structured events to stderr
-- Format: `__WF_EVENT__:{"type":"phase_started","phase":2}`
-- TUI parses these events for hierarchical display
-- Human-readable logs go to stdout
+## Current Architecture
 
-**Hierarchical Progress:**
-- Phase level: "Phase 2: Execute Research (3/5 complete)"
-- Task level: "Task 3: API Documentation (in progress)"
-- Agent level: "@files agent: Completed (5 files identified)"
+### Execution Model
 
-**State Management:**
-- Each phase outputs files (e.g., `codebase_analysis_20250113_143045.yaml`)
-- TUI tracks these state files
-- Can pass state files to resume from specific phases
+The Workflow Manager uses a **process-based execution model** where all workflows run as separate processes spawned via `std::process::Command`. This provides strong isolation but introduces complexity in state management and communication.
 
-## Implementation Steps
+**Key characteristics:**
 
-### Phase 1: Structured Logging Infrastructure
+- **Communication protocol**: Structured events transmitted over stderr using the `__WF_EVENT__:<JSON>` format
+- **State hierarchy**: Three-level tracking system: `Phase → Task → Agent`
+- **Binary discovery**: Workflow executables respond to `--workflow-metadata` flag with JSON schema describing inputs
+- **State management**: In-memory `Arc<Mutex<Vec<WorkflowPhase>>>` per tab (non-persistent across application restarts)
 
-**1.1 Define WorkflowLog enum in workflow-manager-sdk**
+**Process lifecycle:**
+1. Discovery: Scan directories for workflow binaries
+2. Metadata extraction: Execute `binary --workflow-metadata` to get schema
+3. Execution: Spawn process with constructed CLI arguments
+4. Monitoring: Parse stderr for `__WF_EVENT__` messages
+5. State tracking: Build hierarchical phase/task/agent structure dynamically
+
+### Three-Layer Design
+
+The architecture follows a clean separation of concerns:
+
+1. **Domain Layer** (`workflow-manager-sdk`): Runtime-agnostic types
+   - Core types: `WorkflowDefinition`, `WorkflowLog`, `WorkflowStatus`, `FieldSchema`
+   - Location: workflow-manager-sdk/src/lib.rs:40-65
+   - Dependencies: Minimal (serde, serde_json, chrono)
+
+2. **Service Layer**: `WorkflowRuntime` facade (proposed) providing unified API
+   - Abstracts execution model from consumers
+   - Provides sync operations (list, validate) and async operations (execute, subscribe)
+   - Enables both TUI and MCP to share execution logic
+
+3. **Adapter Layer**: TUI and MCP server consuming same `WorkflowRuntime`
+   - TUI: Terminal interface with tab-based workflow management
+   - MCP: In-process JSONRPC server exposing workflow tools
+
+### Discovery & Execution Flow
+
+**Discovery** (src/discovery.rs:15):
+- Scan `~/.workflow-manager/workflows/` and `../target/debug`
+- Execute each binary with `--workflow-metadata`
+- Parse JSON response to extract `FieldSchema[]`
+- Cache metadata for UI rendering and validation
+
+**Execution** (main.rs:502-563):
+1. Build CLI arguments from `HashMap<String, String>` inputs
+2. Spawn process via `std::process::Command`
+3. Attach stdout/stderr readers
+4. Parse structured events from stderr
+5. Forward stdout to display buffers
+
+**State tracking** (main.rs:1255-1400):
+- `handle_workflow_event()` dynamically builds hierarchy
+- 15+ `WorkflowLog` variants cover all lifecycle events
+- Phase/Task/Agent status updates propagate to UI
+- Session restore via JSON (main.rs:229-328)
+
+## Proposed Service API
+
+### WorkflowRuntime Interface
+
+The `WorkflowRuntime` provides a unified API for both TUI and MCP consumers, abstracting the process-based execution model.
+
+#### Synchronous Operations
 
 ```rust
-// workflow-manager-sdk/src/lib.rs
+pub trait WorkflowRuntime {
+    /// List all discovered workflows with metadata
+    fn list_workflows(&self) -> Result<Vec<WorkflowMetadata>>;
+
+    /// Get detailed metadata for a specific workflow
+    fn get_workflow_metadata(&self, id: &str) -> Result<WorkflowMetadata>;
+
+    /// Validate inputs against workflow schema before execution
+    fn validate_workflow_inputs(
+        &self,
+        id: &str,
+        params: HashMap<String, String>
+    ) -> Result<()>;
+
+    /// Get current status of a running workflow
+    fn get_workflow_status(&self, handle_id: &Uuid) -> Result<WorkflowStatus>;
+}
+```
+
+**Design rationale:**
+- Discovery and validation must be synchronous for UI responsiveness
+- Metadata includes `FieldSchema[]` for automatic form generation and validation
+- Pre-execution validation prevents runtime errors from invalid inputs
+
+#### Asynchronous Operations
+
+```rust
+pub trait WorkflowRuntime {
+    /// Execute a workflow asynchronously
+    async fn execute_workflow(
+        &self,
+        id: &str,
+        params: HashMap<String, String>
+    ) -> Result<WorkflowHandle>;
+
+    /// Subscribe to logs from a running workflow
+    async fn subscribe_logs(
+        &self,
+        handle_id: &Uuid
+    ) -> Result<impl Stream<Item = WorkflowLog>>;
+}
+```
+
+**Design rationale:**
+- Workflows are long-running (seconds to hours), requiring async execution
+- Logs stream via broadcast channels (tokio) to support multiple subscribers
+- Returns immediately with `WorkflowHandle` for tracking
+
+### WorkflowHandle
+
+The `WorkflowHandle` provides access to workflow execution state and logs:
+
+```rust
+pub struct WorkflowHandle {
+    id: Uuid,
+    workflow_id: String,
+    logs: tokio::sync::broadcast::Receiver<WorkflowLog>,
+    completion: tokio::sync::oneshot::Receiver<WorkflowResult>,
+}
+
+impl WorkflowHandle {
+    /// Get a stream of workflow logs
+    pub fn logs(&mut self) -> impl Stream<Item = WorkflowLog> + '_;
+
+    /// Wait for workflow completion
+    pub async fn wait_completion(&mut self) -> Result<WorkflowResult>;
+
+    /// Get the unique execution ID
+    pub fn id(&self) -> &Uuid;
+}
+```
+
+**Channel sizing:**
+- Bounded channels (32-100 capacity) prevent memory leaks from slow consumers
+- Oldest logs dropped on overflow (acceptable for streaming use cases)
+- Persistent storage required for complete history
+
+### Data Flow
+
+**1. Initialization:**
+```
+Discovery → FieldSchema → Validation → Spawn process with unique UUID
+```
+
+**2. Runtime:**
+```
+Stderr parsing → Hierarchical state updates → Emit WorkflowLog variants
+                                            ↓
+                            Broadcast to subscribers (TUI, MCP, API)
+```
+
+**3. Persistence:**
+- Current: Session restore via JSON (main.rs:229-328)
+- Future: Database storage of execution history and artifacts
+
+### Supported Field Types
+
+The `FieldSchema` system supports six field types with JSON Schema conversion:
+
+| Type | Purpose | Validation |
+|------|---------|------------|
+| `Text` | Free-form string input | Max length, regex patterns |
+| `Number` | Integer/float input | Min/max, step |
+| `FilePath` | Local file selection | Existence check, extension filter |
+| `Select` | Dropdown/enum | Fixed set of options |
+| `PhaseSelector` | Multi-phase selection | Valid phase indices |
+| `StateFile` | Cross-workflow state | Compatibility check |
+
+**MCP integration:**
+- `FieldSchema` → JSON Schema conversion for automatic tool registration
+- MCP clients can generate forms from schemas
+- Type safety enforced at SDK boundary
+
+## MCP Server Implementation
+
+### In-Process Pattern
+
+The MCP integration uses the **in-process pattern** via `SdkMcpServer`, avoiding subprocess overhead:
+
+```rust
+use crate::mcp::{SdkMcpServer, SdkMcpTool};
+
+let server = SdkMcpServer::new("workflow_manager")
+    .description("Execute and manage workflows")
+    .tools(vec![
+        list_workflows_tool(runtime.clone()),
+        execute_workflow_tool(runtime.clone()),
+        get_workflow_logs_tool(runtime.clone()),
+    ])
+    .build()?;
+```
+
+**Advantages:**
+- JSONRPC over channels (no network/IPC serialization)
+- Direct access to `WorkflowRuntime` via `Arc<dyn WorkflowRuntime>`
+- Lower latency than subprocess-based MCP servers
+
+**Naming convention:**
+- Tools exposed as `mcp__{server_name}__{tool_name}`
+- Example: `mcp__workflow_manager__execute_workflow`
+
+### Three Core Tools
+
+#### 1. list_workflows
+
+**Purpose:** Discover all available workflows with their metadata.
+
+```rust
+fn list_workflows_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
+    SdkMcpTool::new(
+        "list_workflows",
+        "List all available workflows with their metadata and input schemas",
+        serde_json::json!({"type": "object", "properties": {}}),
+        move |_params| {
+            let runtime = runtime.clone();
+            async move {
+                let workflows = runtime.list_workflows()?;
+                let result = serde_json::to_value(&workflows)?;
+                Ok(ToolResult::success(result))
+            }
+        }
+    )
+}
+```
+
+**Returns:**
+```json
+[
+  {
+    "id": "research_agent",
+    "name": "Research Agent",
+    "description": "Performs web research on multiple topics",
+    "fields": [
+      {
+        "name": "topics",
+        "field_type": "Text",
+        "required": true,
+        "description": "Comma-separated research topics"
+      }
+    ]
+  }
+]
+```
+
+#### 2. execute_workflow
+
+**Purpose:** Start asynchronous workflow execution.
+
+```rust
+fn execute_workflow_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
+    SdkMcpTool::new(
+        "execute_workflow",
+        "Execute a workflow with provided parameters",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "workflow_id": {"type": "string"},
+                "parameters": {"type": "object"}
+            },
+            "required": ["workflow_id", "parameters"]
+        }),
+        move |params| {
+            let runtime = runtime.clone();
+            async move {
+                let workflow_id = params["workflow_id"].as_str().unwrap();
+                let parameters = params["parameters"].as_object().unwrap()
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
+                    .collect();
+
+                let handle = runtime.execute_workflow(workflow_id, parameters).await?;
+
+                Ok(ToolResult::success(serde_json::json!({
+                    "handle_id": handle.id(),
+                    "status": "running"
+                })))
+            }
+        }
+    )
+}
+```
+
+**Input:**
+```json
+{
+  "workflow_id": "research_agent",
+  "parameters": {
+    "topics": "quantum computing, AI safety"
+  }
+}
+```
+
+**Returns:**
+```json
+{
+  "handle_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "running"
+}
+```
+
+#### 3. get_workflow_logs
+
+**Purpose:** Retrieve logs from a running or completed workflow.
+
+```rust
+fn get_workflow_logs_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
+    SdkMcpTool::new(
+        "get_workflow_logs",
+        "Get logs from a workflow execution",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "handle_id": {"type": "string", "format": "uuid"}
+            },
+            "required": ["handle_id"]
+        }),
+        move |params| {
+            let runtime = runtime.clone();
+            async move {
+                let handle_id = Uuid::parse_str(params["handle_id"].as_str().unwrap())?;
+                let mut logs_stream = runtime.subscribe_logs(&handle_id).await?;
+
+                let mut logs = Vec::new();
+                while let Some(log) = logs_stream.next().await {
+                    logs.push(log);
+                }
+
+                Ok(ToolResult::success(serde_json::to_value(&logs)?))
+            }
+        }
+    )
+}
+```
+
+**Input:**
+```json
+{
+  "handle_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Returns:**
+```json
+[
+  {
+    "type": "WorkflowStarted",
+    "workflow_id": "research_agent",
+    "timestamp": "2025-10-14T20:00:00Z"
+  },
+  {
+    "type": "PhaseStarted",
+    "phase_id": 0,
+    "name": "Research Phase",
+    "timestamp": "2025-10-14T20:00:01Z"
+  }
+]
+```
+
+### State Management
+
+**Concurrency patterns:**
+
+```rust
+// Shared state across tool handlers
+let state = Arc::new(Mutex::new(WorkflowState::new()));
+
+// Clone Arc into each tool handler closure
+let execute_state = state.clone();
+let logs_state = state.clone();
+
+// TUI: Arc<Mutex<>> for thread-safe buffers (main.rs:1108-1253)
+// MCP: tokio::sync for async-safe state with unique UUIDs
+```
+
+**Best practices:**
+- Use `Arc<tokio::sync::Mutex<>>` for async contexts
+- Use `Arc<std::sync::Mutex<>>` for sync contexts
+- Store `HashMap<Uuid, WorkflowHandle>` for handle tracking
+- Clean up completed handles periodically
+
+### Error Handling
+
+**Domain errors:**
+```rust
+// Workflow not found
+return Ok(ToolResult::error("Workflow 'foo' not found"));
+
+// Validation failure
+return Ok(ToolResult::error("Required field 'topics' missing"));
+```
+
+**System errors:**
+```rust
+// Process spawn failure
+Err(anyhow!("Failed to spawn workflow process"))
+
+// Channel closed
+Err(anyhow!("Workflow execution channel closed unexpectedly"))
+```
+
+**Validation:**
+- Automatic via JSON schema for tool inputs
+- Manual via `validate_workflow_inputs()` for workflow parameters
+- Return structured error messages with field names
+
+### Registration Checklist
+
+**Complete MCP integration in 5 steps:**
+
+1. **Create tools:**
+```rust
+let tools = vec![
+    SdkMcpTool::new(name, desc, schema, handler),
+    // ... repeat for each tool
+];
+```
+
+2. **Build server:**
+```rust
+let server = SdkMcpServer::new("workflow_manager")
+    .description("Workflow execution and management")
+    .tools(tools)
+    .build()?;
+```
+
+3. **Register server:**
+```rust
+McpServerConfig::Sdk(SdkMcpServerMarker {
+    name: "workflow_manager".to_string(),
+    instance: Arc::new(server)
+})
+```
+
+4. **Allow tools:**
+```rust
+allowed_tools: vec![
+    ToolName::new("mcp__workflow_manager__*")
+]
+```
+
+5. **Handle requests:**
+```rust
+// Background task
+tokio::spawn(async move {
+    loop {
+        let request = mcp_rx.recv().await?;
+        let response = server.handle_request(request).await?;
+        mcp_tx.send(response).await?;
+    }
+});
+```
+
+**Reference:**
+- MCP protocol: src/mcp/{server,tool,protocol}.rs
+- Client integration: src/client/mod.rs:266-279, 750-820
+
+## Type System Status
+
+### ✅ Production-Ready
+
+The following types are stable and ready for API use:
+
+- **`WorkflowMetadata`**: Complete workflow schema with fields, description, version
+- **`WorkflowLog`**: 15+ event variants covering full lifecycle (PhaseStarted, TaskCompleted, AgentProgress, etc.)
+- **`WorkflowStatus`**: Enum for Running/Completed/Failed states
+- **Discovery system**: Binary scanning and metadata extraction fully functional
+
+These types require no changes for MCP integration.
+
+### ⚠️ Architectural Blockers
+
+#### 1. PhaseSelector (lib.rs:40-65)
+
+**Problem:**
+- Current implementation uses CLI string format `"0,1,2"` for phase selection
+- Incompatible with JSON Schema array type `[0, 1, 2]`
+- MCP clients expect structured types, not strings
+
+**Required fix:**
+```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum WorkflowLog {
-    PhaseStarted {
-        phase: usize,
-        name: String,
-        total_phases: usize,
-    },
-    PhaseProgress {
-        phase: usize,
-        message: String,
-        progress: Option<f32>, // 0.0 to 1.0
-    },
-    PhaseCompleted {
-        phase: usize,
-        output_file: Option<String>,
-    },
-
-    TaskStarted {
-        phase: usize,
-        task_id: String,
-        description: String,
-        total_tasks: Option<usize>,
-    },
-    TaskProgress {
-        phase: usize,
-        task_id: String,
-        message: String,
-        progress: Option<f32>,
-    },
-    TaskCompleted {
-        phase: usize,
-        task_id: String,
-        duration_secs: Option<u64>,
-    },
-
-    AgentStarted {
-        task_id: String,
-        agent_name: String,
-        description: String,
-    },
-    AgentProgress {
-        task_id: String,
-        agent_name: String,
-        message: String,
-    },
-    AgentCompleted {
-        task_id: String,
-        agent_name: String,
-        output: Option<String>,
-    },
-
-    Info { message: String },
-    Warning { message: String },
-    Error { message: String },
+#[serde(untagged)]
+pub enum PhaseInput {
+    Indices(Vec<usize>),      // API: [0, 1, 2]
+    String(String),           // CLI: "0,1,2"
 }
 
-impl WorkflowLog {
-    pub fn emit(&self) {
-        eprintln!("__WF_EVENT__:{}", serde_json::to_string(self).unwrap());
-    }
-}
-```
-
-**1.2 Add helper macros for easy logging**
-
-```rust
-#[macro_export]
-macro_rules! log_phase_started {
-    ($phase:expr, $name:expr, $total:expr) => {
-        WorkflowLog::PhaseStarted {
-            phase: $phase,
-            name: $name.to_string(),
-            total_phases: $total,
-        }.emit();
-    };
-}
-
-// Similar macros for other event types
-```
-
-### Phase 2: Update Workflow Binaries
-
-**2.1 Refactor research_agent example**
-
-Add structured logging throughout:
-
-```rust
-// Phase 0
-log_phase_started!(0, "Analyze Codebase", 5);
-println!("PHASE 0: Analyzing Codebase Structure");
-// ... existing code ...
-log_phase_completed!(0, Some("codebase_analysis.yaml"));
-
-// Phase 2 with concurrent tasks
-log_phase_started!(2, "Execute Research", 5);
-for (i, prompt) in prompts.iter().enumerate() {
-    let task_id = format!("research_{}", i + 1);
-    log_task_started!(2, &task_id, &prompt.title, Some(prompts.len()));
-
-    // Execute research
-    // ...
-
-    log_task_completed!(2, &task_id, Some(duration));
-}
-log_phase_completed!(2, Some("research_results.yaml"));
-```
-
-**2.2 Refactor tasks_agent example**
-
-Add agent-level logging:
-
-```rust
-// When invoking sub-agents
-log_agent_started!(&task_id, "files", "Identify files to modify");
-
-// During agent execution
-log_agent_progress!(&task_id, "files", "Found 5 files...");
-
-// After agent completes
-log_agent_completed!(&task_id, "files", Some("5 files identified"));
-```
-
-**2.3 Update simple_query workflow**
-
-Even simple workflows emit basic events:
-
-```rust
-log_phase_started!(0, "Query Claude", 1);
-log_phase_progress!(0, "Sending query...", None);
-// ... query execution ...
-log_phase_completed!(0, None);
-```
-
-### Phase 3: TUI Hierarchical Log Viewer
-
-**3.1 Add log parsing to main.rs**
-
-```rust
-#[derive(Debug, Clone)]
-struct WorkflowPhase {
-    id: usize,
-    name: String,
-    status: PhaseStatus,
-    tasks: Vec<WorkflowTask>,
-    output_file: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct WorkflowTask {
-    id: String,
-    description: String,
-    status: TaskStatus,
-    agents: Vec<WorkflowAgent>,
-    duration: Option<Duration>,
-}
-
-#[derive(Debug, Clone)]
-struct WorkflowAgent {
-    name: String,
-    status: AgentStatus,
-    output: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum PhaseStatus {
-    NotStarted,
-    InProgress,
-    Completed,
-    Failed,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum TaskStatus {
-    Pending,
-    Running,
-    Completed,
-    Failed,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum AgentStatus {
-    Pending,
-    Running,
-    Completed,
-}
-```
-
-**3.2 Update launch_workflow to parse structured logs**
-
-```rust
-fn launch_workflow(&mut self) {
-    // ... existing setup ...
-
-    // Clear and initialize phase structure
-    if let Ok(mut output) = self.workflow_output.lock() {
-        output.clear();
-    }
-    self.workflow_phases = Arc::new(Mutex::new(Vec::new()));
-
-    // Spawn threads to read stdout AND stderr
-    if let Some(stdout) = child.stdout.take() {
-        let output = Arc::clone(&self.workflow_output);
-        thread::spawn(move || {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    if let Ok(mut output) = output.lock() {
-                        output.push(line);
-                    }
-                }
-            }
-        });
-    }
-
-    if let Some(stderr) = child.stderr.take() {
-        let output = Arc::clone(&self.workflow_output);
-        let phases = Arc::clone(&self.workflow_phases);
-        thread::spawn(move || {
-            let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    // Check for structured event
-                    if line.starts_with("__WF_EVENT__:") {
-                        if let Some(json) = line.strip_prefix("__WF_EVENT__:") {
-                            if let Ok(event) = serde_json::from_str::<WorkflowLog>(json) {
-                                // Update phase structure
-                                if let Ok(mut phases) = phases.lock() {
-                                    update_phases(&mut phases, event);
-                                }
-                            }
-                        }
-                    }
-
-                    // Also store raw stderr
-                    if let Ok(mut output) = output.lock() {
-                        output.push(format!("ERROR: {}", line));
-                    }
-                }
-            }
-        });
-    }
-}
-
-fn update_phases(phases: &mut Vec<WorkflowPhase>, event: WorkflowLog) {
-    match event {
-        WorkflowLog::PhaseStarted { phase, name, .. } => {
-            // Ensure phase exists
-            while phases.len() <= phase {
-                phases.push(WorkflowPhase {
-                    id: phases.len(),
-                    name: format!("Phase {}", phases.len()),
-                    status: PhaseStatus::NotStarted,
-                    tasks: Vec::new(),
-                    output_file: None,
-                });
-            }
-            phases[phase].name = name;
-            phases[phase].status = PhaseStatus::InProgress;
+impl PhaseInput {
+    pub fn to_indices(&self) -> Result<Vec<usize>> {
+        match self {
+            PhaseInput::Indices(v) => Ok(v.clone()),
+            PhaseInput::String(s) => s.split(',')
+                .map(|x| x.trim().parse())
+                .collect()
         }
-        WorkflowLog::TaskStarted { phase, task_id, description, .. } => {
-            if let Some(p) = phases.get_mut(phase) {
-                p.tasks.push(WorkflowTask {
-                    id: task_id,
-                    description,
-                    status: TaskStatus::Running,
-                    agents: Vec::new(),
-                    duration: None,
-                });
-            }
-        }
-        WorkflowLog::AgentStarted { task_id, agent_name, .. } => {
-            // Find task and add agent
-            for phase in phases.iter_mut() {
-                if let Some(task) = phase.tasks.iter_mut().find(|t| t.id == task_id) {
-                    task.agents.push(WorkflowAgent {
-                        name: agent_name,
-                        status: AgentStatus::Running,
-                        output: None,
-                    });
-                }
-            }
-        }
-        // Handle other events...
-        _ => {}
     }
 }
 ```
 
-**3.3 Create hierarchical rendering**
+**Impact:** Blocks automatic JSON Schema generation for workflows using phase selectors.
 
+**Effort:** 2-3 hours (refactor + tests)
+
+#### 2. StateFile Architecture
+
+**Problem:**
+- Current design conflates three concerns:
+  1. File discovery (where to find state files)
+  2. User input (file selection/upload)
+  3. State tracking (execution artifacts)
+- Assumes local filesystem access (breaks for remote APIs)
+
+**Required split:**
 ```rust
-fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize) {
-    let workflow = &app.workflows[idx];
+// User input layer (API boundary)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FileInput {
+    Path(PathBuf),              // Local filesystem
+    Url(String),                // Remote file
+    Content(Vec<u8>),           // Inline upload
+    Reference(String),          // Previous execution artifact
+}
 
-    // Get phases structure
-    let phases = if let Ok(phases) = app.workflow_phases.lock() {
-        phases.clone()
-    } else {
-        Vec::new()
-    };
+// Validation metadata (workflow schema)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateFileConstraint {
+    pub compatible_workflows: Vec<String>,
+    pub required_fields: Vec<String>,
+    pub max_age: Option<Duration>,
+}
 
-    // Build hierarchical list
-    let mut items = Vec::new();
+// Internal tracking (runtime state)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateFileReference {
+    pub execution_id: Uuid,
+    pub file_path: PathBuf,
+    pub created_at: DateTime<Utc>,
+}
+```
 
-    for phase in &phases {
-        // Phase line
-        let status_icon = match phase.status {
-            PhaseStatus::NotStarted => "○",
-            PhaseStatus::InProgress => "▶",
-            PhaseStatus::Completed => "✓",
-            PhaseStatus::Failed => "✗",
+**Impact:** Blocks remote execution and multi-user scenarios.
+
+**Effort:** 1-2 weeks (requires refactoring all state file usage)
+
+#### 3. JSON Schema Generation
+
+**Problem:**
+- No `FieldType::to_json_schema()` implementation
+- Manual schema construction in tool definitions
+- Breaks automatic tool generation
+
+**Required implementation:**
+```rust
+impl FieldType {
+    pub fn to_json_schema(&self) -> serde_json::Value {
+        match self {
+            FieldType::Text => json!({"type": "string"}),
+            FieldType::Number => json!({"type": "number"}),
+            FieldType::FilePath => json!({
+                "type": "string",
+                "format": "path"
+            }),
+            FieldType::Select(options) => json!({
+                "type": "string",
+                "enum": options
+            }),
+            FieldType::PhaseSelector => json!({
+                "type": "array",
+                "items": {"type": "integer"}
+            }),
+            FieldType::StateFile => json!({"type": "string"}),
+        }
+    }
+}
+```
+
+**Impact:** Blocks automatic MCP tool creation from workflow metadata.
+
+**Effort:** 4-6 hours (implementation + tests)
+
+#### 4. Versioning
+
+**Problem:**
+- No `schema_version` field in `WorkflowMetadata`
+- Cannot detect format changes or perform migrations
+- Risk of silent breakage across versions
+
+**Required addition:**
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowMetadata {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub fields: Vec<FieldSchema>,
+
+    #[serde(default = "default_version")]
+    pub schema_version: String,  // Semver: "1.0.0"
+}
+
+fn default_version() -> String {
+    "1.0.0".to_string()
+}
+```
+
+**Impact:** Blocks production deployment without migration strategy.
+
+**Effort:** 2-3 hours (add field + update all workflows)
+
+## Critical Gaps
+
+### Execution Layer
+
+#### No Resource Controls
+
+**Problem:**
+- Workflows can consume unlimited CPU, memory, disk
+- No execution time limits
+- No process sandboxing or isolation
+
+**Required:**
+```rust
+pub struct ExecutionLimits {
+    pub max_cpu_percent: u8,           // 0-100
+    pub max_memory_mb: usize,          // MB
+    pub max_disk_mb: usize,            // MB
+    pub timeout: Duration,             // Wall clock
+}
+
+// Implementation approaches:
+// 1. tokio::timeout for wall clock limits
+// 2. cgroups v2 for CPU/memory/disk (Linux)
+// 3. resource_limits crate for cross-platform
+```
+
+**Risk:** Resource exhaustion in production environments.
+
+**Effort:** 3-4 weeks (research + cross-platform implementation)
+
+#### Forceful Cancellation
+
+**Problem:**
+- `child.kill()` sends SIGKILL immediately (src/main.rs:1844)
+- No grace period for cleanup
+- Risk of corrupted state files
+
+**Required:**
+```rust
+pub async fn graceful_shutdown(
+    child: &mut Child,
+    timeout: Duration
+) -> Result<()> {
+    // 1. Send SIGTERM
+    send_signal(child.id(), Signal::SIGTERM)?;
+
+    // 2. Wait with timeout
+    match tokio::time::timeout(timeout, child.wait()).await {
+        Ok(Ok(status)) => Ok(()),
+        _ => {
+            // 3. Force kill if timeout
+            child.kill().await?;
+            Err(anyhow!("Process killed after timeout"))
+        }
+    }
+}
+```
+
+**Risk:** Data loss or corruption on cancellation.
+
+**Effort:** 1-2 days (implementation + testing)
+
+#### No Execution Persistence
+
+**Problem:**
+- Only TUI session restore exists (main.rs:229-328)
+- No database storage of execution history
+- Logs lost on application restart
+
+**Required:**
+- SQLite for local deployments
+- PostgreSQL for production/multi-user
+- Schema: `executions`, `workflow_logs`, `artifacts`
+
+**Risk:** Cannot audit or replay workflow executions.
+
+**Effort:** 2-3 weeks (schema design + migration system)
+
+#### Stub Implementation
+
+**Location:** main.rs:2153 (`load_discovered_workflows()`)
+
+**Problem:**
+- Discovery system not integrated with execution
+- Metadata caching incomplete
+- No hot reload on workflow changes
+
+**Required:**
+- File watcher for workflow directory changes
+- LRU cache with TTL for metadata
+- Background discovery refresh
+
+**Effort:** 1-2 weeks
+
+### Multi-tenancy
+
+**Problem:**
+- No user isolation or authentication
+- All workflows visible to all users
+- Shared execution namespace
+
+**Required for production:**
+- User authentication (OAuth/JWT)
+- Per-user workflow visibility
+- Execution quotas and rate limits
+- Audit logging
+
+**Effort:** 4-6 weeks (authentication + authorization system)
+
+## Recommended Architecture Evolution
+
+### Create `workflow-manager-api` Crate
+
+**Rationale:**
+- **Preserves SDK purity**: Minimal dependencies (serde, chrono only)
+- **Prevents circular dependencies**: Unidirectional flow (SDK ← API)
+- **Future extensibility**: Supports HTTP, gRPC, WebSocket without SDK changes
+
+**Structure:**
+```
+workflow-manager-api/
+├── Cargo.toml
+├── src/
+│   ├── lib.rs
+│   ├── client.rs          // WorkflowApiClient trait
+│   ├── endpoints.rs       // HTTP endpoint definitions
+│   ├── error.rs           // API-specific errors
+│   ├── types.rs           // Request/Response DTOs
+│   └── streaming.rs       // WebSocket/SSE support
+
+Dependencies:
+  workflow-manager-sdk = { path = "../workflow-manager-sdk" }
+  reqwest = "0.11"
+  tokio = { version = "1", features = ["full"] }
+  serde = { version = "1", features = ["derive"] }
+  serde_json = "1"
+```
+
+**Benefits:**
+1. SDK remains embeddable in workflows (no heavy deps)
+2. API crate can use async runtime, HTTP libs freely
+3. Multiple API implementations (REST, gRPC) share SDK types
+4. Clear versioning boundary (SDK 1.x can support API 2.x)
+
+### Extract Execution Engine
+
+**Current problem:**
+- Execution logic tightly coupled to TUI (tab-based state)
+- `Arc<Mutex<Vec<WorkflowPhase>>>` per tab (main.rs:1108)
+- Cannot reuse for MCP/API without duplication
+
+**Proposed structure:**
+```rust
+// workflow-manager-core/src/execution.rs
+pub struct ExecutionEngine {
+    executions: Arc<Mutex<HashMap<Uuid, ExecutionState>>>,
+    runtime: tokio::runtime::Runtime,
+}
+
+pub struct ExecutionState {
+    id: Uuid,
+    workflow_id: String,
+    status: WorkflowStatus,
+    phases: Vec<WorkflowPhase>,
+    logs: tokio::sync::broadcast::Sender<WorkflowLog>,
+    child: Option<Child>,
+}
+
+impl ExecutionEngine {
+    pub async fn execute(
+        &self,
+        workflow: &WorkflowMetadata,
+        params: HashMap<String, String>
+    ) -> Result<Uuid> {
+        let id = Uuid::new_v4();
+        let (log_tx, _) = broadcast::channel(100);
+
+        // Spawn process
+        let child = self.spawn_workflow(workflow, params)?;
+
+        // Store state
+        let state = ExecutionState {
+            id, workflow_id: workflow.id.clone(),
+            status: WorkflowStatus::Running,
+            phases: Vec::new(),
+            logs: log_tx,
+            child: Some(child),
         };
-        let phase_line = format!("{} Phase {}: {}", status_icon, phase.id, phase.name);
-        items.push(ListItem::new(phase_line));
+        self.executions.lock().unwrap().insert(id, state);
 
-        // If expanded, show tasks
-        if app.expanded_phases.contains(&phase.id) {
-            for task in &phase.tasks {
-                let task_icon = match task.status {
-                    TaskStatus::Pending => "[ ]",
-                    TaskStatus::Running => "[⚙]",
-                    TaskStatus::Completed => "[✓]",
-                    TaskStatus::Failed => "[✗]",
-                };
-                let task_line = format!("  {} {}", task_icon, task.description);
-                items.push(ListItem::new(task_line));
+        // Start log consumer
+        self.start_log_consumer(id).await?;
 
-                // If task expanded, show agents
-                if app.expanded_tasks.contains(&task.id) {
-                    for agent in &task.agents {
-                        let agent_icon = match agent.status {
-                            AgentStatus::Pending => "○",
-                            AgentStatus::Running => "⚙",
-                            AgentStatus::Completed => "✓",
-                        };
-                        let agent_line = format!("    {} @{}", agent_icon, agent.name);
-                        items.push(ListItem::new(agent_line));
-                    }
-                }
-            }
-        }
-    }
-
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(" Workflow Progress "));
-
-    f.render_widget(list, area);
-}
-```
-
-**3.4 Add expand/collapse keyboard handling**
-
-```rust
-// In keyboard handler for WorkflowRunning view
-KeyCode::Char(' ') | KeyCode::Enter => {
-    // Toggle expansion of selected item
-    app.toggle_expansion();
-}
-KeyCode::Char('e') => {
-    // Expand all
-    app.expand_all();
-}
-KeyCode::Char('c') => {
-    // Collapse all
-    app.collapse_all();
-}
-```
-
-**3.5 Add App state for expansions**
-
-```rust
-struct App {
-    // ... existing fields ...
-    workflow_phases: Arc<Mutex<Vec<WorkflowPhase>>>,
-    expanded_phases: HashSet<usize>,
-    expanded_tasks: HashSet<String>,
-    selected_item: Option<SelectedItem>,
-}
-
-#[derive(Debug, Clone)]
-enum SelectedItem {
-    Phase(usize),
-    Task(usize, String),  // phase_id, task_id
-    Agent(String, String), // task_id, agent_name
-}
-
-impl App {
-    fn toggle_expansion(&mut self) {
-        match &self.selected_item {
-            Some(SelectedItem::Phase(phase_id)) => {
-                if self.expanded_phases.contains(phase_id) {
-                    self.expanded_phases.remove(phase_id);
-                } else {
-                    self.expanded_phases.insert(*phase_id);
-                }
-            }
-            Some(SelectedItem::Task(_, task_id)) => {
-                if self.expanded_tasks.contains(task_id) {
-                    self.expanded_tasks.remove(task_id);
-                } else {
-                    self.expanded_tasks.insert(task_id.clone());
-                }
-            }
-            _ => {}
-        }
+        Ok(id)
     }
 }
 ```
 
-### Phase 4: State File Management
+**Benefits:**
+1. TUI becomes thin adapter over `ExecutionEngine`
+2. MCP tools delegate to same engine
+3. Future API server uses same engine
+4. Testable in isolation
 
-**4.1 Add state file tracking to WorkflowInfo**
+**Migration path:**
+1. Extract `ExecutionEngine` to `src/execution.rs`
+2. Refactor TUI to use engine (1-2 weeks)
+3. Implement MCP tools using engine (1 week)
+4. Add persistence layer to engine (2-3 weeks)
 
-```rust
-// In workflow-manager-sdk
-pub struct WorkflowInfo {
-    // ... existing fields ...
-    pub state_files: HashMap<String, Option<PathBuf>>,
-}
-```
+**Effort:** 3-4 weeks total
 
-**4.2 Detect state files from PhaseCompleted events**
+## Implementation Roadmap
 
-```rust
-WorkflowLog::PhaseCompleted { phase, output_file } => {
-    if let Some(p) = phases.get_mut(phase) {
-        p.status = PhaseStatus::Completed;
-        p.output_file = output_file.clone();
+### Phase 1: MCP Integration (13-18 hours)
 
-        // Store in workflow state_files
-        if let Some(file) = output_file {
-            // Extract state file name (e.g., "analysis_file")
-            let state_name = extract_state_name(&file);
-            app.workflows[idx].info.state_files.insert(
-                state_name,
-                Some(PathBuf::from(file))
-            );
-        }
-    }
-}
-```
+**Goal:** Enable Claude Desktop to execute workflows via MCP tools.
 
-**4.3 Show state files in WorkflowDetail view**
+**Tasks:**
 
-```rust
-// Add section to workflow detail
-if !workflow.info.state_files.is_empty() {
-    items.push(Line::from(""));
-    items.push(Line::from(Span::styled(
-        "State Files:",
-        Style::default().add_modifier(Modifier::BOLD)
-    )));
-    for (name, path) in &workflow.info.state_files {
-        if let Some(p) = path {
-            items.push(Line::from(format!("  {}: {}", name, p.display())));
-        }
-    }
-}
-```
+1. **Service layer** (4-6 hours)
+   - Define `WorkflowRuntime` trait
+   - Implement `ProcessBasedRuntime` using existing discovery/execution
+   - Add broadcast channels for log streaming
+   - Write unit tests for runtime API
 
-### Phase 5: Enhanced Field Types
+2. **TUI refactor** (3-4 hours)
+   - Replace direct process spawning with `WorkflowRuntime` calls
+   - Migrate to `subscribe_logs()` for log consumption
+   - Test tab management with new API
+   - Verify session restore works
 
-**5.1 Add PhaseSelector field type**
+3. **MCP server** (4-5 hours)
+   - Implement three tools: `list_workflows`, `execute_workflow`, `get_workflow_logs`
+   - Register server in MCP client
+   - Add tool allowlist configuration
+   - Test end-to-end with Claude Desktop
 
-```rust
-// In workflow-manager-sdk
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum FieldType {
-    Text,
-    Number { min: Option<f64>, max: Option<f64> },
-    FilePath { default_path: Option<String> },
-    Select { options: Vec<String> },
-    PhaseSelector { total_phases: usize }, // NEW: "0,1,2" or "2,3,4"
-}
-```
+4. **Testing** (2-3 hours)
+   - Integration tests for MCP tools
+   - Manual testing: workflow discovery, execution, log streaming
+   - Error handling validation
 
-**5.2 Add StateFile field type**
+**Deliverables:**
+- Working MCP server with three tools
+- TUI using new `WorkflowRuntime` API
+- Documentation: MCP setup guide
 
-```rust
-pub enum FieldType {
-    // ... existing ...
-    StateFile {
-        pattern: String,  // "codebase_analysis_*.yaml"
-        phase: usize,     // Which phase generates this file
-    },
-}
-```
+**Blockers:** None (uses existing types)
 
-**5.3 Update WorkflowEdit to handle new field types**
+### Phase 2: Type System (Weeks 1-2)
 
-```rust
-// PhaseSelector: Show checkboxes for phases
-FieldType::PhaseSelector { total_phases } => {
-    // Render as: [x] Phase 0  [ ] Phase 1  [x] Phase 2
-    // User can toggle with space
-}
+**Goal:** Fix type system blockers for API readiness.
 
-// StateFile: Show file picker filtered by pattern
-FieldType::StateFile { pattern, .. } => {
-    // When Tab pressed, show files matching pattern
-    // Fuzzy search through matching files
-}
-```
+**Tasks:**
 
-## Example: Updated research_agent workflow
+1. **JSON Schema generation** (2-3 hours)
+   - Implement `FieldType::to_json_schema()`
+   - Add tests for all field types
+   - Update MCP tool registration to use generated schemas
 
-```rust
-#[derive(Parser, Debug, Clone, WorkflowDefinition)]
-#[workflow(
-    id = "research_agent",
-    name = "Research Agent Workflow",
-    description = "Multi-phase research workflow with codebase analysis"
-)]
-struct Args {
-    /// Research objective
-    #[arg(short, long)]
-    #[field(
-        label = "Objective",
-        description = "[TEXT] Research question or objective",
-        type = "text"
-    )]
-    input: Option<String>,
+2. **Schema versioning** (2-3 hours)
+   - Add `schema_version` field with `#[serde(default)]`
+   - Update all workflow binaries to emit version
+   - Write migration guide for future versions
 
-    /// Phases to execute
-    #[arg(long, default_value = "0,1,2,3,4")]
-    #[field(
-        label = "Phases",
-        description = "[PHASES] Select phases to run (0-4)",
-        type = "phase_selector",
-        total_phases = "5"
-    )]
-    phases: String,
+3. **PhaseSelector fix** (4-6 hours)
+   - Create `PhaseInput` enum (array + string variants)
+   - Update CLI parsing to support both formats
+   - Add JSON Schema generation for array format
+   - Test with existing workflows
 
-    /// Batch size for concurrent execution
-    #[arg(long, default_value = "1")]
-    #[field(
-        label = "Batch Size",
-        description = "[NUMBER] Concurrent execution batch size",
-        type = "number",
-        min = "1",
-        max = "10"
-    )]
-    batch_size: usize,
+4. **Testing** (2-3 hours)
+   - Unit tests for schema generation
+   - Integration tests with MCP tools
+   - Backward compatibility tests
 
-    /// Resume from saved analysis
-    #[arg(long)]
-    #[field(
-        label = "Analysis File",
-        description = "[STATE FILE] Resume with existing analysis",
-        type = "state_file",
-        pattern = "codebase_analysis_*.yaml",
-        phase = "0"
-    )]
-    analysis_file: Option<String>,
+**Deliverables:**
+- `FieldType::to_json_schema()` implementation
+- Versioned metadata format
+- PhaseSelector supporting JSON arrays
 
-    /// Resume from saved prompts
-    #[arg(long)]
-    #[field(
-        label = "Prompts File",
-        description = "[STATE FILE] Resume with existing prompts",
-        type = "state_file",
-        pattern = "research_prompts_*.yaml",
-        phase = "1"
-    )]
-    prompts_file: Option<String>,
+**Blockers:** None
 
-    // ... other fields ...
+### Phase 3: API Foundation (Weeks 2-6)
 
-    #[arg(long, hide = true)]
-    workflow_metadata: bool,
-}
+**Goal:** Production-ready workflow execution API.
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
+**Tasks:**
 
-    if args.workflow_metadata {
-        args.print_metadata();
-        return Ok(());
-    }
+1. **Create `workflow-manager-api` crate** (1 week)
+   - Define HTTP endpoints (REST)
+   - Implement `WorkflowApiClient` trait
+   - Add request/response DTOs
+   - Write OpenAPI spec
 
-    use workflow_manager_sdk::WorkflowLog;
+2. **Implement core endpoints** (2 weeks)
+   - `GET /workflows` - List workflows
+   - `POST /workflows/{id}/execute` - Start execution
+   - `GET /executions/{id}` - Get status
+   - `GET /executions/{id}/logs` - Stream logs
+   - Add authentication middleware
 
-    // Parse phases
-    let phases: Vec<usize> = args.phases
-        .split(',')
-        .filter_map(|p| p.trim().parse().ok())
-        .collect();
+3. **Fix StateFile blocker** (1 week)
+   - Split into `FileInput`, `StateFileConstraint`, `StateFileReference`
+   - Update workflows using state files
+   - Add remote file fetching
+   - Test with API uploads
 
-    let mut codebase_analysis = None;
-    let mut prompts_data = None;
+4. **Dual execution modes** (1 week)
+   - Process-based: Current model (isolation)
+   - Library-based: Direct function calls (low latency)
+   - Add mode selection to workflow metadata
+   - Benchmark performance difference
 
-    // Phase 0
-    if phases.contains(&0) {
-        WorkflowLog::PhaseStarted {
-            phase: 0,
-            name: "Analyze Codebase".to_string(),
-            total_phases: 5,
-        }.emit();
+5. **Testing** (1 week)
+   - Integration tests for all endpoints
+   - Load testing (concurrent executions)
+   - Security testing (input validation, auth)
 
-        println!("PHASE 0: Analyzing Codebase");
-        // ... existing analysis code ...
+**Deliverables:**
+- `workflow-manager-api` crate with REST endpoints
+- OpenAPI specification
+- StateFile refactored for remote use
+- Performance benchmarks
 
-        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-        let analysis_path = format!("codebase_analysis_{}.yaml", timestamp);
-        fs::write(&analysis_path, &analysis_yaml).await?;
+**Blockers:**
+- Requires Phase 2 completion (type system fixes)
+- May need execution engine extraction for library mode
 
-        WorkflowLog::PhaseCompleted {
-            phase: 0,
-            output_file: Some(analysis_path),
-        }.emit();
+### Phase 4: Production Hardening (Medium-term)
 
-        codebase_analysis = Some(analysis);
-    } else if let Some(file) = &args.analysis_file {
-        // Load from file
-        let content = fs::read_to_string(file).await?;
-        codebase_analysis = Some(serde_yaml::from_str(&content)?);
-    }
+**Goal:** Enterprise-ready deployment with persistence and resource controls.
 
-    // Phase 1
-    if phases.contains(&1) {
-        WorkflowLog::PhaseStarted {
-            phase: 1,
-            name: "Generate Prompts".to_string(),
-            total_phases: 5,
-        }.emit();
+**Tasks:**
 
-        println!("PHASE 1: Generating Research Prompts");
-        // ... existing prompt generation ...
+1. **Extract execution engine** (2-3 weeks)
+   - Create `workflow-manager-core` crate
+   - Implement `ExecutionEngine` with UUID-based state
+   - Migrate TUI and MCP to use engine
+   - Add comprehensive tests
 
-        WorkflowLog::PhaseCompleted {
-            phase: 1,
-            output_file: Some(prompts_path.to_string()),
-        }.emit();
+2. **Resource limits** (3-4 weeks)
+   - Start with `tokio::timeout` for wall clock
+   - Add CPU/memory/disk limits via cgroups (Linux)
+   - Cross-platform fallback using `resource_limits` crate
+   - Test limit enforcement
 
-        prompts_data = Some(prompts);
-    }
+3. **Graceful shutdown** (1 week)
+   - SIGTERM → timeout → SIGKILL pattern
+   - Cleanup handlers for state files
+   - Test cancellation scenarios
 
-    // Phase 2 - with task tracking
-    if phases.contains(&2) {
-        WorkflowLog::PhaseStarted {
-            phase: 2,
-            name: "Execute Research".to_string(),
-            total_phases: 5,
-        }.emit();
+4. **Persistence layer** (2-3 weeks)
+   - Schema design: `executions`, `workflow_logs`, `artifacts`
+   - SQLite implementation for local use
+   - PostgreSQL implementation for production
+   - Migration system
 
-        let prompts = prompts_data.as_ref().unwrap();
+5. **WebSocket streaming** (1-2 weeks)
+   - Implement `/api/executions/{id}/stream` endpoint
+   - Add WebSocket authentication
+   - Test with concurrent clients
 
-        for (i, prompt) in prompts.prompts.iter().enumerate() {
-            let task_id = format!("research_{}", i + 1);
+6. **Multi-tenancy** (4-6 weeks)
+   - User authentication (OAuth/JWT)
+   - Per-user workflow isolation
+   - Execution quotas and rate limits
+   - Audit logging
 
-            WorkflowLog::TaskStarted {
-                phase: 2,
-                task_id: task_id.clone(),
-                description: prompt.title.clone(),
-                total_tasks: Some(prompts.prompts.len()),
-            }.emit();
+**Deliverables:**
+- `workflow-manager-core` crate
+- Resource control system
+- Persistent execution history
+- Multi-user support
 
-            // Execute research
-            let result = execute_research_prompt(prompt, i + 1, &timestamp, None).await?;
+**Blockers:**
+- Requires Phase 3 completion (API foundation)
 
-            WorkflowLog::TaskCompleted {
-                phase: 2,
-                task_id,
-                duration_secs: Some(60), // calculate actual duration
-            }.emit();
-        }
+## API Readiness Assessment
 
-        WorkflowLog::PhaseCompleted {
-            phase: 2,
-            output_file: Some(results_path.to_string()),
-        }.emit();
-    }
+### Overall: 70%
 
-    // ... Phases 3, 4 ...
+The codebase has strong foundations but requires focused work on type system and execution architecture before production API deployment.
 
-    Ok(())
-}
-```
+| Component | Status | Notes | Timeline |
+|-----------|--------|-------|----------|
+| Core types | ✅ Ready | `WorkflowMetadata`, `WorkflowLog`, `WorkflowStatus` stable | - |
+| Discovery system | ✅ Ready | Binary scanning, metadata extraction functional | - |
+| Execution logic | ⚠️ Needs extraction | Coupled to TUI, requires `ExecutionEngine` refactor | 1-2 weeks |
+| PhaseSelector | 🚫 Blocked | String format incompatible with JSON Schema | 2-3 weeks |
+| StateFile | 🚫 Blocked | Conflates discovery/input/tracking, assumes local FS | 2-3 weeks |
+| JSON Schema | 📦 Missing | No `to_json_schema()` implementation | 4-6 hours |
+| Versioning | 📦 Missing | No `schema_version` field for migration | 2-3 hours |
+| Resource controls | 📦 Missing | No CPU/memory/disk limits, no timeouts | 3-4 weeks |
+| Graceful shutdown | 📦 Missing | Uses SIGKILL, no cleanup grace period | 1 week |
+| Persistence | 📦 Missing | No database storage of execution history | 2-3 weeks |
+| Multi-user support | 📦 Missing | No auth, isolation, or quotas | 4-6 weeks |
 
-## Testing Plan
+### Readiness by Use Case
 
-1. **Unit tests:** Test log parsing, phase tracking
-2. **Integration tests:** Run research_agent with different phase combinations
-3. **Manual testing:**
-   - Run full workflow, verify all logs captured
-   - Expand/collapse phases, tasks, agents
-   - Resume from phase 2, verify state loaded correctly
-   - Test with concurrent tasks (batch_size > 1)
+**MCP Integration (Claude Desktop):**
+- **Status:** 90% ready
+- **Timeline:** 2 weeks
+- **Blockers:** Need `WorkflowRuntime` abstraction (Phase 1)
 
-## Future Enhancements (Not in this plan)
+**HTTP API (Single user, local):**
+- **Status:** 60% ready
+- **Timeline:** 6-8 weeks
+- **Blockers:** Type system fixes (Phase 2), API crate (Phase 3)
 
-- Pause/Resume functionality
-- Log persistence to disk/database
-- Export logs to JSON/text
-- Filter logs by level/phase/task/agent
-- Search functionality in logs
-- Real-time cost tracking
-- Workflow templates/presets
-- Workflow chaining (output of one → input of another)
+**HTTP API (Multi-user, production):**
+- **Status:** 40% ready
+- **Timeline:** 12-16 weeks
+- **Blockers:** All of above + persistence, resource limits, auth (Phase 4)
+
+### Risk Assessment
+
+**High priority (blocks deployment):**
+1. StateFile architecture (breaks remote execution)
+2. No resource controls (security/stability risk)
+3. No persistence (cannot audit/replay)
+
+**Medium priority (degrades UX):**
+1. PhaseSelector format (manual schema workarounds)
+2. Forceful cancellation (data loss risk)
+3. No multi-tenancy (single-user limitation)
+
+**Low priority (nice-to-have):**
+1. Library-based execution (latency optimization)
+2. WebSocket streaming (HTTP SSE sufficient)
+3. Hot reload (restart acceptable)
+
+## Actionable Recommendations
+
+### Immediate Actions (Next 2 weeks)
+
+1. **Implement Phase 1 (MCP Integration)**
+   - Create `WorkflowRuntime` trait and `ProcessBasedRuntime` implementation
+   - Refactor TUI to use new runtime API
+   - Build MCP server with three core tools
+   - Test with Claude Desktop
+   - **Owner:** Backend team
+   - **Effort:** 13-18 hours
+
+2. **Fix JSON Schema generation**
+   - Implement `FieldType::to_json_schema()`
+   - Update MCP tool registration
+   - Add unit tests
+   - **Owner:** SDK team
+   - **Effort:** 2-3 hours
+
+3. **Add schema versioning**
+   - Add `schema_version` field to `WorkflowMetadata`
+   - Update all workflow binaries
+   - **Owner:** SDK team
+   - **Effort:** 2-3 hours
+
+### Short-term (Weeks 3-8)
+
+4. **Fix PhaseSelector blocker**
+   - Create `PhaseInput` enum supporting arrays
+   - Update CLI parsing
+   - Test backward compatibility
+   - **Owner:** SDK team
+   - **Effort:** 4-6 hours
+
+5. **Create `workflow-manager-api` crate**
+   - Define REST endpoints
+   - Implement HTTP handlers
+   - Write OpenAPI spec
+   - **Owner:** API team
+   - **Effort:** 1 week
+
+6. **Fix StateFile architecture**
+   - Split into `FileInput`, `StateFileConstraint`, `StateFileReference`
+   - Update workflows using state files
+   - Add remote file support
+   - **Owner:** SDK + Backend team
+   - **Effort:** 1 week
+
+7. **Extract execution engine**
+   - Create `ExecutionEngine` in `workflow-manager-core`
+   - Migrate TUI and MCP to use engine
+   - Add tests
+   - **Owner:** Backend team
+   - **Effort:** 2-3 weeks
+
+### Medium-term (Weeks 9-16)
+
+8. **Implement resource controls**
+   - Add `tokio::timeout` for wall clock
+   - Add cgroups support (Linux)
+   - Cross-platform fallback
+   - **Owner:** Infrastructure team
+   - **Effort:** 3-4 weeks
+
+9. **Add persistence layer**
+   - Design database schema
+   - Implement SQLite backend
+   - Add PostgreSQL support
+   - **Owner:** Backend + DB team
+   - **Effort:** 2-3 weeks
+
+10. **Implement graceful shutdown**
+    - SIGTERM → timeout → SIGKILL flow
+    - Add cleanup handlers
+    - **Owner:** Backend team
+    - **Effort:** 1 week
+
+### Long-term (Weeks 17+)
+
+11. **Build multi-tenancy system**
+    - User authentication
+    - Workflow isolation
+    - Quotas and rate limits
+    - **Owner:** Full-stack team
+    - **Effort:** 4-6 weeks
+
+12. **Add WebSocket streaming**
+    - Implement `/api/executions/{id}/stream`
+    - Add client SDK
+    - **Owner:** API + Frontend team
+    - **Effort:** 1-2 weeks
+
+### Continuous Improvements
+
+- **Documentation:** Update after each phase completion
+- **Testing:** Maintain 80%+ coverage for new code
+- **Monitoring:** Add metrics for execution time, resource usage, error rates
+- **Performance:** Benchmark each phase, optimize bottlenecks
+
+### Decision Points
+
+**After Phase 1 (MCP Integration):**
+- **Decision:** Proceed with full API development or iterate on MCP tools?
+- **Criteria:** User feedback, usage metrics, resource availability
+
+**After Phase 3 (API Foundation):**
+- **Decision:** Deploy single-user API or wait for multi-tenancy?
+- **Criteria:** Customer demand, security requirements, team capacity
+
+**During Phase 4 (Production Hardening):**
+- **Decision:** SQLite or PostgreSQL first?
+- **Criteria:** Deployment target (local vs. cloud), data volume expectations
+
+---
+
+**Last updated:** 2025-10-14
+**Status:** Draft specification
+**Next review:** After Phase 1 completion

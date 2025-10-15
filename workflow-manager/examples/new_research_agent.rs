@@ -418,7 +418,7 @@ async fn validate_yaml_file(file_path: &str) -> anyhow::Result<(String, bool, St
     use tokio::process::Command;
 
     let output = Command::new("uv")
-        .args(&["run", "./SCRIPTS/check_yaml.py", file_path])
+        .args(&["run", "/home/molaco/Documents/japanese/SCRIPTS/check_yaml.py", file_path])
         .output()
         .await?;
 

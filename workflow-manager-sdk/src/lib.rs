@@ -194,7 +194,10 @@ impl WorkflowLog {
     /// Emit this log event to stderr for TUI parsing
     pub fn emit(&self) {
         if let Ok(json) = serde_json::to_string(self) {
+            use std::io::Write;
             eprintln!("__WF_EVENT__:{}", json);
+            // Force flush stderr in async/concurrent contexts
+            let _ = std::io::stderr().flush();
         }
     }
 }
