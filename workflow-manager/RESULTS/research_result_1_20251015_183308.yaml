@@ -1,0 +1,588 @@
+workflow_manager_architecture:
+  overview: |
+    A TUI-based workflow orchestration system that discovers, validates, and executes multi-phase workflows.
+    Workflows are standalone executables that emit structured JSON events via stderr for real-time monitoring.
+    The system features a ProcessBasedRuntime for execution, an MCP server API for external integrations,
+    and a TUI with tabbed workflow management.
+
+  core_components:
+    workflow_definition:
+      location: workflow-manager-sdk/src/lib.rs
+      trait: WorkflowDefinition
+      purpose: Contract that all workflows must implement (auto-derived via macro)
+      methods:
+        - metadata() -> WorkflowMetadata  # Returns id, name, description
+        - fields() -> Vec<FieldSchema>    # Returns input field schemas
+        - print_metadata(&self)           # Outputs JSON metadata for discovery
+      
+    workflow_metadata:
+      location: workflow-manager-sdk/src/lib.rs:14-28
+      structure:
+        WorkflowMetadata:
+          id: String          # Unique identifier (e.g., "research_agent")
+          name: String        # Display name
+          description: String # User-facing description
+        FullWorkflowMetadata:
+          metadata: WorkflowMetadata
+          fields: Vec<FieldSchema>  # Complete schema for API/TUI
+      
+    field_schema:
+      location: workflow-manager-sdk/src/lib.rs:31-42
+      fields:
+        name: String              # Internal field name (e.g., "input")
+        field_type: FieldType     # Type enum with validation rules
+        label: String             # UI label
+        description: String       # Help text
+        cli_arg: String           # CLI argument (e.g., "--input")
+        required: bool            # Whether field is mandatory
+        default: Option<String>   # Default value
+        required_for_phases: Option<Vec<usize>>  # Phase-specific requirements
+      
+      field_types:
+        Text: {}
+        Number:
+          min: Option<i64>
+          max: Option<i64>
+        FilePath:
+          pattern: Option<String>  # Glob pattern for filtering
+        Select:
+          options: Vec<String>
+        PhaseSelector:
+          total_phases: usize
+        StateFile:
+          pattern: String          # File pattern (e.g., "*.yaml")
+          phase: Option<usize>     # Phase that generates this file
+          
+    workflow_macro:
+      location: workflow-manager-macros/src/lib.rs
+      derive_attribute: WorkflowDefinition
+      usage: |
+        #[derive(Parser, WorkflowDefinition)]
+        #[workflow(id = "my_workflow", name = "My Workflow", description = "...")]
+        struct Args {
+            #[arg(long)]
+            #[field(label = "Input", description = "...", type = "text")]
+            input: Option<String>,
+        }
+      implementation:
+        - Extracts #[workflow(...)] attributes for metadata
+        - Extracts #[field(...)] attributes for schema
+        - Infers types from Rust types (String -> Text, PathBuf -> FilePath)
+        - Generates WorkflowDefinition trait impl
+        - Handles required_for_phases for conditional validation
+
+  workflow_discovery:
+    location: src/discovery.rs
+    function: discover_workflows() -> Vec<DiscoveredWorkflow>
+    search_paths:
+      - target/debug/ or target/release/  # Built-in workflows (same dir as TUI binary)
+      - ~/.workflow-manager/workflows/    # User-defined workflows
+    discovery_process:
+      - Scan for executable files
+      - Skip non-executables and build artifacts (*.d, *-<hash>)
+      - Execute each with --workflow-metadata flag
+      - Parse JSON output as FullWorkflowMetadata
+      - Cache in DiscoveredWorkflow struct with binary_path
+    discovered_workflow:
+      metadata: WorkflowMetadata
+      fields: Vec<FieldSchema>
+      binary_path: PathBuf
+
+  workflow_execution:
+    runtime_trait:
+      location: workflow-manager-sdk/src/lib.rs:396-431
+      trait: WorkflowRuntime
+      methods:
+        list_workflows: -> Vec<FullWorkflowMetadata>
+        get_workflow_metadata: (id: &str) -> FullWorkflowMetadata
+        validate_workflow_inputs: (id, params) -> Result<()>
+        execute_workflow: (id, params) -> WorkflowHandle
+        subscribe_logs: (handle_id) -> broadcast::Receiver<WorkflowLog>
+        get_status: (handle_id) -> WorkflowStatus
+        cancel_workflow: (handle_id) -> Result<()>
+      
+    process_runtime:
+      location: src/runtime.rs
+      implementation: ProcessBasedRuntime
+      architecture:
+        - Maintains workflows cache (id -> DiscoveredWorkflow)
+        - Maintains executions map (Uuid -> ExecutionState)
+        - Spawns workflow as child process with piped stdout/stderr
+        - Creates broadcast channel (capacity 100) for log streaming
+        - Spawns async task to parse stderr for __WF_EVENT__:<JSON>
+        - Broadcasts WorkflowLog events to subscribers
+      
+      execution_flow:
+        1. Validate inputs against field schemas
+        2. Build CLI command from parameters (HashMap<String, String>)
+        3. Spawn child process with stdout/stderr pipes
+        4. Generate execution UUID
+        5. Store ExecutionState with broadcast channel
+        6. Spawn stderr parser task
+        7. Return WorkflowHandle
+      
+      execution_state:
+        workflow_id: String
+        status: WorkflowStatus
+        child: Option<Child>
+        logs_tx: broadcast::Sender<WorkflowLog>
+        binary_path: PathBuf
+      
+      stderr_parsing:
+        - Reads stderr line-by-line asynchronously
+        - Detects "__WF_EVENT__:<JSON>" prefix
+        - Deserializes JSON to WorkflowLog enum
+        - Broadcasts to all subscribers
+        - Marks workflow as Completed when stderr closes
+
+  logging_system:
+    location: workflow-manager-sdk/src/lib.rs:123-208
+    event_format: "__WF_EVENT__:<JSON>"
+    emission: eprintln!("__WF_EVENT__:{}", serde_json::to_string(log))
+    
+    workflow_log_events:
+      PhaseStarted:
+        phase: usize
+        name: String
+        total_phases: usize
+      PhaseCompleted:
+        phase: usize
+        name: String
+      PhaseFailed:
+        phase: usize
+        name: String
+        error: String
+      TaskStarted:
+        phase: usize
+        task_id: String
+        description: String
+        total_tasks: Option<usize>
+      TaskProgress:
+        task_id: String
+        message: String
+      TaskCompleted:
+        task_id: String
+        result: Option<String>
+      TaskFailed:
+        task_id: String
+        error: String
+      AgentStarted:
+        task_id: String
+        agent_name: String
+        description: String
+      AgentMessage:
+        task_id: String
+        agent_name: String
+        message: String
+      AgentCompleted:
+        task_id: String
+        agent_name: String
+        result: Option<String>
+      AgentFailed:
+        task_id: String
+        agent_name: String
+        error: String
+      StateFileCreated:
+        phase: usize
+        file_path: String
+        description: String
+    
+    logging_macros:
+      location: workflow-manager-sdk/src/lib.rs:211-374
+      macros:
+        - log_phase_start!(phase, name, total)
+        - log_phase_complete!(phase, name)
+        - log_phase_failed!(phase, name, error)
+        - log_task_start!(phase, task_id, desc)
+        - log_task_complete!(task_id)
+        - log_task_failed!(task_id, error)
+        - log_agent_start!(task_id, agent, desc)
+        - log_agent_message!(task_id, agent, msg)
+        - log_agent_complete!(task_id, agent)
+        - log_agent_failed!(task_id, agent, error)
+        - log_state_file!(phase, path, desc)
+
+  data_flow:
+    workflow_definition_to_execution:
+      1_derive_macro:
+        input: Rust struct with #[workflow] and #[field] attributes
+        process: Parse attributes, infer types, generate trait impl
+        output: WorkflowDefinition trait implementation
+      
+      2_metadata_export:
+        trigger: Binary executed with --workflow-metadata flag
+        process: Call metadata() and fields(), serialize to JSON
+        output: FullWorkflowMetadata JSON on stdout
+      
+      3_discovery:
+        trigger: TUI startup or runtime.refresh_workflows()
+        process: Scan directories, execute --workflow-metadata, parse JSON
+        output: HashMap<String, DiscoveredWorkflow>
+      
+      4_user_input:
+        trigger: User fills form fields in TUI or API call
+        process: Validate against FieldSchema constraints
+        output: HashMap<String, String> parameters
+      
+      5_execution:
+        trigger: execute_workflow(id, params)
+        process: Build CLI args, spawn process, setup log streaming
+        output: WorkflowHandle with UUID
+      
+      6_monitoring:
+        trigger: subscribe_logs(handle_id)
+        process: Return broadcast receiver for WorkflowLog stream
+        output: Real-time log events
+      
+      7_display:
+        trigger: TUI polls/receives WorkflowLog events
+        process: Parse events, update phase/task/agent hierarchical state
+        output: Live hierarchical view in TUI tabs
+
+  tui_architecture:
+    main_loop:
+      location: src/main.rs:54-399
+      polling: 50ms event poll
+      structure:
+        - Poll all tabs for process status (poll_all_tabs)
+        - Render UI (ratatui terminal.draw)
+        - Handle keyboard events
+      
+    app_state:
+      location: src/app/models/app.rs
+      fields:
+        workflows: Vec<Workflow>                    # Catalog of available workflows
+        open_tabs: Vec<WorkflowTab>                 # Running workflow instances
+        active_tab_idx: usize                       # Currently selected tab
+        current_view: View                          # Current screen
+        field_values: HashMap<String, String>       # Form input state
+        history: WorkflowHistory                    # Field value history
+        runtime: Arc<dyn WorkflowRuntime>           # Execution engine
+        chat: Option<ChatInterface>                 # AI assistant
+      
+    workflow_tab:
+      location: src/app/models/tab.rs
+      per_tab_state:
+        id: String                                  # Unique ID
+        workflow_idx: usize                         # Index into workflows catalog
+        instance_number: usize                      # Display counter (#1, #2)
+        status: WorkflowStatus                      # Running/Completed/Failed
+        child_process: Option<Child>                # OS process handle
+        workflow_phases: Arc<Mutex<Vec<WorkflowPhase>>>  # Hierarchical state
+        workflow_output: Arc<Mutex<Vec<String>>>    # Stdout lines
+        field_values: HashMap<String, String>       # Input parameters
+        expanded_phases/tasks/agents: HashSet       # UI expansion state
+        agent_scroll_offsets: HashMap<String, usize> # Per-agent scroll
+      
+    workflow_hierarchy:
+      location: src/app/models/workflow.rs
+      structure:
+        WorkflowPhase:
+          id: usize
+          name: String
+          status: PhaseStatus
+          tasks: Vec<WorkflowTask>
+          output_files: Vec<(String, String)>  # (path, description)
+        
+        WorkflowTask:
+          id: String
+          phase: usize
+          description: String
+          status: TaskStatus
+          agents: Vec<WorkflowAgent>
+          messages: Vec<String>
+          result: Option<String>
+        
+        WorkflowAgent:
+          id: String        # "task_id:agent_name"
+          task_id: String
+          name: String
+          description: String
+          status: AgentStatus
+          messages: Vec<String>
+          result: Option<String>
+      
+    event_handler:
+      location: src/app/workflow_ops.rs:472-637
+      function: handle_workflow_event(event, phases)
+      process:
+        - Locks phases mutex
+        - Matches on WorkflowLog variant
+        - Creates/updates WorkflowPhase/Task/Agent structs
+        - Appends messages and results
+        - Updates status fields
+      threading:
+        - Each tab spawns 2 threads: stdout reader, stderr parser
+        - Threads write to Arc<Mutex<Vec>> buffers
+        - Main loop polls without blocking
+
+  tui_coupling:
+    tightly_coupled:
+      - src/main.rs:54-399         # Main event loop (TUI-specific)
+      - src/ui/                    # Ratatui rendering (100% TUI)
+      - src/app/tabs.rs            # Tab navigation and management
+      - src/app/navigation.rs      # Keyboard navigation
+      - src/app/file_browser.rs    # File picker UI
+      - src/models.rs              # Re-exports for UI compatibility
+    
+    loosely_coupled_can_expose:
+      - src/discovery.rs           # Workflow discovery (pure logic)
+      - src/runtime.rs             # ProcessBasedRuntime (implements WorkflowRuntime)
+      - src/mcp_tools.rs           # MCP server (already API-ready)
+      - src/chat.rs                # ChatInterface (uses WorkflowRuntime)
+      - workflow-manager-sdk       # All SDK components (pure data structures)
+    
+    already_api_ready:
+      - workflow-manager-sdk::WorkflowRuntime trait
+      - workflow-manager-sdk::WorkflowLog events
+      - workflow-manager-sdk::FieldSchema validation
+      - mcp_tools::create_workflow_mcp_server
+
+  mcp_api_layer:
+    location: src/mcp_tools.rs
+    server_creation: create_workflow_mcp_server(runtime: Arc<dyn WorkflowRuntime>)
+    tools:
+      list_workflows:
+        input: {}
+        output: Vec<FullWorkflowMetadata>
+        description: List all available workflows with schemas
+      
+      execute_workflow:
+        input:
+          workflow_id: String
+          parameters: Object  # HashMap<String, String>
+        output:
+          handle_id: Uuid
+          workflow_id: String
+          status: "running"
+      
+      get_workflow_logs:
+        input:
+          handle_id: Uuid
+          limit: usize (default 50)
+        output: Vec<WorkflowLog>
+        note: Uses try_recv, non-blocking poll
+      
+      get_workflow_status:
+        input:
+          handle_id: Uuid
+        output:
+          handle_id: Uuid
+          status: WorkflowStatus
+      
+      cancel_workflow:
+        input:
+          handle_id: Uuid
+        output:
+          handle_id: Uuid
+          status: "cancelled"
+    
+    integration_pattern:
+      - MCP server wraps WorkflowRuntime trait
+      - Tools are async functions with JSON parameters
+      - Uses claude-agent-sdk::mcp::SdkMcpTool
+      - Returns ToolResult::text(json) or ToolResult::error(msg)
+
+  chat_interface:
+    location: src/chat.rs
+    purpose: AI assistant for workflow management
+    initialization:
+      - Creates MCP server from WorkflowRuntime
+      - Registers MCP tools with ClaudeSDKClient
+      - Allows tool names: mcp__workflow_manager__<tool_name>
+    
+    state:
+      messages: Vec<ChatMessage>               # Conversation history
+      runtime: Arc<dyn WorkflowRuntime>        # For tool execution
+      client: Option<ClaudeSDKClient>          # Claude API client
+    
+    workflow:
+      - User sends message via TUI
+      - Client.send_message() streams response
+      - Parses ContentBlock::ToolUse for MCP calls
+      - Displays results in TUI chat view
+    
+    coupling: Uses WorkflowRuntime, not TUI-specific (reusable for API)
+
+  example_workflow:
+    location: src/bin/research_agent.rs
+    demonstrates:
+      - Multi-phase workflow (5 phases)
+      - Concurrent task execution with batch_size semaphore
+      - State file resumption (analysis_file, prompts_file, results_file)
+      - Phase-specific field requirements (required_for_phases)
+      - Hierarchical logging (Phase -> Task -> Agent)
+      - Map-reduce pattern (Phase 4 summarization)
+    
+    execution_flow:
+      phase_0_analyze:
+        - Uses WorkflowLog::AgentStarted/Message/Completed
+        - Queries Claude to analyze codebase
+        - Emits StateFileCreated for codebase_analysis.yaml
+      
+      phase_1_generate_prompts:
+        - Reads codebase_analysis.yaml (or uses from Phase 0)
+        - Generates research questions via Claude
+        - Emits StateFileCreated for research_prompts.yaml
+      
+      phase_2_execute_research:
+        - Parallel execution with Arc<Semaphore>
+        - Each prompt spawns AgentStarted/Message/Completed
+        - TaskStarted/Completed for each concurrent batch
+        - Writes individual YAML result files
+        - Emits StateFileCreated for research_results.yaml
+      
+      phase_3_validate:
+        - Validates YAML with external Python script
+        - Iteratively fixes errors with Claude
+        - Uses concurrent batch fixing
+      
+      phase_4_synthesize:
+        - Map phase: Parallel summarization of all results
+        - Reduce phase: Tree-based document merging
+        - Final synthesis with Claude
+        - Writes markdown output
+
+  api_extraction_candidates:
+    rest_api_design:
+      endpoints:
+        GET /workflows:
+          response: Vec<FullWorkflowMetadata>
+          impl: runtime.list_workflows()
+        
+        GET /workflows/:id:
+          response: FullWorkflowMetadata
+          impl: runtime.get_workflow_metadata(id)
+        
+        POST /workflows/:id/execute:
+          body: HashMap<String, String>
+          response: {handle_id, workflow_id, status}
+          impl: runtime.execute_workflow(id, params)
+        
+        GET /executions/:handle_id/status:
+          response: WorkflowStatus
+          impl: runtime.get_status(handle_id)
+        
+        GET /executions/:handle_id/logs:
+          query: ?limit=50
+          response: Vec<WorkflowLog>
+          impl: runtime.subscribe_logs(handle_id), poll receiver
+        
+        WebSocket /executions/:handle_id/stream:
+          stream: WorkflowLog events
+          impl: runtime.subscribe_logs(handle_id), stream receiver
+        
+        DELETE /executions/:handle_id:
+          response: {status: "cancelled"}
+          impl: runtime.cancel_workflow(handle_id)
+      
+      required_components:
+        - src/runtime.rs (ProcessBasedRuntime) - no changes needed
+        - src/discovery.rs (discover_workflows) - no changes needed
+        - workflow-manager-sdk (all traits) - no changes needed
+        - New: HTTP server framework (axum/actix-web)
+        - New: WebSocket handler for log streaming
+      
+      unchanged_components:
+        - Workflow binaries (emit same WorkflowLog events)
+        - Discovery mechanism (--workflow-metadata)
+        - Validation logic (FieldSchema)
+        - Execution engine (ProcessBasedRuntime)
+
+  key_insights:
+    separation_of_concerns:
+      - WorkflowDefinition trait is workflow-agnostic (CLI, TUI, API all work)
+      - ProcessBasedRuntime is execution-agnostic (not TUI-coupled)
+      - WorkflowLog events are transport-agnostic (JSON over stderr)
+      - MCP tools demonstrate API readiness
+    
+    tui_specific_code:
+      - Only UI rendering (src/ui/*)
+      - Only keyboard event handling (src/main.rs event loop)
+      - Only terminal setup/teardown
+      - Tab management is UI concept, but WorkflowTab state is reusable
+    
+    api_readiness:
+      - 80% of logic is already API-compatible
+      - WorkflowRuntime trait is the abstraction boundary
+      - MCP tools prove external integration works
+      - Need: HTTP wrapper + WebSocket streaming
+    
+    workflow_isolation:
+      - Workflows are separate executables (not plugins)
+      - Communication via CLI args + JSON events
+      - No shared memory or dependencies
+      - Easy to sandbox, distribute, or containerize
+    
+    real_time_monitoring:
+      - broadcast::Receiver enables multiple subscribers
+      - TUI is just one subscriber
+      - API could have N concurrent WebSocket streams
+      - No polling required for live updates
+
+  metadata_discovery_flow:
+    compile_time:
+      - Developer writes workflow with #[derive(WorkflowDefinition)]
+      - Macro generates metadata() and fields() implementations
+      - Cargo compiles to executable binary
+    
+    discovery_time:
+      - TUI/API calls discover_workflows()
+      - Each binary executed with --workflow-metadata
+      - Binary calls args.print_metadata() -> JSON to stdout
+      - TUI/API parses JSON, caches DiscoveredWorkflow
+    
+    runtime_validation:
+      - User submits parameters
+      - validate_workflow_inputs checks against FieldSchema
+      - Rejects invalid types, missing required fields, out-of-range numbers
+      - Returns Result<(), Error>
+    
+    execution_time:
+      - build_command constructs CLI args from HashMap
+      - Spawns binary with validated parameters
+      - Binary runs, emits WorkflowLog events
+      - TUI/API subscribes to broadcast channel for live updates
+
+  field_schema_validation:
+    supported_validations:
+      - required: bool (enforces presence)
+      - required_for_phases: Vec<usize> (conditional requirements)
+      - Number.min/max: Range validation
+      - FilePath.pattern: Glob pattern matching
+      - Select.options: Enum validation
+      - PhaseSelector: Phase selection (0 to total_phases-1)
+      - StateFile: Intermediate output file discovery
+    
+    validation_location: runtime.rs:105-123 (validate_workflow_inputs)
+    
+    future_extensibility:
+      - Could add regex validation for Text
+      - Could add custom validators per field
+      - Could add inter-field dependencies
+      - All changes backward-compatible via FieldType enum
+
+  technical_decisions:
+    why_separate_binaries:
+      - Language-agnostic (could write workflows in any language)
+      - Process isolation (crash doesn't affect manager)
+      - Easy distribution (single binary per workflow)
+      - Simple debugging (run workflow standalone)
+    
+    why_json_events:
+      - Language-agnostic serialization
+      - Streaming-friendly (line-delimited)
+      - Human-readable for debugging
+      - Standard libraries everywhere
+    
+    why_broadcast_channel:
+      - Multiple concurrent subscribers (TUI, API, logging)
+      - Non-blocking for slow consumers
+      - Backpressure via channel capacity
+      - Tokio-native async integration
+    
+    why_trait_based_runtime:
+      - Abstraction over execution strategy
+      - Could swap ProcessBasedRuntime for DockerRuntime, K8sRuntime
+      - Testable via mock implementations
+      - Enables different deployment models

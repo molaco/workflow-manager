@@ -1,0 +1,554 @@
+research_summary:
+  title: "Best Practices for Dual-Purpose APIs: MCP Servers & Programmatic Clients"
+  
+  key_findings:
+    
+    mcp_architecture:
+      core_principles:
+        - modularity: "Separate transport, protocol logic, and user-defined handlers"
+        - type_safety: "Strongly typed messages using Rust's type system"
+        - extensibility: "Easy to add new transports or message types"
+      
+      rust_sdk_features:
+        - official_sdk: "modelcontextprotocol/rust-sdk with tokio async runtime"
+        - handler_traits: "ServerHandler and ServerHandlerCore traits for request/notification/error handling"
+        - transport_abstraction: "STDIO, SSE, HTTP support via trait-based design"
+        - async_io: "Built on tokio futures and async/await for non-blocking I/O"
+      
+      best_practices:
+        - trait_based_handlers: "Implement ToolHandler and ResourceHandler traits"
+        - async_first: "All MCP operations are async for concurrency"
+        - stdio_transport: "Primary transport for local integrations (simple & effective)"
+        - type_safe_tools: "Define clear schemas for tool parameters"
+    
+    dual_purpose_api_patterns:
+      
+      facade_pattern:
+        purpose: "Provide simplified interface to complex subsystem"
+        rust_implementation:
+          - unified_api: "Single struct exposing high-level operations"
+          - internal_complexity: "Hide workflow discovery, process management, log parsing"
+          - client_agnostic: "Same API serves TUI, MCP server, CLI, future HTTP API"
+        benefits:
+          - simplification: "Clients don't deal with low-level details"
+          - consistency: "Single source of truth for behavior"
+          - testability: "Mock the facade for testing"
+      
+      builder_pattern:
+        purpose: "Flexible configuration with optional parameters"
+        rust_implementation:
+          - common_in_tui: "Ratatui widgets use builder pattern extensively"
+          - fluent_api: "Chain method calls for configuration"
+          - type_safe: "Compile-time validation of required fields"
+        example_usage: "WorkflowExecutor::new(id).params(map).timeout(60).build()"
+      
+      trait_based_plugin_system:
+        purpose: "Allow multiple implementations of same interface"
+        rust_implementation:
+          - runtime_trait: "WorkflowRuntime trait already exists in your codebase"
+          - multiple_impls: "ProcessBasedRuntime, future DockerRuntime, K8sRuntime"
+          - dependency_injection: "Pass Arc<dyn WorkflowRuntime> to consumers"
+        benefits:
+          - swappable_backends: "Change runtime without changing clients"
+          - testing: "Mock runtime for unit tests"
+          - extensibility: "Add new runtimes without modifying existing code"
+    
+    event_driven_architecture:
+      
+      streaming_patterns:
+        tokio_broadcast:
+          description: "Multi-producer, multi-consumer broadcast channel"
+          use_case: "Stream workflow logs to multiple subscribers (TUI + MCP)"
+          key_features:
+            - channel_creation: "broadcast::channel(capacity) creates sender"
+            - subscription: "sender.subscribe() creates new receiver"
+            - message_distribution: "All receivers get copies of sent messages"
+            - async_ready: "Works with tokio async/await"
+          
+          current_usage_in_codebase:
+            location: "src/runtime.rs:152"
+            pattern: "ExecutionState contains broadcast::Sender<WorkflowLog>"
+            workflow: |
+              1. Runtime creates broadcast channel when executing workflow
+              2. Background task parses stderr, sends WorkflowLog to channel
+              3. Clients call subscribe_logs() to get receiver
+              4. Each client receives all logs independently
+        
+        tokio_streams:
+          description: "Async sequences of values over time (like async iterators)"
+          use_cases:
+            - real_time_data: "Log entries, event streams, metrics"
+            - composition: "Chain, filter, map stream transformations"
+            - backpressure: "Control flow of data to prevent overwhelming consumers"
+          
+          integration_opportunity:
+            suggestion: "Wrap broadcast::Receiver in Stream adapter for composability"
+            benefit: "Enables filtering, batching, rate-limiting of logs"
+      
+      tracing_for_diagnostics:
+        description: "Structured, event-based diagnostic framework for async Rust"
+        benefits:
+          - context_aware: "Track spans across async tasks"
+          - structured_logging: "Better than println! for production"
+          - async_friendly: "Designed for tokio ecosystem"
+        recommendation: "Add tracing to workflow runtime for better observability"
+    
+    similar_rust_projects:
+      
+      examples_with_multiple_interfaces:
+        - name: "Cargo (Rust package manager)"
+          interfaces: ["CLI (cargo build)", "Programmatic API (used by build.rs)", "JSON output (--message-format=json)"]
+          pattern: "Core library with thin CLI wrapper"
+        
+        - name: "Rust Analyzer (LSP server)"
+          interfaces: ["LSP protocol", "CLI (for debugging)", "Library API"]
+          pattern: "LSP server trait, multiple transport implementations"
+        
+        - name: "Ratatui TUI framework"
+          interfaces: ["Widget trait", "Builder pattern API", "Backend abstraction"]
+          pattern: "Backend trait (Crossterm, Termion, etc.) + unified widget API"
+      
+      key_lessons:
+        separation_of_concerns: "Core logic separate from interface layer"
+        trait_abstraction: "Define traits for swappable implementations"
+        async_everywhere: "Use tokio consistently for I/O operations"
+        builder_for_config: "Optional parameters via builder pattern"
+
+  minimal_viable_api_design:
+    
+    architecture_overview:
+      layers:
+        1_core_domain:
+          module: "workflow_manager_sdk (already exists)"
+          responsibilities:
+            - "WorkflowRuntime trait definition"
+            - "Data types (WorkflowLog, WorkflowStatus, WorkflowHandle)"
+            - "No I/O, pure business logic where possible"
+        
+        2_implementation:
+          module: "workflow-manager/src/runtime.rs (already exists)"
+          current_state: "ProcessBasedRuntime implements WorkflowRuntime"
+          responsibilities:
+            - "Process spawning and management"
+            - "Stderr parsing for __WF_EVENT__ messages"
+            - "Broadcast channel for log streaming"
+        
+        3_interface_adapters:
+          mcp_server:
+            module: "workflow-manager/src/mcp_tools.rs (already exists)"
+            current_state: "5 MCP tools wrapping WorkflowRuntime"
+            pattern: "Thin adapter: MCP JSON -> Runtime methods -> MCP ToolResult"
+          
+          tui_client:
+            module: "workflow-manager/src/app/* (already exists)"
+            current_state: "App struct uses ProcessBasedRuntime directly"
+            pattern: "Event loop polls runtime, updates UI state"
+          
+          future_http_api:
+            suggestion: "REST API wrapping WorkflowRuntime trait"
+            endpoints: ["GET /workflows", "POST /workflows/:id/execute", "GET /executions/:id/logs"]
+    
+    facade_design:
+      unified_api_struct:
+        name: "WorkflowManager"
+        location: "New module: workflow-manager/src/api.rs or src/facade.rs"
+        
+        structure: |
+          pub struct WorkflowManager {
+              runtime: Arc<dyn WorkflowRuntime>,
+              // Optional: caching, metrics, hooks
+          }
+          
+          impl WorkflowManager {
+              pub fn new(runtime: Arc<dyn WorkflowRuntime>) -> Self { ... }
+              
+              // High-level operations
+              pub fn list_workflows(&self) -> Result<Vec<FullWorkflowMetadata>> { ... }
+              pub async fn execute(&self, id: &str, params: HashMap<String, String>) -> Result<ExecutionHandle> { ... }
+              pub async fn stream_logs(&self, handle: &ExecutionHandle) -> Result<LogStream> { ... }
+              pub async fn get_status(&self, handle: &ExecutionHandle) -> Result<WorkflowStatus> { ... }
+              pub async fn cancel(&self, handle: &ExecutionHandle) -> Result<()> { ... }
+          }
+        
+        benefits:
+          - "Single entry point for all workflow operations"
+          - "Can add cross-cutting concerns (logging, metrics, auth)"
+          - "Easier to mock for testing vs. mocking runtime directly"
+        
+        note: "This is OPTIONAL - your current architecture already works well via WorkflowRuntime trait"
+    
+    streaming_logs_to_multiple_consumers:
+      
+      current_implementation_analysis:
+        what_works_well:
+          - runtime_has_broadcast: "ProcessBasedRuntime::ExecutionState uses broadcast::Sender<WorkflowLog>"
+          - subscribe_method: "WorkflowRuntime::subscribe_logs() returns broadcast::Receiver"
+          - multiple_subscribers: "Each subscriber gets independent receiver, no coordination needed"
+        
+        current_usage:
+          mcp_server: "src/mcp_tools.rs:116-124 - get_workflow_logs_tool subscribes and drains"
+          tui_tabs: "src/app/tabs.rs - WorkflowTab::poll() subscribes and accumulates logs"
+        
+        limitation_in_mcp_tool:
+          issue: "get_workflow_logs uses try_recv() which only gets buffered logs, not streaming"
+          reason: "MCP tool handler is synchronous callback, can't hold async receiver"
+          current_workaround: "Returns snapshot of available logs up to limit"
+      
+      recommended_pattern_for_streaming:
+        
+        approach_1_polling:
+          description: "Client periodically calls get_logs with offset/cursor"
+          pros:
+            - "Simple implementation"
+            - "Works with synchronous MCP tools"
+            - "Client controls polling rate"
+          cons:
+            - "Not true real-time"
+            - "Increased latency"
+          
+          implementation:
+            tui: "Already does this - poll_all_tabs() every 50ms in main loop"
+            mcp: "Client would need to repeatedly call get_workflow_logs tool"
+        
+        approach_2_async_stream:
+          description: "Return Stream<WorkflowLog> that yields logs as they arrive"
+          pros:
+            - "True real-time streaming"
+            - "Efficient (no polling)"
+            - "Composable with Stream combinators"
+          cons:
+            - "Requires async support in consumer"
+            - "More complex lifecycle management"
+          
+          rust_code: |
+            use tokio_stream::wrappers::BroadcastStream;
+            
+            pub async fn stream_logs(
+                &self,
+                handle: &ExecutionHandle
+            ) -> Result<impl Stream<Item = WorkflowLog>> {
+                let receiver = self.runtime.subscribe_logs(&handle.id).await?;
+                Ok(BroadcastStream::new(receiver)
+                    .filter_map(|r| r.ok())) // Skip lagged errors
+            }
+          
+          usage_in_tui: |
+            // In WorkflowTab
+            let mut log_stream = manager.stream_logs(&handle).await?;
+            while let Some(log) = log_stream.next().await {
+                self.handle_log(log);
+            }
+          
+          usage_in_mcp:
+            challenge: "MCP tool handlers can't easily return streams"
+            solution_a: "Server-Sent Events (SSE) transport for MCP"
+            solution_b: "Polling pattern (approach_1) remains best for MCP tools"
+
+  concrete_implementation_steps:
+    
+    phase_1_extract_facade:
+      description: "Create unified API layer (OPTIONAL - current design already good)"
+      
+      step_1:
+        task: "Create src/api.rs or src/facade.rs module"
+        code_skeleton: |
+          use std::sync::Arc;
+          use workflow_manager_sdk::*;
+          
+          pub struct WorkflowManager {
+              runtime: Arc<dyn WorkflowRuntime>,
+          }
+          
+          impl WorkflowManager {
+              pub fn new(runtime: Arc<dyn WorkflowRuntime>) -> Self {
+                  Self { runtime }
+              }
+              
+              // Delegate to runtime methods
+              pub fn list_workflows(&self) -> WorkflowResult<Vec<FullWorkflowMetadata>> {
+                  self.runtime.list_workflows()
+              }
+              
+              pub async fn execute_workflow(
+                  &self,
+                  id: &str,
+                  params: HashMap<String, String>,
+              ) -> WorkflowResult<WorkflowHandle> {
+                  self.runtime.execute_workflow(id, params).await
+              }
+              
+              // Add convenience methods
+              pub async fn stream_logs(
+                  &self,
+                  handle_id: &Uuid,
+              ) -> WorkflowResult<impl Stream<Item = WorkflowLog>> {
+                  let rx = self.runtime.subscribe_logs(handle_id).await?;
+                  Ok(BroadcastStream::new(rx).filter_map(|r| r.ok()))
+              }
+          }
+      
+      step_2:
+        task: "Update TUI to use WorkflowManager instead of runtime directly"
+        changes:
+          - "src/app/models/app.rs: Change runtime field to manager: WorkflowManager"
+          - "src/app/tabs.rs: Call manager methods instead of runtime"
+      
+      step_3:
+        task: "Update MCP tools to use WorkflowManager"
+        changes:
+          - "src/mcp_tools.rs: Accept Arc<WorkflowManager> instead of Arc<dyn WorkflowRuntime>"
+      
+      estimated_effort: "2-4 hours"
+      
+      decision_point:
+        question: "Is facade layer necessary?"
+        current_state: "WorkflowRuntime trait already provides good abstraction"
+        recommendation: "SKIP this phase unless you need cross-cutting concerns (metrics, caching, auth)"
+    
+    phase_2_improve_log_streaming:
+      description: "Enhance log streaming for TUI with tokio Stream"
+      
+      step_1:
+        task: "Add tokio-stream dependency"
+        change: "Cargo.toml: tokio-stream = \"0.1\""
+      
+      step_2:
+        task: "Create stream wrapper in runtime or facade"
+        location: "src/runtime.rs or new src/api.rs"
+        code: |
+          use tokio_stream::{Stream, wrappers::BroadcastStream};
+          
+          impl ProcessBasedRuntime {
+              pub async fn stream_logs(
+                  &self,
+                  handle_id: &Uuid,
+              ) -> WorkflowResult<impl Stream<Item = WorkflowLog>> {
+                  let rx = self.subscribe_logs(handle_id).await?;
+                  Ok(BroadcastStream::new(rx)
+                      .filter_map(|result| match result {
+                          Ok(log) => Some(log),
+                          Err(_) => None, // Handle lagged receiver
+                      }))
+              }
+          }
+      
+      step_3:
+        task: "Update WorkflowTab to use Stream API"
+        location: "src/app/tabs.rs or src/app/models/tab.rs"
+        current_code_analysis:
+          file: "src/app/models/tab.rs (inferred)"
+          current_pattern: "poll() method with try_recv() in loop"
+        
+        new_pattern: |
+          use tokio_stream::StreamExt;
+          
+          pub struct WorkflowTab {
+              log_stream: Option<Pin<Box<dyn Stream<Item = WorkflowLog> + Send>>>,
+              // ... existing fields
+          }
+          
+          impl WorkflowTab {
+              pub async fn subscribe_to_logs(&mut self, runtime: Arc<dyn WorkflowRuntime>) {
+                  if let Ok(stream) = runtime.stream_logs(&self.handle_id).await {
+                      self.log_stream = Some(Box::pin(stream));
+                  }
+              }
+              
+              pub async fn poll_logs(&mut self) {
+                  if let Some(stream) = &mut self.log_stream {
+                      // Drain available logs without blocking
+                      while let Ok(Some(log)) = tokio::time::timeout(
+                          Duration::from_millis(0),
+                          stream.next()
+                      ).await {
+                          self.handle_log(log);
+                      }
+                  }
+              }
+          }
+      
+      estimated_effort: "3-5 hours"
+      recommendation: "OPTIONAL - current polling with try_recv() works fine for TUI"
+    
+    phase_3_enhance_mcp_integration:
+      description: "Improve MCP server with better async handling"
+      
+      current_limitation:
+        issue: "get_workflow_logs returns snapshot, not true stream"
+        root_cause: "MCP tool handler returns Future<ToolResult>, not Stream"
+      
+      solution_options:
+        
+        option_a_keep_polling:
+          approach: "Keep current snapshot API, document that clients should poll"
+          implementation: "Add 'offset' or 'since' parameter to skip already-seen logs"
+          code_change: |
+            // In get_workflow_logs_tool
+            fn get_workflow_logs_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
+                SdkMcpTool::new(
+                    "get_workflow_logs",
+                    "Get logs from workflow execution (poll repeatedly for updates)",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "handle_id": {"type": "string"},
+                            "since_index": {"type": "integer", "default": 0}
+                        }
+                    }),
+                    move |params| {
+                        // Return logs from index onwards
+                        // Client tracks last index and requests since_index=N
+                    }
+                )
+            }
+          
+          pros: "Simple, works with current MCP tool architecture"
+          cons: "Client complexity, not real-time"
+        
+        option_b_sse_transport:
+          approach: "Use Server-Sent Events transport for MCP"
+          note: "MCP spec supports SSE for streaming"
+          research_needed: "Check if claude-agent-sdk supports SSE transport"
+          complexity: "High - requires transport layer changes"
+        
+        option_c_websocket_extension:
+          approach: "Add WebSocket endpoint for log streaming (outside MCP)"
+          implementation: "Separate from MCP tools, dedicated streaming API"
+          complexity: "Medium - requires HTTP server setup"
+      
+      recommendation:
+        short_term: "Option A - enhance polling API with since_index parameter"
+        long_term: "Option B or C if real-time streaming critical"
+      
+      estimated_effort:
+        option_a: "2-3 hours"
+        option_b: "1-2 days (research + implementation)"
+        option_c: "1 day (using axum or warp framework)"
+    
+    phase_4_add_observability:
+      description: "Integrate tracing for better diagnostics"
+      
+      step_1:
+        task: "Add tracing dependencies"
+        cargo_toml: |
+          tracing = "0.1"
+          tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+      
+      step_2:
+        task: "Initialize tracing in main.rs"
+        code: |
+          use tracing_subscriber;
+          
+          fn main() -> Result<()> {
+              tracing_subscriber::fmt()
+                  .with_env_filter("workflow_manager=debug")
+                  .init();
+              
+              // ... rest of main
+          }
+      
+      step_3:
+        task: "Add tracing spans to runtime operations"
+        location: "src/runtime.rs"
+        code: |
+          use tracing::{debug, error, info, instrument};
+          
+          #[instrument(skip(self))]
+          async fn execute_workflow(&self, id: &str, params: HashMap<String, String>) -> WorkflowResult<WorkflowHandle> {
+              info!("Executing workflow: {}", id);
+              // ... implementation
+              debug!("Workflow started with handle: {}", exec_id);
+              Ok(handle)
+          }
+      
+      benefits:
+        - "Better debugging of async operations"
+        - "Structured logging output"
+        - "Correlation of logs across async tasks"
+      
+      estimated_effort: "2-3 hours"
+      recommendation: "HIGH PRIORITY - significant quality-of-life improvement"
+
+  architecture_decision_records:
+    
+    adr_1_keep_trait_based_runtime:
+      decision: "Keep WorkflowRuntime trait as primary abstraction"
+      rationale:
+        - "Already provides interface abstraction needed for dual-purpose API"
+        - "Allows swapping implementations (Process, Docker, K8s)"
+        - "No need for additional facade layer"
+      
+      implications:
+        - "TUI and MCP server both depend on WorkflowRuntime trait"
+        - "Easy to test with mock implementations"
+        - "Future HTTP API would also consume WorkflowRuntime"
+    
+    adr_2_broadcast_for_log_distribution:
+      decision: "Use tokio broadcast channel for log streaming"
+      rationale:
+        - "Supports multiple independent consumers (TUI tabs + MCP)"
+        - "Built-in overflow handling (lagged receiver)"
+        - "Zero-copy for consumers (Arc internally)"
+      
+      current_implementation: "Already in use at src/runtime.rs:152"
+      
+      implications:
+        - "Each consumer must handle potential lag (missed messages)"
+        - "Channel capacity (100) should be tuned based on log volume"
+        - "Consumers should use try_recv() for non-blocking polls"
+    
+    adr_3_polling_for_mcp_tools:
+      decision: "MCP tools use polling pattern, not streaming"
+      rationale:
+        - "MCP tool handlers are async closures returning single result"
+        - "Streaming would require SSE transport or WebSocket"
+        - "Polling is simpler and sufficient for AI assistant use case"
+      
+      implementation:
+        - "get_workflow_logs returns snapshot of available logs"
+        - "Clients call repeatedly to get updates"
+      
+      future_enhancement:
+        - "Add since_index parameter for efficiency"
+        - "Consider SSE transport if streaming becomes critical"
+    
+    adr_4_tui_event_loop_architecture:
+      decision: "TUI polls runtime every 50ms in main event loop"
+      rationale:
+        - "Simple model: render, check events, poll state, repeat"
+        - "Avoids complex async integration with ratatui (which is sync)"
+        - "50ms polling gives good UX without high CPU usage"
+      
+      current_implementation: "main.rs:64 - event::poll(Duration::from_millis(50))"
+      
+      alternatives_considered:
+        - "Spawn background task per tab to push updates to queue"
+        - "Use async ratatui wrapper (experimental)"
+      
+      chosen_approach_pros:
+        - "Simpler to reason about"
+        - "No complex async/sync bridging"
+        - "Consistent with ratatui examples"
+
+  recommended_next_actions:
+    
+    priority_1_minimal_changes:
+      description: "Ship current architecture - it already supports dual-purpose API well"
+      
+      tasks:
+        - task: "Document WorkflowRuntime trait as the public API"
+          location: "workflow-manager-sdk/src/lib.rs"
+          add_docs: |
+            /// # Dual-Purpose API Design
+            ///
+            /// `WorkflowRuntime` serves as the primary interface for workflow operations,
+            /// supporting multiple client types:
+            ///
+            /// - **TUI Client**: `src/app/` modules use runtime for UI state
+            /// - **MCP Server**: `src/mcp_tools.rs` exposes runtime via MCP tools
+            /// - **Future HTTP API**: Can wrap runtime with REST endpoints
+            ///
+            /// ## Log Streaming Pattern
+            ///
+            /// Logs are streamed via tokio broadcast channels:
+            ///

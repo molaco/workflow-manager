@@ -1,6 +1,7 @@
 //! History and session management
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use workflow_manager_sdk::WorkflowStatus;
 
