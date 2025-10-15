@@ -538,7 +538,7 @@ cargo run --release
 |-------|--------|--------|-----------|-------|
 | 0: Preparation | ✅ | - | ✅ | Plan created and committed |
 | 1: Extract Models | ✅ | ✅ | ✅ | 4bc33af - All tests passed |
-| 2: Extract UI | ⏸️ | ⬜ | ⬜ | |
+| 2: Extract UI | ✅ | ✅ | ✅ | 0b7d730 - UI extracted + 3 bug fixes |
 | 3: Extract App Methods | ⏸️ | ⬜ | ⬜ | |
 | 4: Extract Utilities | ⏸️ | ⬜ | ⬜ | |
 | 5: Split UI Module | ⏸️ | ⬜ | ⬜ | |
