@@ -322,15 +322,15 @@ fn run_app<B: ratatui::backend::Backend>(
                                 }
                             }
                             KeyCode::Tab => {
-                                // Tab navigation for Tabs view
-                                if key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) {
-                                    if matches!(app.current_view, View::Tabs) {
-                                        app.previous_tab();
-                                    }
-                                } else {
-                                    if matches!(app.current_view, View::Tabs) {
-                                        app.next_tab();
-                                    }
+                                // Tab navigation forward
+                                if matches!(app.current_view, View::Tabs) {
+                                    app.next_tab();
+                                }
+                            }
+                            KeyCode::BackTab => {
+                                // Shift+Tab navigation backward
+                                if matches!(app.current_view, View::Tabs) {
+                                    app.previous_tab();
                                 }
                             }
                             KeyCode::Char('t') | KeyCode::Char('T') => {

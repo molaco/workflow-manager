@@ -1,0 +1,549 @@
+mcp_server_implementation_analysis:
+  overview: |
+    The claude-agent-sdk-rust implements an in-process MCP (Model Context Protocol) server pattern
+    that enables custom tools to be registered and invoked by Claude without subprocess overhead.
+    The implementation uses a JSONRPC protocol for tool communication and provides type-safe,
+    async tool handlers.
+
+  core_components:
+    SdkMcpTool:
+      location: src/mcp/tool.rs
+      description: Represents a single invokable tool with validation and async execution
+      structure:
+        name: Unique tool identifier (String)
+        description: Human-readable description (String)
+        input_schema: JSON schema for parameter validation (serde_json::Value)
+        compiled_schema: Pre-compiled JSONSchema validator (Option<JSONSchema>)
+        handler: Async function wrapped in ToolHandler type alias
+      
+      creation_pattern:
+        signature: |
+          SdkMcpTool::new<F, Fut>(
+              name: impl Into<String>,
+              description: impl Into<String>,
+              input_schema: serde_json::Value,
+              handler: F
+          ) -> Self
+          where
+              F: Fn(serde_json::Value) -> Fut + Send + Sync + 'static,
+              Fut: Future<Output = Result<ToolResult>> + Send + 'static
+        
+        example: |
+          SdkMcpTool::new(
+              "add",
+              "Add two numbers together",
+              json!({
+                  "type": "object",
+                  "properties": {
+                      "a": {"type": "number", "description": "First number"},
+                      "b": {"type": "number", "description": "Second number"}
+                  },
+                  "required": ["a", "b"]
+              }),
+              |input| {
+                  Box::pin(async move {
+                      let a = input["a"].as_f64().unwrap();
+                      let b = input["b"].as_f64().unwrap();
+                      let result = a + b;
+                      Ok(ToolResult::text(format!("{} + {} = {}", a, b, result)))
+                  })
+              }
+          )
+      
+      key_methods:
+        invoke:
+          signature: pub async fn invoke(&self, input serde_json::Value) -> Result<ToolResult>
+          description: Executes the tool handler with given input
+          location: src/mcp/tool.rs:129
+        
+        validate_input:
+          signature: pub fn validate_input(&self, input &serde_json::Value) -> Result<()>
+          description: Validates input against JSON schema using jsonschema crate
+          location: src/mcp/tool.rs:136
+          error_handling: Returns ClaudeError::ValidationError with collected error messages
+        
+        to_tool_info:
+          signature: pub(crate) fn to_tool_info(&self) -> serde_json::Value
+          description: Converts tool to MCP tools/list format
+          location: src/mcp/tool.rs:147
+
+    SdkMcpServer:
+      location: src/mcp/server.rs
+      description: In-process MCP server that hosts and manages custom tools
+      structure:
+        name: Server identifier (String)
+        version: Server version string (String)
+        tools: HashMap of tool name to SdkMcpTool
+      
+      builder_pattern:
+        methods:
+          - new(name impl Into<String>) -> Self
+          - version(self, version impl Into<String>) -> Self
+          - tool(self, tool SdkMcpTool) -> Self
+          - tools(self, tools Vec<SdkMcpTool>) -> Self
+        
+        example: |
+          let server = SdkMcpServer::new("calculator")
+              .version("1.0.0")
+              .tool(add_tool)
+              .tool(multiply_tool)
+              .tool(divide_tool);
+      
+      protocol_handling:
+        description: Implements JSONRPC 2.0 protocol for MCP communication
+        location: src/mcp/server.rs:169-282
+        
+        supported_methods:
+          initialize:
+            method: initialize
+            handler: handle_initialize
+            response: |
+              {
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {"name": server_name, "version": server_version},
+                "capabilities": {"tools": {}}
+              }
+            location: src/mcp/server.rs:185
+          
+          notifications_initialized:
+            method: notifications/initialized
+            handler: handle_notifications_initialized
+            description: Acknowledges initialization notification
+            location: src/mcp/server.rs:202
+          
+          tools_list:
+            method: tools/list
+            handler: handle_tools_list
+            response: |
+              {
+                "tools": [
+                  {"name": "tool_name", "description": "...", "inputSchema": {...}},
+                  ...
+                ]
+              }
+            location: src/mcp/server.rs:209
+          
+          tools_call:
+            method: tools/call
+            handler: handle_tools_call
+            parameters:
+              name: Tool name to invoke (required)
+              arguments: Tool input matching schema (required)
+            validation_flow:
+              - Check parameters exist
+              - Extract tool name
+              - Verify tool exists
+              - Validate arguments against pre-compiled JSON schema
+              - Invoke tool handler
+              - Serialize result or return error
+            location: src/mcp/server.rs:221-281
+            error_codes:
+              - "-32602 Invalid params (missing name/arguments)"
+              - "-32001 Tool not found"
+              - "-32603 Internal error (validation failed or execution error)"
+
+    ToolResult:
+      location: src/mcp/tool.rs:169-210
+      description: Result type returned by tool handlers
+      structure:
+        content: Vec<ToolContent>
+        is_error: Option<bool>
+      
+      factory_methods:
+        text:
+          signature: pub fn text(text impl Into<String>) -> Self
+          description: Create successful text result
+          location: src/mcp/tool.rs:188
+        
+        error:
+          signature: pub fn error(text impl Into<String>) -> Self
+          description: Create error result with is_error flag
+          location: src/mcp/tool.rs:204
+
+    ToolContent:
+      location: src/mcp/tool.rs:212-229
+      description: Content blocks in tool results
+      variants:
+        Text:
+          fields: text String
+          description: Plain text content
+        
+        Image:
+          fields:
+            data: String (base64 encoded)
+            mime_type: String (e.g., "image/png")
+          description: Image content
+      
+      serialization: Tagged enum with type field and lowercase variant names
+
+    ToolHandler:
+      location: src/mcp/mod.rs:100-104
+      description: Type alias for tool handler functions
+      definition: |
+        pub type ToolHandler = Arc<
+            dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = Result<ToolResult>> + Send>>
+                + Send
+                + Sync
+        >;
+      constraints:
+        - Must be Send + Sync + 'static for concurrent invocation
+        - Returns pinned boxed future for async execution
+        - Handler closure is Arc-wrapped for sharing across threads
+
+  integration_with_claude:
+    McpServerConfig:
+      location: src/types.rs:433-442
+      description: Configuration enum for different MCP server types
+      variants:
+        Stdio: Subprocess-based MCP server
+        Sse: Server-Sent Events MCP server
+        Http: HTTP-based MCP server
+        Sdk: In-process SDK MCP server
+      
+      sdk_variant:
+        structure: Sdk(SdkMcpServerMarker)
+        marker_fields:
+          name: Server name (String)
+          instance: Arc<SdkMcpServer> - Shared server instance
+        location: src/types.rs:423-429
+
+    registration_pattern:
+      location: examples/mcp_integration_demo.rs:86-104
+      steps:
+        1_create_server: |
+          let server = SdkMcpServer::new("calculator")
+              .version("1.0.0")
+              .tool(add_tool)
+              .tool(multiply_tool);
+        
+        2_wrap_in_arc: |
+          let calculator_arc = Arc::new(server);
+        
+        3_create_server_config: |
+          let mut mcp_servers = HashMap::new();
+          mcp_servers.insert(
+              "calc".to_string(),
+              McpServerConfig::Sdk(SdkMcpServerMarker {
+                  name: "calc".to_string(),
+                  instance: calculator_arc,
+              })
+          );
+        
+        4_configure_options: |
+          let options = ClaudeAgentOptions {
+              mcp_servers: McpServers::Dict(mcp_servers),
+              allowed_tools: vec![
+                  ToolName::new("mcp__calc__add"),
+                  ToolName::new("mcp__calc__multiply"),
+              ],
+              ..Default::default()
+          };
+        
+        5_create_client: |
+          let mut client = ClaudeSDKClient::new(options, None).await?;
+
+    tool_naming_convention:
+      pattern: mcp__{server_name}__{tool_name}
+      example: mcp__calc__add
+      description: Tools are prefixed with mcp__ and server name for namespacing
+      location: examples/test2.rs:96
+
+    client_integration:
+      sdk_server_extraction:
+        location: src/client/mod.rs:266-275
+        process: |
+          let sdk_mcp_servers = if let McpServers::Dict(ref servers) = options.mcp_servers {
+              servers.iter().filter_map(|(name, config)| {
+                  if let McpServerConfig::Sdk(marker) = config {
+                      Some((name.clone(), marker.instance.clone()))
+                  } else {
+                      None
+                  }
+              }).collect()
+          } else {
+              HashMap::new()
+          };
+      
+      mcp_message_handler_task:
+        location: src/client/mod.rs:731-798
+        description: Background task that routes MCP requests to SDK servers
+        flow:
+          1_receive_request: Receives (RequestId, server_name, message) from channel
+          2_lookup_server: Gets server instance from sdk_mcp_servers HashMap
+          3_deserialize_request: Converts message to JsonRpcRequest
+          4_invoke_server: Calls server.handle_request(request).await
+          5_send_response: Sends JSONRPC response back via control protocol
+        
+        error_handling:
+          server_not_found: Returns JSONRPC error with code -32001
+          deserialization_error: Returns JSONRPC error with -32700
+          execution_error: Propagates error from tool handler
+      
+      initialization:
+        location: src/client/mod.rs:408-412
+        condition: SDK MCP servers present OR hooks configured
+        purpose: Establishes control protocol connection for bidirectional communication
+
+  async_execution_model:
+    tool_handler_execution:
+      pattern: Box::pin(async move { ... })
+      description: Handlers return boxed pinned futures for async execution
+      trait_bounds: Future<Output = Result<ToolResult>> + Send + 'static
+      example: |
+        |input| {
+            Box::pin(async move {
+                // Async operations allowed here
+                let result = some_async_operation().await;
+                Ok(ToolResult::text(result))
+            })
+        }
+    
+    concurrency:
+      server_sharing: Arc<SdkMcpServer> enables concurrent tool invocations
+      handler_safety: Handlers must be Send + Sync for parallel execution
+      state_management: Handlers should use Arc<Mutex<T>> or Arc<RwLock<T>> for shared state
+
+  error_handling:
+    validation_errors:
+      type: ClaudeError::ValidationError
+      source: jsonschema crate validation failures
+      location: src/mcp/tool.rs:136-144
+      handling: Collected into comma-separated error message string
+    
+    execution_errors:
+      handler_result: Result<ToolResult> allows tools to return errors
+      error_results: ToolResult::error() creates error response with is_error flag
+      propagation: Errors converted to JSONRPC error responses in handle_tools_call
+    
+    jsonrpc_error_codes:
+      method_not_found: -32601
+      invalid_params: -32602
+      internal_error: -32603
+      tool_not_found: -32001 (custom)
+      location: src/mcp/protocol.rs:59-107
+
+  protocol_types:
+    JsonRpcRequest:
+      location: src/mcp/protocol.rs:8-20
+      fields:
+        jsonrpc: Always "2.0"
+        id: Optional request ID (null for notifications)
+        method: Method name string
+        params: Optional parameters as JSON value
+    
+    JsonRpcResponse:
+      location: src/mcp/protocol.rs:23-56
+      fields:
+        jsonrpc: Always "2.0"
+        id: Matches request ID
+        result: Present on success (optional)
+        error: Present on failure (optional)
+      
+      factory_methods:
+        success: Creates response with result field
+        error: Creates response with error field
+    
+    McpError:
+      location: src/mcp/protocol.rs:60-107
+      fields:
+        code: Error code (i32)
+        message: Error message (String)
+        data: Optional additional error data
+
+  patterns_for_workflow_operations:
+    recommended_approach:
+      description: Expose workflow operations as MCP tools using SDK pattern
+      benefits:
+        - No subprocess overhead
+        - Type-safe tool definitions
+        - Direct access to workflow state
+        - Integrated error handling
+        - Async operation support
+    
+    workflow_tool_structure:
+      list_workflows:
+        tool_name: list_workflows
+        description: List all available workflows with metadata
+        input_schema: |
+          {
+            "type": "object",
+            "properties": {
+              "filter": {"type": "string", "description": "Optional filter pattern"},
+              "include_disabled": {"type": "boolean", "default": false}
+            }
+          }
+        handler_pattern: |
+          |input| Box::pin(async move {
+              let filter = input["filter"].as_str();
+              let workflows = workflow_registry.list(filter).await?;
+              let result = serde_json::to_string_pretty(&workflows)?;
+              Ok(ToolResult::text(result))
+          })
+      
+      execute_workflow:
+        tool_name: execute_workflow
+        description: Execute a specific workflow with parameters
+        input_schema: |
+          {
+            "type": "object",
+            "properties": {
+              "workflow_name": {"type": "string", "description": "Workflow identifier"},
+              "parameters": {"type": "object", "description": "Workflow input parameters"},
+              "async": {"type": "boolean", "default": false, "description": "Run asynchronously"}
+            },
+            "required": ["workflow_name"]
+          }
+        handler_pattern: |
+          |input| Box::pin(async move {
+              let name = input["workflow_name"].as_str().unwrap();
+              let params = input.get("parameters").cloned().unwrap_or_default();
+              let is_async = input["async"].as_bool().unwrap_or(false);
+              
+              if is_async {
+                  let job_id = workflow_executor.spawn(name, params).await?;
+                  Ok(ToolResult::text(format!("Workflow started: {}", job_id)))
+              } else {
+                  let result = workflow_executor.execute(name, params).await?;
+                  let output = serde_json::to_string_pretty(&result)?;
+                  Ok(ToolResult::text(output))
+              }
+          })
+      
+      get_workflow_status:
+        tool_name: get_workflow_status
+        description: Get status of a running workflow
+        input_schema: |
+          {
+            "type": "object",
+            "properties": {
+              "job_id": {"type": "string", "description": "Workflow job identifier"}
+            },
+            "required": ["job_id"]
+          }
+        handler_pattern: |
+          |input| Box::pin(async move {
+              let job_id = input["job_id"].as_str().unwrap();
+              let status = workflow_executor.get_status(job_id).await?;
+              let output = serde_json::to_string_pretty(&status)?;
+              Ok(ToolResult::text(output))
+          })
+      
+      cancel_workflow:
+        tool_name: cancel_workflow
+        description: Cancel a running workflow
+        input_schema: |
+          {
+            "type": "object",
+            "properties": {
+              "job_id": {"type": "string", "description": "Workflow job identifier"},
+              "force": {"type": "boolean", "default": false, "description": "Force cancellation"}
+            },
+            "required": ["job_id"]
+          }
+        handler_pattern: |
+          |input| Box::pin(async move {
+              let job_id = input["job_id"].as_str().unwrap();
+              let force = input["force"].as_bool().unwrap_or(false);
+              workflow_executor.cancel(job_id, force).await?;
+              Ok(ToolResult::text(format!("Workflow {} cancelled", job_id)))
+          })
+    
+    state_management_pattern:
+      description: Share workflow executor state across tools using Arc
+      example: |
+        let executor = Arc::new(WorkflowExecutor::new());
+        
+        let list_tool = {
+            let executor = executor.clone();
+            SdkMcpTool::new("list_workflows", "List workflows", schema, move |input| {
+                let executor = executor.clone();
+                Box::pin(async move {
+                    let workflows = executor.list().await?;
+                    Ok(ToolResult::text(format!("{:?}", workflows)))
+                })
+            })
+        };
+        
+        let execute_tool = {
+            let executor = executor.clone();
+            SdkMcpTool::new("execute_workflow", "Execute workflow", schema, move |input| {
+                let executor = executor.clone();
+                Box::pin(async move {
+                    let result = executor.execute(...).await?;
+                    Ok(ToolResult::text(format!("{:?}", result)))
+                })
+            })
+        };
+    
+    error_reporting_pattern:
+      success_with_details: Use ToolResult::text() with formatted output
+      partial_failure: Use ToolResult with custom content describing what succeeded
+      complete_failure: Use ToolResult::error() with error message
+      validation_error: Return early from handler with Err(ClaudeError::ValidationError)
+      execution_error: Return Err(ClaudeError::Mcp) with descriptive message
+    
+    json_output_pattern:
+      description: Return structured JSON for complex results
+      example: |
+        |input| Box::pin(async move {
+            let result = complex_operation().await?;
+            let json = serde_json::json!({
+                "status": "success",
+                "data": result,
+                "metadata": {
+                    "timestamp": chrono::Utc::now(),
+                    "duration_ms": duration.as_millis()
+                }
+            });
+            Ok(ToolResult::text(serde_json::to_string_pretty(&json)?))
+        })
+
+  implementation_recommendations:
+    for_workflow_manager:
+      server_organization:
+        create_single_server: One SdkMcpServer per logical service (e.g., "workflow-manager")
+        group_related_tools: All workflow operations in same server for cohesion
+        version_appropriately: Use semantic versioning for server version
+      
+      tool_naming:
+        use_clear_names: list_workflows, execute_workflow, get_status
+        avoid_abbreviations: Prefer readability over brevity
+        consistent_convention: Use verb_noun pattern for operations
+      
+      schema_design:
+        be_specific: Use detailed property descriptions for Claude
+        mark_required_fields: Explicitly list required parameters
+        provide_defaults: Use default values where sensible
+        add_examples: Include example values in descriptions
+      
+      handler_implementation:
+        validate_early: Check inputs before expensive operations
+        use_async_properly: Leverage await for I/O operations
+        handle_errors_gracefully: Return informative error messages
+        log_appropriately: Use tracing feature for debugging
+        avoid_panics: Never panic in handlers, return errors instead
+      
+      state_management:
+        use_arc_for_sharing: Wrap executors in Arc for multi-threaded access
+        consider_mutex_locks: Use Mutex/RwLock for mutable shared state
+        avoid_blocking: Never block in async handlers
+        cleanup_resources: Ensure proper cleanup on error paths
+      
+      testing_strategy:
+        unit_test_tools: Test individual tool handlers in isolation
+        integration_test_server: Test server JSONRPC protocol handling
+        test_validation: Verify schema validation catches invalid inputs
+        test_error_paths: Ensure errors are properly propagated
+
+  key_files_for_reference:
+    - src/mcp/tool.rs - SdkMcpTool implementation
+    - src/mcp/server.rs - SdkMcpServer implementation
+    - src/mcp/protocol.rs - JSONRPC protocol types
+    - src/mcp/mod.rs - MCP module documentation and ToolHandler type
+    - src/types.rs:423-442 - McpServerConfig and SdkMcpServerMarker
+    - src/client/mod.rs:266-275 - SDK server extraction
+    - src/client/mod.rs:731-798 - MCP message handler task
+    - examples/mcp_integration_demo.rs - Complete integration example
+    - examples/mcp_demo.rs - Tool creation patterns
+    - examples/test2.rs - Real-world usage with TTS tool
+    - examples/test_mcp_tools.rs - Testing patterns

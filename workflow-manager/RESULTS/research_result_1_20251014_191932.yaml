@@ -1,0 +1,650 @@
+# Workflow-Manager Architecture Analysis
+# Generated: 2025-10-14
+
+## OVERVIEW
+architecture:
+  type: "TUI-based workflow orchestration system with tabbed interface"
+  language: "Rust"
+  workspace_structure:
+    - workflow-manager: "Main TUI application (main.rs)"
+    - workflow-manager-sdk: "Core traits, types, and logging macros"
+    - workflow-manager-macros: "Procedural macros for WorkflowDefinition derive"
+    - claude-agent-sdk-rust: "Claude API integration"
+
+## WORKFLOW DEFINITION LAYER
+
+workflow_trait:
+  location: "workflow-manager-sdk/src/lib.rs:68-72"
+  trait_name: "WorkflowDefinition"
+  methods:
+    - "metadata() -> WorkflowMetadata"
+    - "fields() -> Vec<FieldSchema>"
+    - "print_metadata(&self)"
+  
+  implementation:
+    derive_macro: "workflow-manager-macros/src/lib.rs"
+    usage_pattern: |
+      #[derive(Parser, WorkflowDefinition)]
+      #[workflow(id, name, description)]
+      struct Args {
+        #[field(label, description, type, ...)]
+        field_name: FieldType,
+      }
+    
+    example: "workflow-manager/examples/test_workflow.rs:5-35"
+
+metadata_structures:
+  WorkflowMetadata:
+    location: "workflow-manager-sdk/src/lib.rs:10-15"
+    fields:
+      - id: String
+      - name: String
+      - description: String
+  
+  FullWorkflowMetadata:
+    location: "workflow-manager-sdk/src/lib.rs:18-23"
+    fields:
+      - metadata: WorkflowMetadata (flattened)
+      - fields: Vec<FieldSchema>
+    purpose: "JSON export to TUI for workflow discovery"
+
+  FieldSchema:
+    location: "workflow-manager-sdk/src/lib.rs:26-37"
+    fields:
+      - name: String
+      - field_type: FieldType
+      - label: String
+      - description: String
+      - cli_arg: String
+      - required: bool
+      - default: Option<String>
+      - required_for_phases: Option<Vec<usize>>
+    purpose: "Define UI input fields and CLI arguments"
+
+  FieldType:
+    location: "workflow-manager-sdk/src/lib.rs:39-65"
+    variants:
+      - Text: "Simple text input"
+      - Number: "with optional min/max constraints"
+      - FilePath: "with optional pattern glob"
+      - Select: "dropdown with predefined options"
+      - PhaseSelector: "select specific phases to execute"
+      - StateFile: "reference intermediate output files from previous phases"
+
+## WORKFLOW DISCOVERY
+
+discovery_system:
+  location: "workflow-manager/src/discovery.rs"
+  
+  discovery_function:
+    name: "discover_workflows()"
+    location: "workflow-manager/src/discovery.rs:15-78"
+    search_paths:
+      - "~/.workflow-manager/workflows/" # User workflows
+      - "../target/debug" # Built-in workflows (dev mode)
+    
+    filtering:
+      - "Skip directories"
+      - "Skip workflow-manager binary itself"
+      - "Skip build artifacts (files with extensions)"
+      - "Skip hash-suffixed binaries (e.g., binary-abc123def)"
+      - "Only executable files"
+    
+    metadata_extraction:
+      method: "Execute binary with --workflow-metadata flag"
+      location: "workflow-manager/src/discovery.rs:118-147"
+      protocol: |
+        Command: <binary> --workflow-metadata
+        Output: JSON to stdout (FullWorkflowMetadata)
+        Stderr: Suppressed
+      
+      handled_by_workflow: |
+        if args.workflow_metadata {
+          args.print_metadata();  // Prints JSON to stdout
+          return Ok(());
+        }
+
+  load_workflows:
+    location: "workflow-manager/src/main.rs:2049-2156"
+    sources:
+      builtin: "load_builtin_workflows() - scans ../target/debug"
+      user_defined: "load_discovered_workflows() - TODO: integrate discovery.rs"
+
+  internal_representation:
+    structure: "Workflow"
+    location: "workflow-manager-sdk/src/lib.rs:113-116"
+    fields:
+      - info: WorkflowInfo
+      - source: WorkflowSource (BuiltIn | UserDefined)
+    
+    WorkflowInfo:
+      location: "workflow-manager-sdk/src/lib.rs:94-102"
+      fields:
+        - id: String
+        - name: String
+        - description: String
+        - status: WorkflowStatus
+        - metadata: WorkflowMetadata
+        - fields: Vec<FieldSchema>
+        - progress_messages: Vec<String>
+
+## WORKFLOW EXECUTION
+
+execution_flow:
+  trigger: "User selects workflow in TUI and fills field values"
+  
+  command_building:
+    location: "workflow-manager/src/discovery.rs:150-170"
+    function: "build_workflow_command(workflow, field_values)"
+    format: "<binary_path> --arg1 value1 --arg2 'value with spaces'"
+  
+  process_spawning:
+    locations:
+      - "workflow-manager/src/main.rs:502" # Rerun in tab
+      - "workflow-manager/src/main.rs:1023" # Legacy single workflow
+      - "workflow-manager/src/main.rs:1178" # New tab workflow
+    
+    command_structure: |
+      std::process::Command::new(&binary_path)
+        .args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    
+    thread_architecture:
+      stdout_reader:
+        purpose: "Capture regular output lines"
+        handler: "Append to workflow_output: Arc<Mutex<Vec<String>>>"
+      
+      stderr_reader:
+        purpose: "Parse structured WorkflowLog events"
+        protocol: "Lines starting with '__WF_EVENT__:<JSON>'"
+        handler: "handle_workflow_event(event, phases)"
+        location: "workflow-manager/src/main.rs:1255-1400"
+      
+      wait_thread:
+        purpose: "Monitor process completion"
+        updates: "tab.status, tab.exit_code"
+
+## STRUCTURED LOGGING SYSTEM
+
+workflow_log:
+  location: "workflow-manager-sdk/src/lib.rs:118-203"
+  enum_name: "WorkflowLog"
+  
+  event_types:
+    phase_lifecycle:
+      - PhaseStarted: {phase, name, total_phases}
+      - PhaseCompleted: {phase, name}
+      - PhaseFailed: {phase, name, error}
+    
+    task_lifecycle:
+      - TaskStarted: {phase, task_id, description, total_tasks}
+      - TaskProgress: {task_id, message}
+      - TaskCompleted: {task_id, result}
+      - TaskFailed: {task_id, error}
+    
+    agent_lifecycle:
+      - AgentStarted: {task_id, agent_name, description}
+      - AgentMessage: {task_id, agent_name, message}
+      - AgentCompleted: {task_id, agent_name, result}
+      - AgentFailed: {task_id, agent_name, error}
+    
+    state_management:
+      - StateFileCreated: {phase, file_path, description}
+
+  emission_protocol:
+    method: "WorkflowLog::emit(&self)"
+    location: "workflow-manager-sdk/src/lib.rs:194-202"
+    format: "eprintln!(\"__WF_EVENT__:{}\", json)"
+    serialization: "serde_json::to_string(event)"
+    flush: "Forces stderr flush for async contexts"
+
+  helper_macros:
+    location: "workflow-manager-sdk/src/lib.rs:206-369"
+    provided:
+      - log_phase_start!
+      - log_phase_complete!
+      - log_phase_failed!
+      - log_task_start!
+      - log_task_progress!
+      - log_task_complete!
+      - log_task_failed!
+      - log_agent_start!
+      - log_agent_message!
+      - log_agent_complete!
+      - log_agent_failed!
+      - log_state_file!
+
+## HIERARCHICAL EXECUTION TRACKING
+
+internal_state:
+  data_structures:
+    WorkflowPhase:
+      location: "workflow-manager/src/main.rs:79-85"
+      fields:
+        - id: usize
+        - name: String
+        - status: PhaseStatus
+        - tasks: Vec<WorkflowTask>
+        - output_files: Vec<(String, String)> # (path, description)
+    
+    WorkflowTask:
+      location: "workflow-manager/src/main.rs:68-76"
+      fields:
+        - id: String
+        - phase: usize
+        - description: String
+        - status: TaskStatus
+        - agents: Vec<WorkflowAgent>
+        - messages: Vec<String>
+        - result: Option<String>
+    
+    WorkflowAgent:
+      location: "workflow-manager/src/main.rs:57-65"
+      fields:
+        - id: String # "task_id:agent_name"
+        - task_id: String
+        - name: String
+        - description: String
+        - status: AgentStatus
+        - messages: Vec<String>
+        - result: Option<String>
+
+  status_enums:
+    PhaseStatus:
+      location: "workflow-manager/src/main.rs:33-38"
+      values: [NotStarted, Running, Completed, Failed]
+    
+    TaskStatus:
+      location: "workflow-manager/src/main.rs:40-45"
+      values: [NotStarted, Running, Completed, Failed]
+    
+    AgentStatus:
+      location: "workflow-manager/src/main.rs:48-53"
+      values: [NotStarted, Running, Completed, Failed]
+
+  event_handler:
+    location: "workflow-manager/src/main.rs:1255-1400"
+    function: "handle_workflow_event(event: WorkflowLog, phases: &Arc<Mutex<Vec<WorkflowPhase>>>)"
+    
+    responsibilities:
+      - "Dynamically create phases as PhaseStarted events arrive"
+      - "Create/update tasks within phases"
+      - "Create/update agents within tasks"
+      - "Append progress messages to tasks/agents"
+      - "Track state files per phase"
+      - "Update status transitions (Running -> Completed/Failed)"
+
+## TABBED INTERFACE ARCHITECTURE
+
+tab_management:
+  WorkflowTab:
+    location: "workflow-manager/src/main.rs:89-119"
+    purpose: "Per-execution state container"
+    
+    identity:
+      - id: String # "workflow_name_YYYYMMDD_HHMMSS"
+      - workflow_idx: usize # Index in App.workflows catalog
+      - workflow_name: String
+      - instance_number: usize # Display counter (#1, #2, #3)
+      - start_time: Option<DateTime>
+    
+    execution_state:
+      - status: WorkflowStatus
+      - child_process: Option<std::process::Child>
+      - exit_code: Option<i32>
+    
+    workflow_data:
+      - workflow_phases: Arc<Mutex<Vec<WorkflowPhase>>>
+      - workflow_output: Arc<Mutex<Vec<String>>>
+      - field_values: HashMap<String, String>
+    
+    ui_state:
+      - scroll_offset: usize
+      - expanded_phases: HashSet<usize>
+      - expanded_tasks: HashSet<String>
+      - expanded_agents: HashSet<String>
+      - selected_phase: usize
+      - selected_task: Option<String>
+      - selected_agent: Option<String>
+      - agent_scroll_offsets: HashMap<String, usize>
+    
+    persistence:
+      - saved_logs: Option<Vec<String>>
+
+  App_structure:
+    location: "workflow-manager/src/main.rs:130-174"
+    
+    tab_fields:
+      - open_tabs: Vec<WorkflowTab>
+      - active_tab_idx: usize
+      - workflow_counters: HashMap<String, usize> # Track instance numbers
+      - show_close_confirmation: bool
+      - in_new_tab_flow: bool
+    
+    legacy_fields:
+      - workflow_running: bool # For old single-workflow view
+      - workflow_phases: Arc<Mutex<Vec<WorkflowPhase>>> # Legacy
+      - workflow_output: Arc<Mutex<Vec<String>>> # Legacy
+
+  views:
+    location: "workflow-manager/src/main.rs:122-128"
+    enum_variants:
+      - WorkflowList: "Browse available workflows"
+      - WorkflowDetail(usize): "View workflow metadata"
+      - WorkflowEdit(usize): "Fill in workflow field values"
+      - WorkflowRunning(usize): "Legacy single execution view"
+      - Tabs: "NEW: Main tabbed interface"
+
+  session_persistence:
+    save_session:
+      location: "workflow-manager/src/main.rs:229-263"
+      path: "~/.local/share/workflow-manager/session.json"
+      saves:
+        - workflow_idx
+        - workflow_name
+        - instance_number
+        - field_values
+        - status (as string)
+        - saved_logs (full output)
+    
+    restore_session:
+      location: "workflow-manager/src/main.rs:265-324"
+      behavior: "Recreate tabs on startup (without running processes)"
+
+## DATA FLOW SUMMARY
+
+workflow_lifecycle:
+  1_definition:
+    developer_action: "Create binary with WorkflowDefinition derive macro"
+    output: "Executable that responds to --workflow-metadata"
+  
+  2_discovery:
+    system_action: "Scan directories for executables"
+    method: "Execute <binary> --workflow-metadata"
+    result: "Populate App.workflows: Vec<Workflow>"
+  
+  3_user_input:
+    tui_action: "User selects workflow, fills field values in WorkflowEdit view"
+    storage: "field_values: HashMap<String, String>"
+  
+  4_execution_spawn:
+    command: "build_workflow_command(workflow, field_values)"
+    spawn: "Command::new(binary_path).args(args).spawn()"
+    container: "WorkflowTab with child_process, phases, output"
+  
+  5_runtime_monitoring:
+    stdout_thread: "Read lines -> append to workflow_output"
+    stderr_thread: "Parse __WF_EVENT__:<JSON> -> handle_workflow_event()"
+    
+    event_processing:
+      - "Parse WorkflowLog enum variants"
+      - "Update workflow_phases hierarchy (Phase -> Task -> Agent)"
+      - "Update status transitions"
+      - "Append messages to appropriate containers"
+  
+  6_ui_rendering:
+    tui_render: "Display tabs with hierarchical phase/task/agent trees"
+    user_interactions:
+      - "Expand/collapse phases, tasks, agents"
+      - "Scroll through agent messages"
+      - "Switch between tabs"
+      - "Rerun workflows in existing tab"
+      - "Close tabs"
+  
+  7_completion:
+    wait_thread: "Process exits -> update tab.status, tab.exit_code"
+    persistence: "Save session to restore tabs on next launch"
+
+## TUI-COUPLED COMPONENTS
+
+tightly_coupled:
+  - component: "Tabbed interface (WorkflowTab, open_tabs)"
+    reason: "UI-specific state (scroll, expanded sections, selected items)"
+    location: "workflow-manager/src/main.rs:89-174"
+  
+  - component: "Session persistence (save/restore)"
+    reason: "Tied to TUI window state restoration"
+    location: "workflow-manager/src/main.rs:229-324"
+  
+  - component: "File browser & dropdown UI"
+    reason: "TUI-specific input mechanisms"
+    location: "workflow-manager/src/main.rs:148-157"
+  
+  - component: "Ratatui rendering code"
+    reason: "Terminal-specific rendering"
+    dependencies: ["ratatui", "crossterm"]
+  
+  - component: "Workflow history (autocomplete)"
+    reason: "TUI convenience feature"
+    location: "workflow-manager/src/main.rs:25-29"
+
+## API-EXPOSABLE COMPONENTS
+
+decoupled_core:
+  workflow_definition_system:
+    components:
+      - "WorkflowDefinition trait"
+      - "WorkflowMetadata, FullWorkflowMetadata"
+      - "FieldSchema, FieldType"
+      - "Derive macro system"
+    api_exposure:
+      - "GET /workflows -> List<WorkflowMetadata>"
+      - "GET /workflows/{id}/schema -> FullWorkflowMetadata"
+    location: "workflow-manager-sdk/src/lib.rs:1-72"
+
+  discovery_system:
+    components:
+      - "discover_workflows()"
+      - "extract_workflow_metadata()"
+      - "build_workflow_command()"
+    api_exposure:
+      - "GET /workflows/discover -> List<DiscoveredWorkflow>"
+      - "POST /workflows/{id}/build-command -> String"
+    location: "workflow-manager/src/discovery.rs"
+
+  execution_system:
+    components:
+      - "Process spawning logic"
+      - "Stdout/stderr thread readers"
+      - "Command building from field values"
+    api_exposure:
+      - "POST /workflows/{id}/execute -> {execution_id}"
+      - "GET /executions/{id}/status -> WorkflowStatus"
+    current_location: "workflow-manager/src/main.rs:502, 1023, 1178"
+    refactor_needed: "Extract from TUI-specific code"
+
+  logging_system:
+    components:
+      - "WorkflowLog enum and event types"
+      - "emit() method and helper macros"
+      - "Event parsing (__WF_EVENT__ protocol)"
+    api_exposure:
+      - "WebSocket /executions/{id}/events -> Stream<WorkflowLog>"
+      - "GET /executions/{id}/logs -> List<WorkflowLog>"
+    location: "workflow-manager-sdk/src/lib.rs:118-369"
+
+  state_tracking:
+    components:
+      - "WorkflowPhase, WorkflowTask, WorkflowAgent"
+      - "handle_workflow_event() logic"
+      - "Status enums (PhaseStatus, TaskStatus, AgentStatus)"
+    api_exposure:
+      - "GET /executions/{id}/phases -> List<WorkflowPhase>"
+      - "GET /executions/{id}/phases/{phase_id}/tasks -> List<WorkflowTask>"
+      - "GET /executions/{id}/output -> List<String>"
+    current_location: "workflow-manager/src/main.rs:33-85, 1255-1400"
+    refactor_needed: "Decouple from Arc<Mutex<>> TUI threading"
+
+  status_types:
+    components:
+      - "WorkflowStatus enum"
+      - "WorkflowProgress enum"
+    api_exposure:
+      - "Serialize for REST/WebSocket responses"
+    location: "workflow-manager-sdk/src/lib.rs:75-90"
+
+## PROPOSED API ARCHITECTURE
+
+api_server_design:
+  crate_structure:
+    - "workflow-manager-api"
+    - "workflow-manager-core (extracted logic)"
+    - "workflow-manager-sdk (shared types)"
+    - "workflow-manager-tui (current main.rs refactored)"
+
+  core_module_extraction:
+    ExecutionEngine:
+      responsibilities:
+        - "Spawn workflow processes"
+        - "Read stdout/stderr streams"
+        - "Parse WorkflowLog events"
+        - "Maintain execution state"
+      storage: "HashMap<ExecutionId, ExecutionState>"
+    
+    ExecutionState:
+      fields:
+        - execution_id: Uuid
+        - workflow_id: String
+        - field_values: HashMap<String, String>
+        - status: WorkflowStatus
+        - child_process: Option<Child>
+        - phases: Vec<WorkflowPhase>
+        - output: Vec<String>
+        - start_time: DateTime
+        - end_time: Option<DateTime>
+        - exit_code: Option<i32>
+    
+    EventBroadcaster:
+      pattern: "Pub-sub for WorkflowLog events"
+      consumers:
+        - "WebSocket connections"
+        - "TUI rendering loop"
+        - "Database persistence"
+
+  rest_endpoints:
+    workflows:
+      - "GET /api/workflows"
+      - "GET /api/workflows/{id}"
+      - "POST /api/workflows/discover"
+    
+    executions:
+      - "POST /api/workflows/{id}/execute"
+      - "GET /api/executions/{execution_id}"
+      - "GET /api/executions/{execution_id}/phases"
+      - "GET /api/executions/{execution_id}/output"
+      - "DELETE /api/executions/{execution_id}"
+    
+    websocket:
+      - "WS /api/executions/{execution_id}/stream"
+
+  authentication:
+    recommendation: "Add optional auth layer (not in current TUI)"
+    methods:
+      - "API tokens"
+      - "OAuth2 for web UI"
+
+## EXAMPLE WORKFLOW
+
+research_agent:
+  location: "workflow-manager/src/bin/research_agent.rs"
+  
+  phases:
+    phase_0:
+      name: "ANALYZE CODEBASE"
+      tasks:
+        - "Read files (Glob, Read, Grep, Bash)"
+        - "Count files by extension"
+        - "Map directory structure"
+        - "Identify entry points & configs"
+      output: "codebase_analysis_<timestamp>.yaml"
+      logging: "log_phase_start!(0, \"Analyze Codebase\", 5)"
+    
+    phase_1:
+      name: "GENERATE RESEARCH PROMPTS"
+      input: "codebase_analysis.yaml + objective"
+      agent: "Claude with custom system prompt"
+      output: "research_prompts_<timestamp>.yaml"
+    
+    phase_2:
+      name: "EXECUTE RESEARCH"
+      pattern: "Concurrent execution with semaphore"
+      tasks: "One task per research prompt"
+      agents: "Claude queries (parallel)"
+      output: "research_result_{n}_<timestamp>.yaml"
+    
+    phase_3:
+      name: "VALIDATE & FIX YAML"
+      validation: "check_yaml.py"
+      repair: "Concurrent Claude agents to fix errors"
+      loop: "Until all YAML valid"
+    
+    phase_4:
+      name: "SYNTHESIZE DOCUMENTATION"
+      input: "All research_results + objective"
+      output: "research_output_<timestamp>.md"
+
+  logging_example:
+    location: "workflow-manager/src/bin/research_agent.rs:124"
+    imports: "log_phase_start, log_phase_complete, log_task_start, log_task_complete, log_state_file"
+    
+    phase_lifecycle: |
+      log_phase_start!(0, "Analyze Codebase", 5);
+      // ... work ...
+      log_state_file!(0, analysis_path, "Codebase analysis");
+      log_phase_complete!(0, "Analyze Codebase");
+    
+    task_lifecycle: |
+      log_task_start!(2, task_id, &prompt.title);
+      log_task_progress!(task_id, "Querying Claude...");
+      log_task_complete!(task_id, result_path);
+
+## KEY OBSERVATIONS
+
+strengths:
+  - "Clean separation: SDK (traits/types) vs TUI (implementation)"
+  - "Procedural macro system for declarative workflow definitions"
+  - "Structured logging protocol is already JSON-serializable"
+  - "Hierarchical state tracking (Phase -> Task -> Agent) maps to API resources"
+  - "Binary discovery protocol is stateless and CLI-friendly"
+
+weaknesses:
+  - "Execution logic embedded in TUI (main.rs lines 502, 1023, 1178)"
+  - "Arc<Mutex<>> threading model specific to TUI needs"
+  - "No persistent execution history (only session restore)"
+  - "load_discovered_workflows() not implemented (TODO comment)"
+
+api_readiness:
+  low_effort:
+    - "Workflow discovery and metadata exposure"
+    - "WorkflowLog event streaming via WebSocket"
+    - "Field schema validation"
+  
+  medium_effort:
+    - "Extract ExecutionEngine from TUI-specific code"
+    - "Replace Arc<Mutex<>> with thread-safe execution store"
+    - "Add execution persistence layer (database)"
+  
+  high_effort:
+    - "Authentication and authorization"
+    - "Multi-user execution isolation"
+    - "Web-based field editor UI"
+    - "Execution history and analytics"
+
+next_steps:
+  immediate:
+    - "Implement load_discovered_workflows() in main.rs:2153"
+    - "Extract execution logic into workflow-manager/src/execution.rs"
+    - "Define ExecutionState struct (non-TUI)"
+  
+  short_term:
+    - "Create workflow-manager-core crate"
+    - "Build REST API server with axum/actix-web"
+    - "Implement WebSocket event streaming"
+  
+  long_term:
+    - "Build web UI for workflow browsing/execution"
+    - "Add execution analytics and monitoring"
+    - "Support remote workflow repositories"

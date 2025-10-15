@@ -1,0 +1,709 @@
+research_findings:
+  title: "Dual-Purpose API Design for MCP Server and TUI Integration"
+  date: "2025-10-14"
+  project: "workflow-manager"
+  
+  executive_summary: |
+    Research into best practices for implementing dual-purpose APIs that serve both MCP servers 
+    and programmatic clients (TUI) reveals several proven architectural patterns in the Rust ecosystem.
+    The key is separating concerns through layered architecture, using trait-based abstractions,
+    and leveraging Tokio's async ecosystem for concurrent execution and multi-consumer log streaming.
+
+  architectural_patterns:
+    
+    facade_pattern:
+      description: "Unified API layer that simplifies complex subsystem interactions"
+      rust_implementation:
+        - "Create a single API struct that wraps internal complexity"
+        - "Use builder pattern for configuration (common in Rust due to lack of named arguments)"
+        - "Expose both sync and async interfaces using tokio::Runtime bridging"
+      benefits:
+        - "Single point of entry for both MCP and TUI clients"
+        - "Hides transport-specific details (stdio, HTTP, SSE)"
+        - "Simplifies testing by isolating core logic"
+      example_pattern: |
+        pub struct WorkflowApi {
+            runtime: Arc<tokio::Runtime>,
+            executor: Arc<dyn WorkflowExecutor + Send + Sync>,
+        }
+        
+        impl WorkflowApi {
+            pub fn builder() -> WorkflowApiBuilder { ... }
+            pub fn list_workflows(&self) -> Result<Vec<Workflow>> { ... }
+            pub fn execute_workflow(&self, id: &str) -> Result<ExecutionHandle> { ... }
+        }
+
+    layered_architecture:
+      pattern: "Onion/Hexagonal Architecture (Clean Architecture)"
+      description: "Organize codebase into layers where each layer depends only on inner layers"
+      layers:
+        - name: "Core Domain Layer"
+          responsibility: "Business logic, workflow definitions, execution rules"
+          rust_types: "struct Workflow, enum WorkflowStatus, WorkflowMetadata"
+          dependencies: "None - pure Rust, no external dependencies"
+          
+        - name: "API/Port Layer"
+          responsibility: "Define abstract interfaces (traits) for external interactions"
+          rust_types: "trait WorkflowExecutor, trait LogStream, trait WorkflowRepository"
+          dependencies: "Only core domain"
+          note: "Use sealed traits for controlled evolution without semver breaks"
+          
+        - name: "Adapter/Implementation Layer"
+          responsibility: "Concrete implementations of ports (MCP, TUI, file system)"
+          rust_types: "struct McpAdapter, struct TuiAdapter, struct FileSystemRepo"
+          dependencies: "Core domain + API layer"
+          
+        - name: "Transport Layer"
+          responsibility: "Protocol-specific communication (stdio, HTTP, SSE)"
+          rust_types: "MCP transport abstractions, ratatui rendering"
+          dependencies: "Adapter layer"
+          
+      benefits:
+        - "Core logic testable without transport infrastructure"
+        - "Easy to add new interfaces (CLI, web API) without touching core"
+        - "Clear separation between what changes frequently (UI) vs rarely (business logic)"
+
+    dependency_injection:
+      rust_approach: "Trait-based DI without runtime container"
+      key_techniques:
+        - pattern: "Trait Objects with Arc"
+          usage: "Arc<dyn WorkflowExecutor + Send + Sync> for shared ownership across async tasks"
+          rationale: "Allows multiple consumers (MCP handler, TUI component) to share same executor"
+          
+        - pattern: "Generic Type Parameters"
+          usage: "struct WorkflowManager<E: WorkflowExecutor> { executor: E }"
+          rationale: "Zero-cost abstraction, monomorphization at compile time"
+          
+        - pattern: "No-Virtual Interface (NVI)"
+          usage: "Wrap traits in concrete types, expose concrete API to users"
+          rationale: "Avoids forcing internal types to be public due to trait visibility rules"
+          
+      visibility_challenge: |
+        Public traits force all referenced types to be public. Solution: define traits in 
+        internal modules, expose only concrete wrapper types publicly.
+        
+      example_structure: |
+        // Internal module
+        mod internal {
+            pub(crate) trait WorkflowExecutor { ... }
+        }
+        
+        // Public API
+        pub struct WorkflowApi {
+            executor: Arc<dyn internal::WorkflowExecutor + Send + Sync>
+        }
+
+    event_driven_architecture:
+      description: "Asynchronous, event-based workflow orchestration with pub-sub patterns"
+      tokio_channels:
+        
+        broadcast_channel:
+          type: "Multi-Producer, Multi-Consumer"
+          use_case: "Log streaming to multiple consumers (MCP client, TUI display, file writer)"
+          api: "tokio::sync::broadcast::channel(buffer_size)"
+          characteristics:
+            - "Each consumer gets independent receiver"
+            - "All receivers see same messages"
+            - "Receivers consume at their own pace"
+          implementation: |
+            let (log_tx, _) = broadcast::channel(1000);
+            
+            // MCP handler subscribes
+            let mcp_rx = log_tx.subscribe();
+            
+            // TUI component subscribes  
+            let tui_rx = log_tx.subscribe();
+            
+            // Executor publishes logs
+            log_tx.send(WorkflowLog { ... })?;
+            
+        watch_channel:
+          type: "Single-Producer, Multi-Consumer (state)"
+          use_case: "Workflow status changes (NotStarted → Running → Completed)"
+          api: "tokio::sync::watch::channel(initial_value)"
+          characteristics:
+            - "Only retains latest value"
+            - "All receivers see most recent state"
+            - "Perfect for status updates"
+          implementation: |
+            let (status_tx, status_rx) = watch::channel(WorkflowStatus::NotStarted);
+            
+            // Update status
+            status_tx.send(WorkflowStatus::Running)?;
+            
+            // Multiple components can watch
+            let tui_status = status_rx.clone();
+            let mcp_status = status_rx.clone();
+            
+        mpsc_channel:
+          type: "Multi-Producer, Single-Consumer"
+          use_case: "Command queue for workflow executor (execute, pause, cancel)"
+          api: "tokio::sync::mpsc::channel(buffer_size)"
+          characteristics:
+            - "Multiple senders (MCP, TUI, API) to single executor"
+            - "Ordered delivery"
+            - "Backpressure support"
+
+      tokio_streams:
+        description: "Asynchronous data flows for log streaming"
+        benefits:
+          - "Handle time-delayed or event-driven data"
+          - "Composable with Stream trait (map, filter, fold)"
+          - "Integration with async/await"
+        example: |
+          use tokio_stream::StreamExt;
+          
+          pub struct LogStream {
+              rx: broadcast::Receiver<WorkflowLog>,
+          }
+          
+          impl LogStream {
+              pub async fn next_log(&mut self) -> Option<WorkflowLog> {
+                  self.rx.recv().await.ok()
+              }
+          }
+
+  mcp_integration_patterns:
+    
+    official_rust_sdk:
+      crate: "rmcp (modelcontextprotocol/rust-sdk)"
+      features:
+        - "Type-safe JSON-RPC 2.0 message handling"
+        - "Procedural macros for automatic tool definition"
+        - "Multiple transport support (stdio, WebSocket, SSE)"
+        - "Async/await with tokio runtime"
+      
+    transport_abstraction:
+      description: "Unified API across different MCP transports"
+      transports:
+        - "stdio: Standard input/output pipes"
+        - "WebSocket: Bidirectional streaming"
+        - "SSE: Server-Sent Events for server push"
+      implementation_approach: |
+        MCP SDK provides transport trait that all implementations share.
+        Switching transports requires minimal code changes.
+        
+    handler_routing:
+      inspiration: "Axum-like routing for MCP requests"
+      pattern: |
+        Route incoming MCP tool calls to handler functions based on tool name.
+        Handlers are async functions that receive typed parameters and return typed results.
+        
+      example: |
+        #[mcp_tool]
+        async fn list_workflows(api: Arc<WorkflowApi>) -> Result<Vec<WorkflowMetadata>> {
+            api.list_workflows().await
+        }
+        
+        #[mcp_tool]
+        async fn execute_workflow(
+            api: Arc<WorkflowApi>,
+            workflow_id: String,
+        ) -> Result<ExecutionHandle> {
+            api.execute_workflow(&workflow_id).await
+        }
+
+  tui_integration_patterns:
+    
+    ratatui_architecture:
+      description: "Terminal UI framework with widget-based composition"
+      current_usage: "Project already uses ratatui 0.28 with crossterm backend"
+      patterns:
+        - "Builder pattern for widget configuration"
+        - "Immediate mode rendering (stateless widgets)"
+        - "Backend abstraction (crossterm, termion, termwiz)"
+        
+    state_management:
+      current_approach: "App struct holds all state (workflows, tabs, execution status)"
+      observation: "Uses Arc<Mutex<Vec<T>>> for shared state between UI and background tasks"
+      improvement_opportunity: |
+        Refactor to separate UI state from domain state. UI should subscribe to 
+        domain events via channels rather than polling shared mutexes.
+        
+    integration_strategy:
+      approach: "TUI calls same WorkflowApi as MCP handlers"
+      example: |
+        struct App {
+            api: Arc<WorkflowApi>,
+            tabs: Vec<WorkflowTab>,
+        }
+        
+        impl App {
+            fn execute_workflow(&mut self, workflow_id: &str) {
+                let api = self.api.clone();
+                tokio::spawn(async move {
+                    let handle = api.execute_workflow(workflow_id).await?;
+                    // Subscribe to logs
+                    let mut log_stream = handle.log_stream();
+                    while let Some(log) = log_stream.next_log().await {
+                        // Update TUI
+                    }
+                });
+            }
+        }
+
+  builder_pattern_details:
+    
+    rationale: "Rust lacks named/optional arguments; builders provide ergonomic API"
+    variants:
+      - type: "By-value builders"
+        characteristics: "Methods consume self, return Self"
+        usage: "Chain methods, final build() consumes builder"
+        example: |
+          let api = WorkflowApi::builder()
+              .with_executor(executor)
+              .with_log_buffer_size(1000)
+              .build()?;
+              
+      - type: "Mutable reference builders"
+        characteristics: "Methods take &mut self, return &mut Self"
+        usage: "Can be reused, not consumed"
+        example: |
+          let mut builder = WorkflowApi::builder();
+          builder.executor(executor);
+          if debug_mode {
+              builder.verbose_logging(true);
+          }
+          let api = builder.build()?;
+          
+    trait_usage:
+      - "Into<T> for flexible input types (Into<String>, Into<PathBuf>)"
+      - "AsRef<T> for reference conversions"
+      - "IntoIterator for collection parameters"
+      - "Example: .with_search_paths(vec![path1, path2]) accepts any IntoIterator<Item=PathBuf>"
+
+  minimal_viable_api_design:
+    
+    core_operations:
+      list_workflows:
+        signature: "fn list_workflows(&self) -> Result<Vec<WorkflowMetadata>>"
+        implementation_notes:
+          - "Synchronous operation (quick metadata read)"
+          - "Uses existing discovery::discover_workflows()"
+          - "Returns workflow catalog without loading full state"
+          
+      execute_workflow:
+        signature: "async fn execute_workflow(&self, id: &str, params: WorkflowParams) -> Result<ExecutionHandle>"
+        implementation_notes:
+          - "Async operation (spawns background task)"
+          - "Returns handle immediately for non-blocking execution"
+          - "Handle provides access to status and log stream"
+          
+      get_execution_status:
+        signature: "fn get_execution_status(&self, handle: &ExecutionHandle) -> WorkflowStatus"
+        implementation_notes:
+          - "Synchronous status check"
+          - "Reads from watch channel (always latest)"
+          
+      stream_logs:
+        signature: "fn stream_logs(&self, handle: &ExecutionHandle) -> LogStream"
+        implementation_notes:
+          - "Returns async stream of logs"
+          - "Multiple consumers can call this to get independent streams"
+          - "Logs buffered in broadcast channel"
+
+    data_structures:
+      workflow_metadata:
+        fields:
+          - "id: String - unique workflow identifier"
+          - "name: String - display name"
+          - "description: String"
+          - "fields: Vec<FieldSchema> - input parameters"
+        source: "Already defined in workflow-manager-sdk"
+        
+      workflow_params:
+        definition: "HashMap<String, String> or custom struct"
+        validation: "Validate against FieldSchema before execution"
+        
+      execution_handle:
+        purpose: "Opaque handle to running workflow"
+        implementation: |
+          pub struct ExecutionHandle {
+              id: String,
+              status_rx: watch::Receiver<WorkflowStatus>,
+              log_rx: broadcast::Receiver<WorkflowLog>,
+          }
+          
+          impl ExecutionHandle {
+              pub fn id(&self) -> &str { &self.id }
+              
+              pub fn status(&self) -> WorkflowStatus {
+                  *self.status_rx.borrow()
+              }
+              
+              pub fn log_stream(&self) -> LogStream {
+                  LogStream { rx: self.log_rx.resubscribe() }
+              }
+          }
+          
+      workflow_log:
+        fields:
+          - "timestamp: chrono::DateTime<Utc>"
+          - "level: LogLevel (Info, Warning, Error)"
+          - "message: String"
+          - "source: Option<String> (phase/task/agent)"
+        serialization: "Derive Serialize for JSON-RPC transport"
+
+    api_surface:
+      minimal_public_interface: |
+        pub struct WorkflowApi { /* private fields */ }
+        
+        impl WorkflowApi {
+            pub fn builder() -> WorkflowApiBuilder { ... }
+            
+            pub fn list_workflows(&self) -> Result<Vec<WorkflowMetadata>> { ... }
+            
+            pub async fn execute_workflow(
+                &self,
+                workflow_id: &str,
+                params: WorkflowParams,
+            ) -> Result<ExecutionHandle> { ... }
+            
+            pub fn get_status(&self, handle: &ExecutionHandle) -> WorkflowStatus { ... }
+            
+            pub fn log_stream(&self, handle: &ExecutionHandle) -> LogStream { ... }
+        }
+        
+        pub struct WorkflowApiBuilder { /* private fields */ }
+        
+        impl WorkflowApiBuilder {
+            pub fn with_search_paths<I>(mut self, paths: I) -> Self 
+            where I: IntoIterator<Item = PathBuf> { ... }
+            
+            pub fn with_log_buffer_size(mut self, size: usize) -> Self { ... }
+            
+            pub fn build(self) -> Result<WorkflowApi> { ... }
+        }
+
+  implementation_roadmap:
+    
+    phase_1_core_api:
+      description: "Extract and refactor core logic into reusable API"
+      tasks:
+        - task: "Create new module: src/api/mod.rs"
+          details: "Define public API surface (WorkflowApi, ExecutionHandle, builders)"
+          
+        - task: "Extract workflow discovery into API"
+          details: "Wrap discovery::discover_workflows() in WorkflowApi::list_workflows()"
+          dependencies: "None - already working"
+          
+        - task: "Define trait abstractions"
+          details: |
+            - trait WorkflowExecutor (sealed)
+            - trait LogSink (sealed)
+            - trait WorkflowRepository (sealed for future DB support)
+          note: "Use sealed trait pattern for controlled evolution"
+          
+        - task: "Implement default executor"
+          details: |
+            - struct DefaultExecutor implements WorkflowExecutor
+            - Spawns child process via tokio::process::Command
+            - Captures stdout/stderr to broadcast channel
+            - Updates status via watch channel
+          
+        - task: "Create ExecutionHandle abstraction"
+          details: |
+            - Holds cloned receivers (status_rx, log_rx)
+            - Provides sync status() and async log_stream()
+            - Hides internal channel details from API consumers
+            
+    phase_2_channel_architecture:
+      description: "Implement multi-consumer log and status streaming"
+      tasks:
+        - task: "Set up broadcast channel for logs"
+          details: |
+            - Create broadcast::channel(1000) in executor
+            - Parse workflow output (JSON logs) and send to channel
+            - Handle backpressure (lagging receivers)
+          reference: "Current WorkflowLog struct already defined"
+          
+        - task: "Set up watch channel for status"
+          details: |
+            - Create watch::channel(WorkflowStatus::NotStarted)
+            - Update on workflow lifecycle events (start, complete, fail)
+            - All handles share same status channel
+            
+        - task: "Implement LogStream wrapper"
+          details: |
+            - Wrap broadcast::Receiver<WorkflowLog>
+            - Provide async fn next_log() -> Option<WorkflowLog>
+            - Optionally implement Stream trait for tokio_stream integration
+            
+    phase_3_tui_integration:
+      description: "Refactor TUI to use new API"
+      tasks:
+        - task: "Replace direct execution with WorkflowApi"
+          location: "src/main.rs App::execute_workflow_in_tab()"
+          before: "Direct tokio::process::Command spawning"
+          after: "Call api.execute_workflow().await, store ExecutionHandle"
+          
+        - task: "Subscribe to log stream in background task"
+          details: |
+            - Spawn tokio task per tab
+            - Call handle.log_stream() to get independent receiver
+            - Forward logs to Arc<Mutex<Vec<String>>> for UI (transition step)
+          future_improvement: "Replace Arc<Mutex> with channel sends to UI task"
+          
+        - task: "Use handle.status() for tab status display"
+          details: "Replace manual status tracking with handle.status() calls"
+          
+    phase_4_mcp_integration:
+      description: "Create MCP server using rmcp SDK"
+      tasks:
+        - task: "Add rmcp dependency to Cargo.toml"
+          details: "rmcp = \"1.0\""
+          
+        - task: "Create MCP tool handlers"
+          location: "src/mcp/mod.rs"
+          tools:
+            - name: "list_workflows"
+              handler: "Calls api.list_workflows(), returns JSON array"
+              
+            - name: "execute_workflow"
+              handler: |
+                - Accepts workflow_id and params
+                - Calls api.execute_workflow().await
+                - Stores handle in Arc<Mutex<HashMap<String, ExecutionHandle>>>
+                - Returns execution_id to client
+                
+            - name: "get_workflow_status"
+              handler: "Looks up handle by execution_id, returns handle.status()"
+              
+            - name: "stream_workflow_logs"
+              handler: |
+                - Looks up handle by execution_id
+                - Gets log_stream()
+                - Streams logs via MCP responses (tool_call_chunk?)
+                - Note: May need to batch or poll depending on MCP stdio constraints
+                
+        - task: "Set up MCP server binary"
+          location: "src/bin/mcp_server.rs"
+          details: |
+            - Initialize WorkflowApi
+            - Create rmcp server with stdio transport
+            - Register tool handlers
+            - Run event loop
+
+    phase_5_testing:
+      description: "Validate API works for both MCP and TUI"
+      tasks:
+        - task: "Unit tests for API"
+          details: |
+            - Mock WorkflowExecutor trait
+            - Test list_workflows() returns correct metadata
+            - Test execute_workflow() returns valid handle
+            - Test log streaming to multiple consumers
+            
+        - task: "Integration test: TUI"
+          details: "Launch TUI, execute workflow, verify logs appear in UI"
+          
+        - task: "Integration test: MCP"
+          details: |
+            - Run MCP server via stdio
+            - Send list_workflows tool call
+            - Send execute_workflow tool call
+            - Poll get_workflow_status until complete
+            - Verify logs received
+
+  api_evolution_strategy:
+    
+    semver_compliance:
+      principle: "Follow Rust RFC 1105 for API evolution"
+      breaking_changes:
+        - "Removing public methods"
+        - "Changing method signatures"
+        - "Adding non-defaulted trait methods"
+        - "Changing trait bounds"
+      non_breaking_changes:
+        - "Adding new methods to sealed traits (with default impls)"
+        - "Adding new public structs/enums"
+        - "Adding new optional builder methods"
+        
+    sealed_traits_for_evolution:
+      pattern: |
+        mod private {
+            pub trait Sealed {}
+        }
+        
+        pub trait WorkflowExecutor: private::Sealed {
+            fn execute(&self, workflow: &Workflow) -> Result<ExecutionHandle>;
+            
+            // Can add in future minor version without breaking:
+            fn pause(&self, handle: &ExecutionHandle) -> Result<()> {
+                Err(anyhow!("Pause not supported"))
+            }
+        }
+        
+      benefit: "Safe to add methods because no external implementations exist"
+      
+    versioning_strategy:
+      initial_version: "0.1.0 (unstable API)"
+      stabilization: "1.0.0 when MCP and TUI both working"
+      major_bumps: "Only for breaking changes (unlikely after 1.0)"
+      minor_bumps: "New features, new optional methods"
+      patch_bumps: "Bug fixes, performance improvements"
+
+  additional_resources:
+    
+    crates_to_consider:
+      - name: "async-trait"
+        purpose: "Simplify async trait method definitions"
+        usage: "May not be needed with native async fn in traits (Rust 1.75+)"
+        
+      - name: "tokio-stream"
+        purpose: "Stream utilities and adaptors"
+        usage: "Implement Stream trait for LogStream"
+        
+      - name: "tower"
+        purpose: "Middleware and service abstractions"
+        usage: "Overkill for this project, but good reference for layered design"
+        
+      - name: "serde"
+        purpose: "Serialization/deserialization"
+        usage: "Already in use; ensure all API types derive Serialize/Deserialize"
+        
+    reference_projects:
+      - name: "Windmill"
+        url: "https://github.com/windmill-labs/windmill"
+        relevance: "Production workflow engine with similar requirements"
+        language: "Rust"
+        
+      - name: "ultrafast_mcp"
+        url: "https://docs.rs/ultrafast-mcp/latest/ultrafast_mcp/"
+        relevance: "High-performance MCP implementation in Rust"
+        
+      - name: "rust-mcp-sdk"
+        url: "https://github.com/rust-mcp-stack/rust-mcp-sdk"
+        relevance: "Alternative MCP SDK with comprehensive examples"
+
+  concrete_next_steps:
+    
+    step_1:
+      action: "Create API module structure"
+      commands:
+        - "mkdir -p src/api"
+        - "touch src/api/mod.rs"
+        - "touch src/api/executor.rs"
+        - "touch src/api/handle.rs"
+        - "touch src/api/builder.rs"
+      
+    step_2:
+      action: "Define core API types"
+      files:
+        - path: "src/api/mod.rs"
+          content: |
+            pub use self::executor::WorkflowApi;
+            pub use self::handle::{ExecutionHandle, LogStream};
+            pub use self::builder::WorkflowApiBuilder;
+            
+            mod executor;
+            mod handle;
+            mod builder;
+            
+            pub type WorkflowParams = std::collections::HashMap<String, String>;
+            
+    step_3:
+      action: "Implement WorkflowApi::list_workflows()"
+      pseudocode: |
+        impl WorkflowApi {
+            pub fn list_workflows(&self) -> Result<Vec<WorkflowMetadata>> {
+                let discovered = discovery::discover_workflows();
+                Ok(discovered.into_iter().map(|d| d.metadata).collect())
+            }
+        }
+        
+    step_4:
+      action: "Implement execution with channels"
+      pseudocode: |
+        impl WorkflowApi {
+            pub async fn execute_workflow(
+                &self,
+                workflow_id: &str,
+                params: WorkflowParams,
+            ) -> Result<ExecutionHandle> {
+                let (log_tx, _log_rx) = broadcast::channel(1000);
+                let (status_tx, status_rx) = watch::channel(WorkflowStatus::NotStarted);
+                
+                let handle_id = format!("{}_{}", workflow_id, Uuid::new_v4());
+                
+                // Spawn executor task
+                let log_tx_clone = log_tx.clone();
+                let status_tx_clone = status_tx.clone();
+                tokio::spawn(async move {
+                    status_tx_clone.send(WorkflowStatus::Running).ok();
+                    
+                    // Execute workflow (spawn process, capture output)
+                    let result = execute_workflow_internal(workflow_id, params, log_tx_clone).await;
+                    
+                    match result {
+                        Ok(_) => status_tx_clone.send(WorkflowStatus::Completed).ok(),
+                        Err(_) => status_tx_clone.send(WorkflowStatus::Failed).ok(),
+                    };
+                });
+                
+                Ok(ExecutionHandle {
+                    id: handle_id,
+                    status_rx,
+                    log_rx: log_tx.subscribe(),
+                })
+            }
+        }
+        
+    step_5:
+      action: "Update TUI to use API"
+      changes:
+        - file: "src/main.rs"
+          modification: |
+            // Add field to App
+            struct App {
+                api: Arc<WorkflowApi>,
+                // ... existing fields
+            }
+            
+            // Update workflow execution
+            async fn execute_workflow_in_tab(&mut self, tab_idx: usize) {
+                let tab = &mut self.open_tabs[tab_idx];
+                let handle = self.api.execute_workflow(&tab.workflow_id, tab.field_values.clone()).await?;
+                
+                // Spawn log reader task
+                let output = tab.workflow_output.clone();
+                let mut log_stream = handle.log_stream();
+                tokio::spawn(async move {
+                    while let Some(log) = log_stream.next_log().await {
+                        output.lock().unwrap().push(log.message);
+                    }
+                });
+                
+                // Store handle for status updates
+                tab.execution_handle = Some(handle);
+            }
+
+  conclusion: |
+    The research clearly indicates that a layered architecture with trait-based abstractions,
+    combined with Tokio's channel ecosystem, provides the optimal solution for dual-purpose APIs.
+    
+    Key success factors:
+    1. Core business logic remains pure and testable (no transport dependencies)
+    2. API layer uses sealed traits for controlled evolution
+    3. Broadcast channels enable multiple log consumers (MCP + TUI)
+    4. Watch channels provide efficient status updates
+    5. Builder pattern provides ergonomic configuration
+    6. Facade pattern (WorkflowApi) hides complexity from both MCP and TUI
+    
+    The existing codebase already has most pieces in place (discovery, execution, logging).
+    The main work is refactoring into layered architecture and adding channel-based streaming.
+    
+    Estimated implementation effort:
+    - Phase 1 (Core API) 4-6 hours
+    - Phase 2 (Channels) 3-4 hours  
+    - Phase 3 (TUI integration) 2-3 hours
+    - Phase 4 (MCP integration) 4-6 hours
+    - Phase 5 (Testing) 3-4 hours
+    Total 16-23 hours for complete dual-purpose API
+
+  references:
+    rust_design_patterns: "https://rust-unofficial.github.io/patterns/"
+    tokio_docs: "https://tokio.rs/tokio/tutorial"
+    mcp_rust_sdk: "https://github.com/modelcontextprotocol/rust-sdk"
+    api_evolution_rfc: "https://rust-lang.github.io/rfcs/1105-api-evolution.html"
+    sealed_traits_guide: "https://predr.ag/blog/definitive-guide-to-sealed-traits-in-rust/"

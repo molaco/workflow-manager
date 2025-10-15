@@ -1,0 +1,389 @@
+research_topic: "API Layer Organization Strategy for workflow-manager Project"
+timestamp: "2025-10-14"
+
+current_crate_structure:
+  workspace_crates:
+    - name: "workflow-manager"
+      type: "binary (TUI application)"
+      dependencies:
+        - "workflow-manager-sdk (local)"
+        - "claude-agent-sdk (local)"
+        - "tokio (with fs, process, io-util features)"
+        - "ratatui, crossterm (TUI)"
+        - "serde, serde_json, serde_yaml"
+        - "clap, reqwest, dotenv, futures, fuzzy-matcher, directories"
+      runtime: "tokio-based"
+      async_usage: "Heavy async usage in workflow execution binaries"
+      
+    - name: "workflow-manager-sdk"
+      type: "library (trait definitions + types)"
+      dependencies:
+        - "serde, serde_json (serialization only)"
+        - "workflow-manager-macros (re-exported)"
+        - "claude-agent-sdk (re-exported for convenience)"
+      runtime: "runtime-agnostic"
+      async_usage: "None - pure data types and traits"
+      purpose:
+        - "WorkflowDefinition trait (auto-implemented by derive macro)"
+        - "WorkflowMetadata, FieldSchema, FieldType definitions"
+        - "WorkflowStatus, WorkflowProgress, WorkflowLog event types"
+        - "Logging macros (log_phase_start, log_task_start, etc.)"
+        - "Re-exports derive macro and claude-agent-sdk"
+      
+    - name: "workflow-manager-macros"
+      type: "proc-macro library"
+      dependencies:
+        - "syn, quote, proc-macro2"
+      purpose: "Derive macro for WorkflowDefinition trait"
+      
+    - name: "claude-agent-sdk"
+      type: "library (async runtime SDK)"
+      dependencies:
+        - "tokio (full features)"
+        - "futures, async-stream, async-trait"
+        - "serde, serde_json"
+        - "reqwest (optional http feature)"
+        - "thiserror, which, jsonschema"
+      runtime: "tokio-specific"
+      modules:
+        - "query (simple one-shot queries)"
+        - "client (interactive bidirectional)"
+        - "mcp (SDK MCP server for custom tools)"
+        - "hooks (event interception)"
+        - "permissions (tool usage control)"
+        - "transport (subprocess communication)"
+        - "control (protocol handler)"
+        - "message (parsing)"
+        - "types (core definitions)"
+
+dependency_analysis:
+  current_flow:
+    - "workflow-manager → workflow-manager-sdk → workflow-manager-macros"
+    - "workflow-manager → claude-agent-sdk"
+    - "workflow-manager-sdk → claude-agent-sdk (re-export)"
+  
+  circular_dependency_risks:
+    current_state: "No circular dependencies present"
+    risk_assessment: "LOW"
+    details:
+      - "workflow-manager-sdk is purely declarative (no async, no tokio)"
+      - "claude-agent-sdk is independently developed and stable"
+      - "Dependency graph is acyclic: macros ← sdk ← binary"
+      - "SDK re-exports claude-agent-sdk for convenience without creating cycles"
+
+runtime_considerations:
+  workflow_manager_sdk:
+    current: "runtime-agnostic"
+    characteristics:
+      - "Zero async/await usage"
+      - "No tokio dependencies"
+      - "Pure Rust data types and trait definitions"
+      - "Logging macros use eprintln! (synchronous)"
+    
+  claude_agent_sdk:
+    current: "tokio-specific"
+    characteristics:
+      - "Heavy tokio integration (v1, full features)"
+      - "Async runtime required for all operations"
+      - "Not runtime-agnostic (no smol/async-std support)"
+    
+  workflow_execution:
+    pattern: "Workflow binaries (research_agent.rs, demo_multiphase.rs) use tokio runtime"
+    requirement: "Async runtime needed for Claude agent interaction"
+
+industry_patterns:
+  aws_sdk_rust:
+    structure:
+      - "Per-service crates (aws-sdk-s3, aws-sdk-ec2, etc.)"
+      - "Shared aws-config crate for credentials and configuration"
+      - "Modular: users install only what they need"
+    benefits:
+      - "Faster compilation times"
+      - "Smaller binary sizes"
+      - "Independent versioning per service"
+  
+  azure_sdk_rust:
+    structure:
+      - "azure_<group>_<service> naming convention"
+      - "azure_core for shared functionality"
+      - "azure_identity for authentication"
+      - "Per-service modularity"
+    
+  google_cloud_rust:
+    structure:
+      - "google-cloud-gax for common types/functions"
+      - "google-cloud-auth for authentication"
+      - "Per-service crates (google-cloud-storage, etc.)"
+      - "Shared concerns separated from service-specific logic"
+  
+  common_patterns:
+    separation_strategy:
+      - "Core/shared crate for common types, auth, config"
+      - "Service-specific crates for API operations"
+      - "Client crate can be separate from models/types"
+    
+    benefits:
+      - "Clear separation of concerns"
+      - "Reduces compile times"
+      - "Enables optional dependencies"
+      - "Prevents circular dependencies"
+
+api_layer_organization_options:
+
+  option_1_extend_workflow_manager_sdk:
+    approach: "Add API functionality to existing workflow-manager-sdk"
+    structure:
+      - "workflow-manager-sdk/src/lib.rs (existing types)"
+      - "workflow-manager-sdk/src/api.rs (new HTTP server)"
+      - "workflow-manager-sdk/src/client.rs (new API client)"
+    
+    pros:
+      - "Simple: everything workflow-related in one crate"
+      - "No additional crate management overhead"
+      - "Easy for users: single import"
+    
+    cons:
+      - "BREAKS runtime-agnostic design of SDK"
+      - "Forces tokio dependency on all SDK users"
+      - "Conflates traits/types with runtime implementation"
+      - "Larger compilation overhead for non-API users"
+      - "Violates single responsibility principle"
+      - "Binary size increases for workflows that don't need API"
+    
+    verdict: "NOT RECOMMENDED - compromises SDK's design philosophy"
+
+  option_2_new_workflow_manager_api_crate:
+    approach: "Create dedicated workflow-manager-api crate for HTTP server/client"
+    structure:
+      workspace_additions:
+        - name: "workflow-manager-api"
+          type: "library (HTTP server + client)"
+          dependencies:
+            - "workflow-manager-sdk (for types/traits)"
+            - "tokio (for async runtime)"
+            - "axum or actix-web (for HTTP server)"
+            - "reqwest (for HTTP client)"
+            - "serde, serde_json"
+          modules:
+            - "server (HTTP server for workflow management)"
+            - "client (HTTP client for remote workflow execution)"
+            - "routes (API endpoints)"
+            - "handlers (request handlers)"
+            - "models (API-specific request/response types)"
+    
+    dependency_flow:
+      - "workflow-manager-api → workflow-manager-sdk (uses types/traits)"
+      - "workflow-manager-api → tokio (runtime)"
+      - "workflow-manager → workflow-manager-api (optional, for HTTP features)"
+      - "External HTTP clients → workflow-manager-api"
+    
+    pros:
+      - "PRESERVES runtime-agnostic nature of workflow-manager-sdk"
+      - "Clear separation: SDK=types/traits, API=HTTP/runtime"
+      - "Optional dependency: workflows can skip API if not needed"
+      - "Faster compilation for non-API use cases"
+      - "Follows industry patterns (AWS/Azure/Google Cloud)"
+      - "Independent versioning for API layer"
+      - "Can choose optimal web framework without affecting SDK"
+      - "Supports future alternative runtimes (if needed)"
+    
+    cons:
+      - "Additional crate to maintain"
+      - "Slightly more complex project structure"
+      - "Users need to import both crates if using API features"
+    
+    verdict: "RECOMMENDED - aligns with best practices and project goals"
+
+  option_3_multiple_specialized_crates:
+    approach: "Maximum granularity - separate server and client"
+    structure:
+      - "workflow-manager-sdk (types/traits - existing)"
+      - "workflow-manager-server (HTTP server)"
+      - "workflow-manager-client (HTTP client)"
+    
+    pros:
+      - "Maximum modularity"
+      - "Users install only what they need"
+    
+    cons:
+      - "Over-engineering for current project scope"
+      - "Increased maintenance burden"
+      - "More complex dependency management"
+    
+    verdict: "OVERKILL - premature optimization for current needs"
+
+circular_dependency_evaluation:
+  option_1_extend_sdk:
+    risk: "NONE - linear dependency chain"
+    concern: "Architectural, not circular dependency"
+    
+  option_2_new_api_crate:
+    risk: "NONE"
+    flow: "workflow-manager-api → workflow-manager-sdk (one-way)"
+    safety: "API crate consumes SDK types, SDK never depends on API"
+    
+  option_3_multiple_crates:
+    risk: "NONE if structured correctly"
+    potential_issue: "Could create cycles if server and client reference each other"
+    mitigation: "Both should depend on SDK for shared types, not on each other"
+
+tokio_vs_runtime_agnostic:
+  current_reality:
+    - "claude-agent-sdk is already tokio-specific"
+    - "Workflow execution requires async runtime for agent interaction"
+    - "TUI application uses tokio for process management and I/O"
+  
+  recommendation_for_api:
+    choice: "tokio-specific is acceptable"
+    rationale:
+      - "Entire ecosystem already built on tokio"
+      - "No requirement for runtime-agnostic API layer"
+      - "Performance and ecosystem benefits of tokio outweigh portability"
+      - "Modern Rust web frameworks (axum, actix-web) built on tokio"
+    
+  recommendation_for_sdk:
+    choice: "Keep runtime-agnostic"
+    rationale:
+      - "SDK defines contracts and data types only"
+      - "No runtime operations needed for trait definitions"
+      - "Smaller dependency footprint"
+      - "Could theoretically be used in non-async contexts"
+
+web_framework_recommendation:
+  if_choosing_new_api_crate:
+    top_choices:
+      axum:
+        pros:
+          - "Excellent tokio integration"
+          - "Type-safe extractors and middleware"
+          - "Clean, composable API"
+          - "Lower memory usage"
+          - "Growing ecosystem support"
+        cons:
+          - "Slightly less mature than actix-web"
+        
+      actix_web:
+        pros:
+          - "Highest performance benchmark results"
+          - "Mature ecosystem"
+          - "Comprehensive feature set"
+        cons:
+          - "Higher memory usage"
+          - "More complex API"
+    
+    recommendation: "axum"
+    reasoning:
+      - "Better alignment with tokio-based workflow-manager architecture"
+      - "Simpler API for maintainability"
+      - "Performance nearly identical to actix-web in practice"
+      - "Strong community momentum in 2024-2025"
+
+final_recommendation:
+  strategy: "Create new workflow-manager-api crate"
+  
+  structure:
+    crate_additions:
+      - name: "workflow-manager-api"
+        path: "../workflow-manager-api"
+        dependencies:
+          required:
+            - "workflow-manager-sdk = { path = '../workflow-manager-sdk' }"
+            - "tokio = { workspace = true }"
+            - "axum = '0.7'"
+            - "serde = { workspace = true }"
+            - "serde_json = { workspace = true }"
+            - "anyhow = { workspace = true }"
+          optional:
+            - "reqwest (for HTTP client functionality)"
+        
+        features:
+          default: "['server']"
+          server: "HTTP server for workflow management"
+          client: "HTTP client for remote execution"
+  
+  module_organization:
+    workflow_manager_api_src:
+      - "lib.rs (public API, feature gates)"
+      - "server/ (HTTP server - behind 'server' feature)"
+      - "  ├── mod.rs"
+      - "  ├── routes.rs (API endpoints)"
+      - "  ├── handlers.rs (request handlers)"
+      - "  └── state.rs (server state management)"
+      - "client/ (HTTP client - behind 'client' feature)"
+      - "  ├── mod.rs"
+      - "  └── client.rs (remote workflow execution)"
+      - "models.rs (API-specific request/response types)"
+      - "error.rs (API-specific errors)"
+  
+  dependency_flow_final:
+    - "workflow-manager-macros (proc-macro, standalone)"
+    - "workflow-manager-sdk → workflow-manager-macros"
+    - "workflow-manager-sdk → claude-agent-sdk (re-export)"
+    - "workflow-manager-api → workflow-manager-sdk (uses types)"
+    - "workflow-manager-api → tokio, axum (runtime & server)"
+    - "workflow-manager (binary) → workflow-manager-sdk"
+    - "workflow-manager (binary) → workflow-manager-api (optional)"
+    - "workflow-manager (binary) → claude-agent-sdk"
+  
+  benefits:
+    architectural:
+      - "Maintains SDK purity (runtime-agnostic, type-focused)"
+      - "Clear separation of concerns (SDK=contracts, API=implementation)"
+      - "Follows industry standards (AWS/Azure/Google Cloud pattern)"
+    
+    practical:
+      - "Optional API dependency - workflows can skip if not needed"
+      - "Faster compilation for SDK-only users"
+      - "Independent versioning for API vs SDK"
+      - "Framework choice flexibility (can swap axum later)"
+    
+    maintenance:
+      - "Easier to test (API logic separate from types)"
+      - "Clear module boundaries"
+      - "Future-proof for additional transports (WebSocket, gRPC)"
+  
+  migration_path:
+    step_1: "Create workflow-manager-api crate skeleton"
+    step_2: "Define API-specific models (requests/responses)"
+    step_3: "Implement server module with axum routes"
+    step_4: "Implement client module for remote execution"
+    step_5: "Add feature flags for optional server/client"
+    step_6: "Update workspace Cargo.toml with new member"
+    step_7: "Add integration tests"
+    step_8: "Update documentation with API examples"
+
+risks_and_mitigations:
+  risk_1:
+    issue: "Increased workspace complexity"
+    mitigation: "Clear documentation, good module organization"
+    severity: "LOW"
+  
+  risk_2:
+    issue: "Potential version skew between SDK and API"
+    mitigation: "Use workspace dependencies, semantic versioning"
+    severity: "LOW"
+  
+  risk_3:
+    issue: "Developer confusion about which crate to import"
+    mitigation: "Clear naming (sdk=types, api=runtime), good examples"
+    severity: "LOW"
+
+alternatives_considered:
+  extend_sdk:
+    reason_rejected: "Breaks runtime-agnostic design principle"
+  
+  multiple_crates:
+    reason_rejected: "Over-engineering for current scope"
+  
+  monolithic_binary:
+    reason_rejected: "Doesn't support API/client use cases"
+
+conclusion:
+  decision: "Create dedicated workflow-manager-api crate"
+  confidence: "HIGH"
+  alignment:
+    industry_patterns: "✓ Matches AWS/Azure/Google Cloud SDK structure"
+    rust_conventions: "✓ Follows cargo workspace best practices"
+    project_goals: "✓ Supports both TUI and API use cases"
+    maintainability: "✓ Clear separation of concerns"
+    performance: "✓ Optional dependencies reduce compilation overhead"

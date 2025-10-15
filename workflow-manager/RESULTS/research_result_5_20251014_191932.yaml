@@ -1,0 +1,681 @@
+workflow_execution_analysis:
+  research_date: "2025-10-14"
+  codebase: "workflow-manager"
+  
+  executive_summary:
+    current_model: "Process-based workflow execution only"
+    communication_protocol: "__WF_EVENT__ structured logging via stderr"
+    state_management: "Arc<Mutex<Vec<WorkflowPhase>>> hierarchical tracking"
+    process_control: "std::process::Command with manual lifecycle management"
+    key_finding: "System currently supports only process-based workflows; no in-process agent execution mode exists"
+  
+  execution_modes:
+    process_based:
+      status: "Fully implemented"
+      location: "src/main.rs"
+      mechanism: "std::process::Command spawns workflow binaries"
+      use_cases:
+        - "All workflow examples (simple_echo, hooks_demo, demo_multiphase)"
+        - "TUI-driven execution from main.rs"
+        - "Tabbed concurrent workflow execution (multiple processes)"
+      
+      implementation_details:
+        spawning:
+          method: "Command::new(&binary_path).args(&args).stdin(null()).stdout(piped()).stderr(piped())"
+          locations:
+            - "src/main.rs:502-553 (rerun_current_tab)"
+            - "src/main.rs:1023-1103 (launch_workflow - legacy)"
+            - "src/main.rs:1178-1240 (launch_workflow_in_tab)"
+          
+        stdio_handling:
+          stdin: "Stdio::null() - no input accepted"
+          stdout: "Stdio::piped() - captured but minimally used"
+          stderr: "Stdio::piped() - primary communication channel"
+          rationale: "Stderr allows mixing structured events with error messages"
+        
+        lifecycle_control:
+          start: "Command::spawn() returns Child handle"
+          monitor: "child.try_wait() polls for completion (src/main.rs:824)"
+          wait: "child.wait() blocks until exit (src/main.rs:1076)"
+          cancel: "child.kill() sends SIGKILL (src/main.rs:409, 433, 452)"
+          cleanup: "Child dropped automatically, no explicit cleanup"
+          
+        limitations:
+          - "No graceful shutdown (SIGTERM not used)"
+          - "No timeout enforcement at process level"
+          - "No resource limits (CPU/memory) applied"
+          - "No sandboxing or isolation"
+          - "kill() is forceful - no cleanup hooks for workflows"
+    
+    library_based:
+      status: "Not implemented"
+      evidence: "No in-process execution found in codebase"
+      potential_examples:
+        - "simple_query.rs uses ClaudeSDKClient directly"
+        - "hooks_demo.rs uses ClaudeSDKClient in-process"
+      note: "These examples ARE workflows but execute as separate processes when launched via TUI"
+      
+      benefits_if_implemented:
+        - "Lower overhead - no process spawn cost"
+        - "Direct memory sharing"
+        - "Better error handling via Result types"
+        - "Easier testing and mocking"
+        - "Real-time progress callbacks"
+      
+      challenges:
+        - "Workflow isolation - shared memory risks"
+        - "Crash propagation - one workflow failure affects TUI"
+        - "Resource control harder without process boundaries"
+        - "Async runtime coordination (tokio)"
+
+  state_management:
+    hierarchical_model:
+      structure: "WorkflowPhase → WorkflowTask → WorkflowAgent"
+      location: "src/main.rs:78-85"
+      
+      phase_definition:
+        struct: "WorkflowPhase"
+        fields:
+          id: "usize"
+          name: "String"
+          status: "PhaseStatus (NotStarted/Running/Completed/Failed)"
+          tasks: "Vec<WorkflowTask>"
+          output_files: "Vec<(String, String)> // path, description"
+        
+      task_definition:
+        struct: "WorkflowTask"
+        fields:
+          id: "String"
+          phase: "usize"
+          description: "String"
+          status: "TaskStatus"
+          agents: "Vec<WorkflowAgent>"
+          messages: "Vec<String>"
+          result: "Option<String>"
+      
+      agent_definition:
+        struct: "WorkflowAgent"
+        fields:
+          id: "String // task_id:agent_name"
+          task_id: "String"
+          name: "String"
+          description: "String"
+          status: "AgentStatus"
+          messages: "Vec<String>"
+          result: "Option<String>"
+    
+    concurrency_model:
+      storage: "Arc<Mutex<Vec<WorkflowPhase>>>"
+      location: "src/main.rs:103 (WorkflowTab.workflow_phases)"
+      access_pattern: |
+        thread::spawn(move || {
+          for line in stderr.lines() {
+            if let Ok(event) = parse_event(&line) {
+              phases.lock().unwrap().update(event);
+            }
+          }
+        })
+      
+      thread_safety:
+        mechanism: "Mutex ensures serialized updates"
+        contention: "Low - stderr parsing thread is main writer"
+        readers: "TUI render loop reads phases for display"
+        
+      per_tab_isolation:
+        description: "Each WorkflowTab has independent Arc<Mutex<Vec<WorkflowPhase>>>"
+        benefit: "Concurrent workflows don't interfere"
+        location: "src/main.rs:87-116 (WorkflowTab struct)"
+
+  log_capture_mechanism:
+    protocol:
+      name: "__WF_EVENT__ Protocol"
+      format: "__WF_EVENT__:<json>"
+      channel: "stderr"
+      encoding: "Line-delimited JSON"
+      
+    emission_side:
+      location: "workflow-manager-sdk/src/lib.rs:193-203"
+      code: |
+        impl WorkflowLog {
+          pub fn emit(&self) {
+            if let Ok(json) = serde_json::to_string(self) {
+              eprintln!("__WF_EVENT__:{}", json);
+              let _ = std::io::stderr().flush();
+            }
+          }
+        }
+      
+      macros:
+        - "log_phase_start!(phase, name, total)"
+        - "log_phase_complete!(phase, name)"
+        - "log_phase_failed!(phase, name, error)"
+        - "log_task_start!(phase, task_id, description)"
+        - "log_task_progress!(task_id, message)"
+        - "log_task_complete!(task_id, result)"
+        - "log_task_failed!(task_id, error)"
+        - "log_agent_start!(task_id, agent_name, description)"
+        - "log_agent_message!(task_id, agent_name, message)"
+        - "log_agent_complete!(task_id, agent_name, result)"
+        - "log_agent_failed!(task_id, agent_name, error)"
+        - "log_state_file!(phase, path, description)"
+      
+      usage_example:
+        workflow: "demo_multiphase.rs:74-104"
+        code: |
+          log_phase_start!(0, "Initialize", 3);
+          for i in 1..=args.tasks_per_phase {
+            log_task_start!(0, &task_id, format!("Init {}", i));
+            // ... work ...
+            log_task_complete!(&task_id, format!("Ready {}", i));
+          }
+          log_phase_complete!(0, "Initialize");
+    
+    parsing_side:
+      location: "src/main.rs:533-549"
+      thread_model: "Dedicated stderr reader thread per workflow"
+      code: |
+        thread::spawn(move || {
+          let reader = BufReader::new(stderr);
+          for line in reader.lines() {
+            if let Ok(line) = line {
+              if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
+                if let Ok(event) = serde_json::from_str::<WorkflowLog>(json_str) {
+                  Self::handle_workflow_event(event, &phases);
+                }
+              } else {
+                output.push(format!("ERROR: {}", line));
+              }
+            }
+          }
+        });
+      
+      handler_location: "src/main.rs:1255-1420"
+      handler_logic: "Match on WorkflowLog enum, update phase/task/agent state"
+      
+    event_types:
+      location: "workflow-manager-sdk/src/lib.rs:119-191"
+      enum_variants:
+        - "PhaseStarted { phase, name, total_phases }"
+        - "PhaseCompleted { phase, name }"
+        - "PhaseFailed { phase, name, error }"
+        - "TaskStarted { phase, task_id, description, total_tasks }"
+        - "TaskProgress { task_id, message }"
+        - "TaskCompleted { task_id, result }"
+        - "TaskFailed { task_id, error }"
+        - "AgentStarted { task_id, agent_name, description }"
+        - "AgentMessage { task_id, agent_name, message }"
+        - "AgentCompleted { task_id, agent_name, result }"
+        - "AgentFailed { task_id, agent_name, error }"
+        - "StateFileCreated { phase, file_path, description }"
+
+  process_lifecycle_control:
+    startup:
+      discovery:
+        mechanism: "discover_workflows() scans ~/.workflow-manager/workflows/"
+        location: "src/discovery.rs:15-78"
+        metadata_extraction: "Execute binary with --workflow-metadata flag"
+        filtering: "Skip non-executables, hash suffixes, .d files"
+        
+      validation:
+        check_executable: "Unix: mode & 0o111 != 0"
+        check_metadata: "Parse FullWorkflowMetadata JSON from stdout"
+        
+      command_building:
+        location: "src/discovery.rs:150-170 (build_workflow_command)"
+        argument_mapping: "FieldSchema → CLI args with proper quoting"
+        example: "--message 'Hello World' --repeat 3"
+    
+    execution:
+      spawn_locations:
+        - "src/main.rs:502 (rerun_current_tab)"
+        - "src/main.rs:1023 (launch_workflow - legacy single-view)"
+        - "src/main.rs:1178 (launch_workflow_in_tab - current approach)"
+      
+      stdio_configuration:
+        stdin: "null() - workflows don't read input"
+        stdout: "piped() - captured for display but rarely used"
+        stderr: "piped() - primary communication channel"
+      
+      handle_storage: "tab.child_process = Some(child)"
+      
+    monitoring:
+      status_check:
+        location: "src/main.rs:823-838"
+        frequency: "Every TUI tick (render loop)"
+        method: "child.try_wait() non-blocking poll"
+        updates: "WorkflowStatus enum (Running → Completed/Failed)"
+        
+      output_capture:
+        stderr_thread: "Dedicated reader thread (src/main.rs:533-549)"
+        stdout_thread: "Not implemented - stdout ignored in current design"
+        buffering: "BufReader wraps Child.stderr"
+        
+    completion:
+      wait_thread:
+        location: "src/main.rs:1074-1093"
+        blocking: "child.wait() spawned in separate thread"
+        updates: "Appends completion message to workflow_output"
+        
+      status_transition:
+        success: "exit_code == 0 → WorkflowStatus::Completed"
+        failure: "exit_code != 0 → WorkflowStatus::Failed"
+        
+    cancellation:
+      trigger:
+        - "User presses 'K' key in Tabs view (src/main.rs:2420)"
+        - "User closes tab while workflow running (src/main.rs:408-410)"
+        
+      method: "child.kill() - sends SIGKILL"
+      locations:
+        - "src/main.rs:409 (close_current_tab)"
+        - "src/main.rs:433 (kill_current_tab)"
+        - "src/main.rs:452 (rerun_current_tab - kills old process)"
+      
+      cleanup:
+        status_update: "tab.status = WorkflowStatus::Failed"
+        message: "⚠️ Workflow killed by user"
+        handle_drop: "Child handle dropped, OS cleans up"
+      
+      limitations:
+        - "No SIGTERM for graceful shutdown"
+        - "Workflow cannot handle cleanup (close files, save state)"
+        - "No timeout between SIGTERM and SIGKILL"
+
+  sandboxing_and_resource_limits:
+    current_state: "None - workflows run with full user privileges"
+    
+    missing_features:
+      sandboxing:
+        - "No filesystem isolation (chroot/pivot_root)"
+        - "No network isolation"
+        - "No seccomp filters"
+        - "No namespace isolation (Linux)"
+      
+      resource_limits:
+        cpu:
+          missing: "No CPU quota or nice priority"
+          impact: "Workflow can consume 100% CPU"
+        
+        memory:
+          missing: "No memory limits (ulimit, cgroups)"
+          impact: "Workflow can OOM host"
+        
+        time:
+          missing: "No execution timeout enforcement"
+          impact: "Workflow can run indefinitely"
+          note: "TUI user can manually kill, but no automatic timeout"
+        
+        io:
+          missing: "No I/O throttling or limits"
+          impact: "Workflow can saturate disk"
+      
+      security_risks:
+        - "Workflow can access any file readable by user"
+        - "Workflow can spawn child processes"
+        - "Workflow can make network requests"
+        - "No audit trail beyond workflow logs"
+    
+    potential_solutions:
+      linux_specific:
+        - "Use cgroups v2 for CPU/memory/IO limits"
+        - "Use namespaces (pid, mount, net) for isolation"
+        - "Use seccomp-bpf for syscall filtering"
+        - "Use bubblewrap or similar sandboxing tool"
+      
+      cross_platform:
+        - "tokio::time::timeout for execution time limits"
+        - "Custom resource monitoring thread"
+        - "Pre-execution checks (disk space, memory available)"
+        - "Post-execution cleanup (kill child processes)"
+      
+      api_layer:
+        - "Allow API users to specify limits: WorkflowLimits { max_time, max_memory, max_cpu }"
+        - "Enforcement layer between API and process spawn"
+        - "Report limit violations as WorkflowLog::LimitExceeded events"
+
+  api_design_implications:
+    execution_mode_support:
+      recommendation: "Support both process and library modes"
+      
+      process_mode_api:
+        use_when:
+          - "Workflow is untrusted code"
+          - "Strong isolation required"
+          - "Workflow may crash or hang"
+          - "External binaries (user-provided workflows)"
+        
+        interface: |
+          pub async fn execute_workflow_process(
+            workflow_id: &str,
+            args: HashMap<String, String>,
+            options: ExecutionOptions,
+          ) -> Result<WorkflowHandle>
+        
+        features:
+          - "Resource limits configurable"
+          - "Sandboxing opt-in"
+          - "Timeout enforcement"
+          - "Process kill/pause/resume"
+      
+      library_mode_api:
+        use_when:
+          - "Built-in trusted workflows"
+          - "Low latency required"
+          - "Direct memory access needed"
+          - "Testing and development"
+        
+        interface: |
+          pub async fn execute_workflow_library(
+            workflow: Box<dyn WorkflowExecutor>,
+            args: HashMap<String, String>,
+            progress_callback: impl Fn(WorkflowLog) + Send,
+          ) -> Result<WorkflowResult>
+        
+        features:
+          - "Direct progress callbacks (no stderr parsing)"
+          - "Shared memory for large data"
+          - "Easier error propagation"
+          - "Testable with mock dependencies"
+      
+      unified_trait:
+        approach: "Abstract over execution mode"
+        trait_definition: |
+          #[async_trait]
+          pub trait WorkflowExecutor: Send {
+            async fn execute(
+              &self,
+              args: HashMap<String, String>,
+              progress: Arc<dyn ProgressSink>,
+            ) -> Result<WorkflowResult>;
+            
+            fn metadata(&self) -> &WorkflowMetadata;
+          }
+        
+        implementations:
+          - "ProcessWorkflowExecutor (spawns binary)"
+          - "LibraryWorkflowExecutor (calls trait method)"
+          - "RemoteWorkflowExecutor (HTTP API call)"
+    
+    state_management_api:
+      approach: "Expose phase/task/agent hierarchy"
+      
+      query_api: |
+        pub async fn get_workflow_state(
+          execution_id: &str
+        ) -> Result<ExecutionState>
+        
+        pub struct ExecutionState {
+          pub status: WorkflowStatus,
+          pub phases: Vec<PhaseState>,
+          pub start_time: DateTime<Utc>,
+          pub end_time: Option<DateTime<Utc>>,
+        }
+      
+      streaming_api: |
+        pub async fn stream_workflow_events(
+          execution_id: &str
+        ) -> impl Stream<Item = WorkflowLog>
+      
+      storage:
+        current: "In-memory Arc<Mutex<Vec<WorkflowPhase>>>"
+        for_api: "Persistent state store (SQLite, PostgreSQL)"
+        benefits:
+          - "State survives API server restart"
+          - "Historical execution queries"
+          - "Multi-server deployment support"
+    
+    cancellation_api:
+      graceful_shutdown:
+        approach: "SIGTERM first, SIGKILL after timeout"
+        interface: |
+          pub async fn cancel_workflow(
+            execution_id: &str,
+            graceful: bool,
+            timeout: Duration,
+          ) -> Result<()>
+        
+        implementation:
+          - "Send SIGTERM if graceful=true"
+          - "Wait up to timeout duration"
+          - "Send SIGKILL if still running"
+          - "Update state to WorkflowStatus::Cancelled"
+      
+      cleanup_hooks:
+        proposal: "Allow workflows to register cleanup handlers"
+        mechanism: "Workflow catches SIGTERM, runs cleanup, exits"
+        example: |
+          // In workflow code:
+          let cleanup_handler = || {
+            log_task_failed!("main", "Workflow cancelled");
+            save_partial_results();
+          };
+          register_sigterm_handler(cleanup_handler);
+    
+    resource_limits_api:
+      configuration: |
+        pub struct ResourceLimits {
+          pub max_duration: Option<Duration>,
+          pub max_memory_mb: Option<u64>,
+          pub max_cpu_percent: Option<u32>,
+          pub allowed_paths: Vec<PathBuf>,  // Sandboxing
+          pub network_access: bool,
+        }
+        
+        pub async fn execute_workflow_with_limits(
+          workflow_id: &str,
+          args: HashMap<String, String>,
+          limits: ResourceLimits,
+        ) -> Result<WorkflowHandle>
+      
+      enforcement:
+        timeout: "tokio::time::timeout wrapper"
+        memory: "cgroups v2 memory.max (Linux) or monitoring thread"
+        cpu: "cgroups v2 cpu.max or nice priority"
+        filesystem: "bubblewrap --bind or similar"
+        network: "unshare --net or seccomp filter"
+      
+      reporting: |
+        pub enum WorkflowError {
+          TimeoutExceeded,
+          MemoryLimitExceeded,
+          CpuLimitExceeded,
+          SandboxViolation { path: PathBuf },
+          // ...
+        }
+
+  example_workflows_analysis:
+    simple_echo:
+      type: "Process-based standalone binary"
+      location: "src/bin/simple_echo.rs"
+      execution_pattern: "Standalone - no agents, no subprocess spawning"
+      features:
+        - "Uses WorkflowDefinition derive macro"
+        - "Emits __WF_EVENT__ logs (implicitly via macros)"
+        - "Simple sequential execution with delays"
+        - "Demonstrates file reading (--file-path)"
+      
+      api_suitability: "Perfect for library mode - pure Rust, no I/O risks"
+    
+    hooks_demo:
+      type: "Process-based with in-process ClaudeSDKClient"
+      location: "src/bin/hooks_demo.rs"
+      execution_pattern: "Spawns ClaudeSDKClient, uses hooks to intercept tool calls"
+      features:
+        - "Demonstrates PreToolUse/PostToolUse hooks"
+        - "Validates bash commands (blocks dangerous 'rm')"
+        - "Audit logging for all tool usage"
+        - "Multiple hooks per event type"
+      
+      complexity:
+        - "Uses ClaudeSDKClient internally (HTTP to Anthropic API)"
+        - "Async execution with tokio"
+        - "Hook closures with Arc and Pin<Box<dyn Future>>"
+      
+      api_suitability: "Could work in library mode if API key handling secure"
+    
+    demo_multiphase:
+      type: "Process-based standalone binary"
+      location: "src/bin/demo_multiphase.rs"
+      execution_pattern: "Multi-phase with hierarchical logging"
+      features:
+        - "3 phases: Initialize, Process, Analyze"
+        - "Simulated task progression with delays"
+        - "Simulated agents (validator, formatter, reviewer)"
+        - "State file creation (log_state_file!)"
+      
+      logging_examples:
+        phase: "log_phase_start!(0, 'Initialize', 3)"
+        task: "log_task_start!(0, &task_id, 'Init component 1')"
+        progress: "log_task_progress!(&task_id, 'Component configured')"
+        agent: "log_agent_start!(&task_id, 'validator', 'Running @validator')"
+      
+      api_suitability: "Excellent for library mode - no external I/O, pure simulation"
+    
+    research_agent:
+      type: "Process-based with heavy ClaudeSDKClient usage"
+      location: "src/bin/research_agent.rs"
+      execution_pattern: "Multi-phase research workflow with concurrent LLM queries"
+      phases:
+        - "Phase 0: Analyze codebase (Glob, Read, Grep)"
+        - "Phase 1: Generate research prompts (LLM)"
+        - "Phase 2: Execute research (concurrent LLM queries)"
+        - "Phase 3: Validate & fix YAML (loop with LLM)"
+        - "Phase 4: Synthesize documentation (LLM)"
+      
+      complexity:
+        - "Heavy file I/O (reads codebase, writes YAML/MD)"
+        - "Concurrent execution with FuturesUnordered and Semaphore"
+        - "External Python script (check_yaml.py) for validation"
+        - "Stateful - resumes from intermediate files"
+      
+      resource_usage:
+        - "Many API calls (expensive)"
+        - "Large token usage"
+        - "Long execution time (minutes)"
+        - "High memory (codebase analysis in memory)"
+      
+      api_suitability: "Process mode essential - isolation, timeouts, cancellation critical"
+    
+    simple_query:
+      type: "Process-based but could be library"
+      location: "src/bin/simple_query.rs"
+      execution_pattern: "Single query to Claude via query() function"
+      features:
+        - "Simple query/response interaction"
+        - "Optional system prompt"
+        - "Max turns configuration"
+        - "Streams response with futures::StreamExt"
+      
+      api_suitability: "Ideal for library mode - minimal, testable, low-risk"
+
+  recommendations:
+    api_execution_modes:
+      support_both: true
+      default_mode: "Process (safer)"
+      opt_in_library: true
+      rationale: "Process mode provides isolation; library mode for trusted, low-latency workflows"
+    
+    process_improvements:
+      graceful_shutdown:
+        priority: "High"
+        implementation: "SIGTERM with timeout, then SIGKILL"
+        benefit: "Workflows can clean up resources"
+      
+      resource_limits:
+        priority: "High"
+        implementation: "Start with tokio::timeout, expand to cgroups on Linux"
+        benefit: "Prevent runaway workflows"
+      
+      sandboxing:
+        priority: "Medium"
+        implementation: "Optional bubblewrap integration"
+        benefit: "Untrusted workflow execution"
+      
+      process_reuse:
+        priority: "Low"
+        implementation: "Long-lived worker processes with IPC"
+        benefit: "Reduce spawn overhead for frequent workflows"
+    
+    library_mode_additions:
+      trait_based_execution:
+        priority: "High"
+        implementation: "Define WorkflowExecutor trait"
+        benefit: "Consistent API, testability"
+      
+      direct_callbacks:
+        priority: "High"
+        implementation: "Pass impl Fn(WorkflowLog) to execute_workflow"
+        benefit: "No stderr parsing, lower latency"
+      
+      error_handling:
+        priority: "High"
+        implementation: "Use Result<T, WorkflowError> throughout"
+        benefit: "Proper error propagation, no process exit codes"
+    
+    state_management:
+      persistent_storage:
+        priority: "High"
+        implementation: "SQLite for single-server, PostgreSQL for multi-server"
+        benefit: "State survives crashes, historical queries"
+      
+      event_streaming:
+        priority: "Medium"
+        implementation: "Server-Sent Events (SSE) or WebSocket"
+        benefit: "Real-time progress for web clients"
+      
+      state_snapshots:
+        priority: "Low"
+        implementation: "Serialize ExecutionState periodically"
+        benefit: "Resume interrupted workflows"
+    
+    cancellation:
+      graceful_api:
+        priority: "High"
+        implementation: "cancel_workflow(id, graceful, timeout)"
+        benefit: "User control over termination"
+      
+      workflow_hooks:
+        priority: "Medium"
+        implementation: "Allow workflows to register SIGTERM handlers"
+        benefit: "Cleanup, save partial results"
+    
+    security:
+      workflow_signing:
+        priority: "Low"
+        implementation: "Verify binary signatures before execution"
+        benefit: "Prevent tampered workflows"
+      
+      capability_model:
+        priority: "Medium"
+        implementation: "Declare required capabilities in metadata (network, filesystem, etc.)"
+        benefit: "User consent, sandboxing configuration"
+
+  conclusion:
+    current_strengths:
+      - "Robust process-based execution with proper stdio handling"
+      - "Well-designed hierarchical state model (Phase/Task/Agent)"
+      - "Clean __WF_EVENT__ protocol for structured logging"
+      - "Concurrent workflow execution in TUI (multiple tabs)"
+      - "Resume support via state files (research_agent example)"
+    
+    current_gaps:
+      - "No library-based execution mode"
+      - "No resource limits or sandboxing"
+      - "No graceful shutdown (SIGTERM)"
+      - "No persistent state storage"
+      - "No timeout enforcement"
+    
+    api_design_guidance:
+      architecture: "Dual-mode execution (process + library) with unified WorkflowExecutor trait"
+      state_storage: "Persistent (SQLite/PostgreSQL) with streaming API"
+      resource_control: "Configurable ResourceLimits with enforcement layer"
+      cancellation: "Graceful shutdown with timeout, workflow cleanup hooks"
+      security: "Optional sandboxing, capability declarations, audit logging"
+    
+    next_steps:
+      - "Define WorkflowExecutor trait and ProcessExecutor/LibraryExecutor implementations"
+      - "Add tokio::timeout for execution time limits (quick win)"
+      - "Implement graceful shutdown with SIGTERM → SIGKILL escalation"
+      - "Design persistent state storage schema"
+      - "Create API layer with execute/query/cancel/stream operations"
+      - "Add integration tests for both execution modes"
