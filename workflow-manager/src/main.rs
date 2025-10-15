@@ -197,14 +197,20 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                                     }
                                 }
                             }
+                            KeyCode::Tab => {
+                                // Switch between chat messages and logs pane
+                                if let Some(chat) = &mut app.chat {
+                                    chat.next_pane();
+                                }
+                            }
                             KeyCode::Up => {
-                                // Scroll messages up
+                                // Scroll active pane up
                                 if let Some(chat) = &mut app.chat {
                                     chat.scroll_up();
                                 }
                             }
                             KeyCode::Down => {
-                                // Scroll messages down
+                                // Scroll active pane down
                                 if let Some(chat) = &mut app.chat {
                                     chat.scroll_down();
                                 }

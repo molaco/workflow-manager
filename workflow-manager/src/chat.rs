@@ -30,6 +30,13 @@ pub struct ToolCall {
     pub output: String,
 }
 
+/// Active pane in chat view
+#[derive(Debug, Clone, PartialEq)]
+pub enum ActivePane {
+    ChatMessages,
+    Logs,
+}
+
 /// Chat interface state
 pub struct ChatInterface {
     /// Message history
@@ -40,8 +47,14 @@ pub struct ChatInterface {
     client: Option<ClaudeSDKClient>,
     /// Whether we're waiting for a response
     pub waiting_for_response: bool,
-    /// Scroll position for message history
+    /// Scroll position for message history (deprecated, use message_scroll)
     pub scroll_offset: usize,
+    /// Scroll position for chat messages pane
+    pub message_scroll: u16,
+    /// Scroll position for logs pane
+    pub log_scroll: u16,
+    /// Currently active pane for keyboard navigation
+    pub active_pane: ActivePane,
     /// Runtime for workflow operations
     runtime: Arc<dyn WorkflowRuntime>,
     /// Initialization state
@@ -64,6 +77,9 @@ impl ChatInterface {
             client: None,
             waiting_for_response: false,
             scroll_offset: 0,
+            message_scroll: 0,
+            log_scroll: 0,
+            active_pane: ActivePane::ChatMessages,
             runtime,
             initialized: false,
             init_error: None,
@@ -219,20 +235,48 @@ impl ChatInterface {
         self.input_buffer.clear();
     }
 
-    /// Scroll up in message history
+    /// Scroll up in active pane
     pub fn scroll_up(&mut self) {
+        match self.active_pane {
+            ActivePane::ChatMessages => {
+                self.message_scroll = self.message_scroll.saturating_sub(1);
+            }
+            ActivePane::Logs => {
+                self.log_scroll = self.log_scroll.saturating_sub(1);
+            }
+        }
+        // Keep old scroll_offset for backwards compat
         if self.scroll_offset > 0 {
             self.scroll_offset -= 1;
         }
     }
 
-    /// Scroll down in message history
+    /// Scroll down in active pane
     pub fn scroll_down(&mut self) {
+        match self.active_pane {
+            ActivePane::ChatMessages => {
+                self.message_scroll = self.message_scroll.saturating_add(1);
+            }
+            ActivePane::Logs => {
+                self.log_scroll = self.log_scroll.saturating_add(1);
+            }
+        }
+        // Keep old scroll_offset for backwards compat
         self.scroll_offset = self.scroll_offset.saturating_add(1);
+    }
+
+    /// Switch to next pane (cycle through)
+    pub fn next_pane(&mut self) {
+        self.active_pane = match self.active_pane {
+            ActivePane::ChatMessages => ActivePane::Logs,
+            ActivePane::Logs => ActivePane::ChatMessages,
+        };
     }
 
     /// Reset scroll to bottom
     pub fn scroll_to_bottom(&mut self) {
         self.scroll_offset = 0;
+        self.message_scroll = 0;
+        self.log_scroll = 0;
     }
 }
