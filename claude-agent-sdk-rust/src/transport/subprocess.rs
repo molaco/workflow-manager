@@ -172,10 +172,9 @@ impl SubprocessTransport {
         }
 
         // Note: --verbose is REQUIRED when using --output-format=stream-json
+        // This applies to BOTH streaming and print modes
         // Stderr output is handled by the stderr task to prevent TUI corruption
-        if needs_streaming_mode {
-            cmd.arg("--verbose");
-        }
+        cmd.arg("--verbose");
 
         // System prompt
         if let Some(ref system_prompt) = self.options.system_prompt {

@@ -86,6 +86,14 @@ fn get_search_paths() -> Vec<PathBuf> {
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
             paths.push(exe_dir.to_path_buf());
+
+            // If running from target/debug/deps or target/release/deps (cargo run),
+            // also check the parent directory where the actual binaries are
+            if exe_dir.ends_with("deps") {
+                if let Some(parent_dir) = exe_dir.parent() {
+                    paths.push(parent_dir.to_path_buf());
+                }
+            }
         }
     }
 
