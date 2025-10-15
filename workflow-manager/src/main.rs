@@ -17,10 +17,18 @@ use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use workflow_manager_sdk::{Workflow, WorkflowSource, WorkflowStatus, FieldType, WorkflowLog};
+use workflow_manager_sdk::{Workflow, WorkflowSource, WorkflowStatus, FieldType, WorkflowLog, WorkflowRuntime};
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use serde::{Deserialize, Serialize};
+
+mod chat;
+mod runtime;
+mod mcp_tools;
+mod discovery;
+
+use chat::ChatInterface;
+use runtime::ProcessBasedRuntime;
 
 // History storage: workflow_id -> field_name -> list of values
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -124,7 +132,8 @@ enum View {
     WorkflowDetail(usize), // workflow index
     WorkflowEdit(usize),   // workflow index
     WorkflowRunning(usize), // workflow index (will be deprecated)
-    Tabs,                  // NEW: Main tabbed view
+    Tabs,                  // Main tabbed view
+    Chat,                  // Chat interface with Claude
 }
 
 struct App {
@@ -171,6 +180,12 @@ struct App {
     selected_task: Option<String>,
     selected_agent: Option<String>,
     workflow_scroll_offset: usize,
+    // Chat interface
+    chat: Option<ChatInterface>,
+    runtime: Option<Arc<dyn WorkflowRuntime>>,
+    chat_initialized: bool,
+    // Tokio runtime for async operations
+    tokio_runtime: tokio::runtime::Runtime,
 }
 
 impl App {
@@ -178,6 +193,9 @@ impl App {
         let workflows = load_workflows();
         let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
         let history = load_history();
+
+        // Create tokio runtime for async operations
+        let tokio_runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
         let mut app = Self {
             workflows,
@@ -214,7 +232,23 @@ impl App {
             selected_task: None,
             selected_agent: None,
             workflow_scroll_offset: 0,
+            chat: None,
+            runtime: None,
+            chat_initialized: false,
+            tokio_runtime,
         };
+
+        // Initialize runtime
+        match ProcessBasedRuntime::new() {
+            Ok(runtime) => {
+                let runtime_arc = Arc::new(runtime) as Arc<dyn WorkflowRuntime>;
+                app.runtime = Some(runtime_arc.clone());
+                app.chat = Some(ChatInterface::new(runtime_arc));
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to initialize workflow runtime: {}", e);
+            }
+        }
 
         // Restore previous session
         app.restore_session();
@@ -890,6 +924,24 @@ impl App {
     fn back_to_list(&mut self) {
         self.current_view = View::WorkflowList;
         self.field_values.clear();
+    }
+
+    fn open_chat(&mut self) {
+        // Initialize chat if needed
+        if !self.chat_initialized {
+            if let Some(chat) = &mut self.chat {
+                // Initialize Claude client asynchronously
+                match self.tokio_runtime.block_on(chat.initialize()) {
+                    Ok(_) => {
+                        self.chat_initialized = true;
+                    }
+                    Err(e) => {
+                        chat.init_error = Some(format!("Failed to initialize: {}", e));
+                    }
+                }
+            }
+        }
+        self.current_view = View::Chat;
     }
 
     fn edit_workflow(&mut self) {
@@ -2383,6 +2435,59 @@ fn run_app<B: ratatui::backend::Backend>(
                             }
                             _ => {}
                         }
+                    } else if matches!(app.current_view, View::Chat) {
+                        // Chat input mode
+                        match key.code {
+                            KeyCode::Esc => {
+                                // Exit chat view
+                                app.current_view = View::Tabs;
+                            }
+                            KeyCode::Char('q') | KeyCode::Char('Q') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                                // Ctrl+Q to quit
+                                app.should_quit = true;
+                            }
+                            KeyCode::Char(c) => {
+                                if let Some(chat) = &mut app.chat {
+                                    chat.input_buffer.push(c);
+                                }
+                            }
+                            KeyCode::Backspace => {
+                                if let Some(chat) = &mut app.chat {
+                                    chat.input_buffer.pop();
+                                }
+                            }
+                            KeyCode::Enter => {
+                                // Send message to Claude
+                                if let Some(chat) = &mut app.chat {
+                                    if !chat.input_buffer.is_empty() {
+                                        let msg = chat.input_buffer.clone();
+                                        chat.input_buffer.clear();
+
+                                        // Send message via tokio runtime
+                                        if let Err(e) = app.tokio_runtime.block_on(chat.send_message(msg)) {
+                                            chat.messages.push(crate::chat::ChatMessage {
+                                                role: crate::chat::ChatRole::Assistant,
+                                                content: format!("Error: {}", e),
+                                                tool_calls: Vec::new(),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Up => {
+                                // Scroll messages up
+                                if let Some(chat) = &mut app.chat {
+                                    chat.scroll_up();
+                                }
+                            }
+                            KeyCode::Down => {
+                                // Scroll messages down
+                                if let Some(chat) = &mut app.chat {
+                                    chat.scroll_down();
+                                }
+                            }
+                            _ => {}
+                        }
                     } else {
                         // Normal navigation mode
                         match key.code {
@@ -2534,9 +2639,19 @@ fn run_app<B: ratatui::backend::Backend>(
                                     app.rerun_current_tab();
                                 }
                             }
+                            KeyCode::Char('a') | KeyCode::Char('A') => {
+                                // A: Open AI chat interface
+                                if matches!(app.current_view, View::Tabs) {
+                                    app.open_chat();
+                                }
+                            }
                             KeyCode::Esc | KeyCode::Char('b') => {
+                                // If in chat view, go back to Tabs
+                                if matches!(app.current_view, View::Chat) {
+                                    app.current_view = View::Tabs;
+                                }
                                 // If in new tab flow, return to Tabs view
-                                if app.in_new_tab_flow {
+                                else if app.in_new_tab_flow {
                                     app.in_new_tab_flow = false;
                                     app.current_view = View::Tabs;
                                     app.field_values.clear();
@@ -2596,6 +2711,7 @@ fn ui(f: &mut Frame, app: &App) {
                     render_tab_content(f, tab_chunks[1], app, tab);
                 }
             }
+            View::Chat => render_chat(f, tab_chunks[1], app),
             View::WorkflowList => render_workflow_list(f, tab_chunks[1], app),
             View::WorkflowDetail(idx) => render_workflow_detail(f, tab_chunks[1], app, idx),
             View::WorkflowEdit(idx) => render_workflow_edit(f, tab_chunks[1], app, idx),
@@ -2608,6 +2724,7 @@ fn ui(f: &mut Frame, app: &App) {
             View::WorkflowDetail(idx) => render_workflow_detail(f, chunks[1], app, idx),
             View::WorkflowEdit(idx) => render_workflow_edit(f, chunks[1], app, idx),
             View::WorkflowRunning(idx) => render_workflow_running(f, chunks[1], app, idx),
+            View::Chat => render_chat(f, chunks[1], app),
             View::Tabs => {
                 // Should not happen
                 let placeholder = Paragraph::new("Error: Tabs view without tab mode");
@@ -2642,6 +2759,7 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         View::WorkflowEdit(_) => "Workflow Manager v0.2.0 - Configure Workflow",
         View::WorkflowRunning(_) => "Workflow Manager v0.2.0 - Running Workflow",
         View::Tabs => "Workflow Manager v0.2.0 - Running Workflows",
+        View::Chat => "Workflow Manager v0.2.0 - AI Chat",
     };
 
     let header = Paragraph::new(Line::from(vec![
@@ -3243,7 +3361,19 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
             Span::raw(" Rerun  "),
             Span::styled("[C]", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(" Close  "),
+            Span::styled("[A]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" AI Chat  "),
             Span::styled("[Q]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Quit"),
+        ]),
+        View::Chat => Line::from(vec![
+            Span::styled("[↑↓]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Scroll  "),
+            Span::styled("[Enter]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Send  "),
+            Span::styled("[Esc]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" Back  "),
+            Span::styled("[Ctrl+Q]", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(" Quit"),
         ]),
     };
@@ -3828,3 +3958,85 @@ fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowTab) 
 
     f.render_widget(content, area);
 }
+
+
+// Chat view rendering
+fn render_chat(f: &mut Frame, area: Rect, app: &App) {
+    use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+    use ratatui::style::{Color, Style, Modifier};
+
+    let chat = match &app.chat {
+        Some(c) => c,
+        None => {
+            let error = Paragraph::new("Chat unavailable - runtime initialization failed")
+                .block(Block::default().borders(Borders::ALL).title(" Error "))
+                .style(Style::default().fg(Color::Red));
+            f.render_widget(error, area);
+            return;
+        }
+    };
+
+    // Split into messages area and input area
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(0),      // Messages
+            Constraint::Length(3),   // Input box
+        ])
+        .split(area);
+
+    // Render messages
+    let mut message_lines = Vec::new();
+    for msg in &chat.messages {
+        let role_style = match msg.role {
+            chat::ChatRole::User => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            chat::ChatRole::Assistant => Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        };
+        let role_text = match msg.role {
+            chat::ChatRole::User => "You",
+            chat::ChatRole::Assistant => "Claude",
+        };
+
+        message_lines.push(Line::from(vec![
+            Span::styled(format!("{}: ", role_text), role_style),
+        ]));
+        message_lines.push(Line::from(msg.content.clone()));
+
+        // Show tool calls if any (but not the verbose output)
+        for tool_call in &msg.tool_calls {
+            message_lines.push(Line::from(vec![
+                Span::styled("  🔧 [Tool Used] ", Style::default().fg(Color::Yellow)),
+                Span::raw(&tool_call.name),
+            ]));
+        }
+
+        message_lines.push(Line::from(""));
+    }
+
+    if chat.waiting_for_response {
+        message_lines.push(Line::from(Span::styled(
+            "Claude is thinking...",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC)
+        )));
+    }
+
+    let messages_widget = Paragraph::new(message_lines)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .title(" Chat with Claude ")
+            .style(Style::default().fg(Color::Cyan)))
+        .wrap(Wrap { trim: false })
+        .scroll((chat.scroll_offset as u16, 0));
+
+    f.render_widget(messages_widget, chunks[0]);
+
+    // Render input box
+    let input_widget = Paragraph::new(chat.input_buffer.as_str())
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .title(" Type your message (Enter to send) ")
+            .style(Style::default().fg(Color::White)));
+
+    f.render_widget(input_widget, chunks[1]);
+}
+

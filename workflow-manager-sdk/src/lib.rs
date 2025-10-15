@@ -5,6 +5,11 @@ pub use workflow_manager_macros::WorkflowDefinition;
 pub use claude_agent_sdk;
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use uuid::Uuid;
+
+// Re-export async trait for convenience
+pub use async_trait::async_trait;
 
 /// Workflow metadata (id, name, description)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -366,4 +371,61 @@ macro_rules! log_state_file {
         }
         .emit();
     };
+}
+
+/// Workflow execution handle for tracking async execution
+#[derive(Debug, Clone)]
+pub struct WorkflowHandle {
+    pub id: Uuid,
+    pub workflow_id: String,
+}
+
+impl WorkflowHandle {
+    pub fn new(id: Uuid, workflow_id: String) -> Self {
+        Self { id, workflow_id }
+    }
+
+    pub fn id(&self) -> &Uuid {
+        &self.id
+    }
+}
+
+/// Result type for workflow operations
+pub type WorkflowResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+/// Runtime trait for workflow discovery and execution
+/// This provides a unified API for both TUI and MCP consumers
+#[async_trait]
+pub trait WorkflowRuntime: Send + Sync {
+    /// List all discovered workflows with metadata
+    fn list_workflows(&self) -> WorkflowResult<Vec<FullWorkflowMetadata>>;
+
+    /// Get detailed metadata for a specific workflow
+    fn get_workflow_metadata(&self, id: &str) -> WorkflowResult<FullWorkflowMetadata>;
+
+    /// Validate inputs against workflow schema before execution
+    fn validate_workflow_inputs(
+        &self,
+        id: &str,
+        params: HashMap<String, String>,
+    ) -> WorkflowResult<()>;
+
+    /// Execute a workflow asynchronously
+    async fn execute_workflow(
+        &self,
+        id: &str,
+        params: HashMap<String, String>,
+    ) -> WorkflowResult<WorkflowHandle>;
+
+    /// Subscribe to logs from a running workflow
+    async fn subscribe_logs(
+        &self,
+        handle_id: &Uuid,
+    ) -> WorkflowResult<tokio::sync::broadcast::Receiver<WorkflowLog>>;
+
+    /// Get current status of a running workflow
+    async fn get_status(&self, handle_id: &Uuid) -> WorkflowResult<WorkflowStatus>;
+
+    /// Cancel a running workflow
+    async fn cancel_workflow(&self, handle_id: &Uuid) -> WorkflowResult<()>;
 }

@@ -78,11 +78,18 @@ pub fn discover_workflows() -> Vec<DiscoveredWorkflow> {
 }
 
 /// Get list of directories to search for workflow binaries
-/// Only searches user workflows directory, built-in workflows are compiled into the binary
 fn get_search_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
-    // User workflows from ~/.workflow-manager/workflows/
+    // 1. Built-in workflows: Same directory as the workflow-manager binary
+    //    When running from target/debug or target/release, workflow binaries from src/bin are here
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            paths.push(exe_dir.to_path_buf());
+        }
+    }
+
+    // 2. User workflows from ~/.workflow-manager/workflows/
     if let Ok(home) = std::env::var("HOME") {
         paths.push(PathBuf::from(home).join(".workflow-manager/workflows"));
     }
