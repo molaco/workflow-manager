@@ -5,7 +5,7 @@ edition = "2021"
 default-run = "workflow-manager"
 
 [dependencies]
-claude-agent-sdk = { path = "../claude-agent-sdk-rust" }
+claude-agent-sdk = { path = "../claude-agent-sdk-rust", features = ["tracing-support"] }
 workflow-manager-sdk = { path = "../workflow-manager-sdk" }
 tokio = { workspace = true, features = ["fs", "process", "io-util"] }
 serde = { workspace = true }
