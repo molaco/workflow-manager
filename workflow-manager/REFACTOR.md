@@ -536,8 +536,8 @@ cargo run --release
 
 | Phase | Status | Tested | Committed | Notes |
 |-------|--------|--------|-----------|-------|
-| 0: Preparation | ⏳ | - | - | Creating plan |
-| 1: Extract Models | ⏸️ | ⬜ | ⬜ | |
+| 0: Preparation | ✅ | - | ✅ | Plan created and committed |
+| 1: Extract Models | ✅ | ✅ | ✅ | 4bc33af - All tests passed |
 | 2: Extract UI | ⏸️ | ⬜ | ⬜ | |
 | 3: Extract App Methods | ⏸️ | ⬜ | ⬜ | |
 | 4: Extract Utilities | ⏸️ | ⬜ | ⬜ | |
