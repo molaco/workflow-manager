@@ -144,7 +144,7 @@ impl WorkflowRuntime for ProcessBasedRuntime {
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
         // Spawn process
-        let mut child = cmd
+        let child = cmd
             .spawn()
             .map_err(|e| anyhow!("Failed to spawn workflow process: {}", e))?;
 
@@ -219,8 +219,12 @@ async fn parse_workflow_stderr(
     // Get stderr handle
     let stderr = {
         let mut execs = executions.lock().unwrap();
-        let state = execs.get_mut(&exec_id).ok_or_else(|| anyhow!("Execution not found"))?;
-        state.child.as_mut()
+        let state = execs
+            .get_mut(&exec_id)
+            .ok_or_else(|| anyhow!("Execution not found"))?;
+        state
+            .child
+            .as_mut()
             .and_then(|c| c.stderr.take())
             .ok_or_else(|| anyhow!("No stderr available"))?
     };
@@ -270,7 +274,10 @@ mod tests {
         let workflows = runtime.list_workflows().unwrap();
 
         for workflow in workflows {
-            println!("Workflow: {} ({})", workflow.metadata.name, workflow.metadata.id);
+            println!(
+                "Workflow: {} ({})",
+                workflow.metadata.name, workflow.metadata.id
+            );
             println!("  Description: {}", workflow.metadata.description);
             println!("  Fields: {}", workflow.fields.len());
         }

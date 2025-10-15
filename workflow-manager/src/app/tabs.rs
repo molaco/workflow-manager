@@ -1,10 +1,9 @@
 //! Tab management operations
 
-use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
-use workflow_manager_sdk::{WorkflowStatus, WorkflowLog};
+use workflow_manager_sdk::{WorkflowLog, WorkflowStatus};
 
 use super::*;
 
@@ -117,9 +116,10 @@ impl App {
                 if !value.is_empty() {
                     let arg_name = format!("--{}", field.name.replace('_', "-"));
 
-                    if field.description.contains("[BOOL]") ||
-                       value.eq_ignore_ascii_case("true") ||
-                       value.eq_ignore_ascii_case("false") {
+                    if field.description.contains("[BOOL]")
+                        || value.eq_ignore_ascii_case("true")
+                        || value.eq_ignore_ascii_case("false")
+                    {
                         if value.eq_ignore_ascii_case("true") {
                             args.push(arg_name);
                         }
@@ -162,11 +162,9 @@ impl App {
                     thread::spawn(move || {
                         use std::io::BufRead;
                         let reader = std::io::BufReader::new(stdout);
-                        for line in reader.lines() {
-                            if let Ok(line) = line {
-                                if let Ok(mut output) = output.lock() {
-                                    output.push(line);
-                                }
+                        for line in reader.lines().flatten() {
+                            if let Ok(mut output) = output.lock() {
+                                output.push(line);
                             }
                         }
                     });
@@ -179,17 +177,13 @@ impl App {
                     thread::spawn(move || {
                         use std::io::BufRead;
                         let reader = std::io::BufReader::new(stderr);
-                        for line in reader.lines() {
-                            if let Ok(line) = line {
-                                if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
-                                    if let Ok(event) = serde_json::from_str::<WorkflowLog>(json_str) {
-                                        Self::handle_workflow_event(event, &phases);
-                                    }
-                                } else {
-                                    if let Ok(mut output) = output.lock() {
-                                        output.push(format!("ERROR: {}", line));
-                                    }
+                        for line in reader.lines().flatten() {
+                            if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
+                                if let Ok(event) = serde_json::from_str::<WorkflowLog>(json_str) {
+                                    Self::handle_workflow_event(event, &phases);
                                 }
+                            } else if let Ok(mut output) = output.lock() {
+                                output.push(format!("ERROR: {}", line));
                             }
                         }
                     });
@@ -231,12 +225,10 @@ impl App {
             }
         }
         // Otherwise, toggle phase expansion
-        else {
-            if tab.expanded_phases.contains(&tab.selected_phase) {
-                tab.expanded_phases.remove(&tab.selected_phase);
-            } else {
-                tab.expanded_phases.insert(tab.selected_phase);
-            }
+        else if tab.expanded_phases.contains(&tab.selected_phase) {
+            tab.expanded_phases.remove(&tab.selected_phase);
+        } else {
+            tab.expanded_phases.insert(tab.selected_phase);
         }
     }
 
@@ -297,13 +289,15 @@ impl App {
                                 if let Some(workflow) = self.workflows.get(tab.workflow_idx) {
                                     for (field_name, value) in &tab.field_values {
                                         if !value.is_empty() {
-                                            let workflow_history = self.history.workflows
+                                            let workflow_history = self
+                                                .history
+                                                .workflows
                                                 .entry(workflow.info.id.clone())
-                                                .or_insert_with(HashMap::new);
+                                                .or_default();
 
                                             let field_history = workflow_history
                                                 .entry(field_name.clone())
-                                                .or_insert_with(Vec::new);
+                                                .or_default();
 
                                             if !field_history.contains(value) {
                                                 field_history.insert(0, value.clone());
@@ -316,7 +310,10 @@ impl App {
                                     let _ = crate::utils::save_history(&self.history);
                                 }
                             } else {
-                                output.push(format!("❌ Workflow failed with exit code: {:?}", tab.exit_code));
+                                output.push(format!(
+                                    "❌ Workflow failed with exit code: {:?}",
+                                    tab.exit_code
+                                ));
                             }
                         }
                     }

@@ -1,4 +1,6 @@
-use claude_agent_sdk::{query, ClaudeAgentOptions, Message, ContentBlock, SystemPrompt, SystemPromptPreset};
+use claude_agent_sdk::{
+    query, ClaudeAgentOptions, ContentBlock, Message, SystemPrompt, SystemPromptPreset,
+};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -42,7 +44,11 @@ async fn generate_prompts(
     // Create options for prompt generation
     let options = ClaudeAgentOptions::builder()
         .system_prompt(system_prompt)
-        .allowed_tools(vec!["Read".to_string(), "Glob".to_string(), "Grep".to_string()])
+        .allowed_tools(vec![
+            "Read".to_string(),
+            "Glob".to_string(),
+            "Grep".to_string(),
+        ])
         .permission_mode(claude_agent_sdk::PermissionMode::BypassPermissions)
         .build();
 
@@ -106,9 +112,7 @@ async fn generate_prompts(
 }
 
 /// Phase 2: Execute a single research prompt
-async fn execute_research_prompt(
-    prompt: &ResearchPrompt,
-) -> anyhow::Result<ResearchResult> {
+async fn execute_research_prompt(prompt: &ResearchPrompt) -> anyhow::Result<ResearchResult> {
     println!("\n{}", "-".repeat(80));
     println!("EXECUTING: {}", prompt.title);
     println!("{}", "-".repeat(80));
@@ -167,7 +171,10 @@ async fn synthesize_documentation(
     println!("{}", "=".repeat(80));
 
     // Build context from all research results
-    let mut research_context = format!("# Research Objective\n{}\n\n# Research Findings\n\n", objective);
+    let mut research_context = format!(
+        "# Research Objective\n{}\n\n# Research Findings\n\n",
+        objective
+    );
 
     for (i, result) in research_results.iter().enumerate() {
         research_context.push_str(&format!(
@@ -241,7 +248,10 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 4 {
-        eprintln!("Usage: {} <objective> <prompt_writer_path> <output_style_path> [output_file]", args[0]);
+        eprintln!(
+            "Usage: {} <objective> <prompt_writer_path> <output_style_path> [output_file]",
+            args[0]
+        );
         std::process::exit(1);
     }
 
@@ -265,13 +275,20 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    println!("\nGenerated {} research prompts", prompts_data.prompts.len());
+    println!(
+        "\nGenerated {} research prompts",
+        prompts_data.prompts.len()
+    );
 
     // Phase 2: Execute research prompts sequentially
     let mut research_results = Vec::new();
 
     for (i, prompt) in prompts_data.prompts.iter().enumerate() {
-        println!("\n[{}/{}] Executing research prompt...", i + 1, prompts_data.prompts.len());
+        println!(
+            "\n[{}/{}] Executing research prompt...",
+            i + 1,
+            prompts_data.prompts.len()
+        );
         let result = execute_research_prompt(prompt).await?;
         research_results.push(result);
     }
@@ -280,7 +297,10 @@ async fn main() -> anyhow::Result<()> {
     synthesize_documentation(objective, &research_results, &output_file).await?;
 
     println!("\n{}", "=".repeat(80));
-    println!("Research complete! Documentation saved to: {}", output_file.display());
+    println!(
+        "Research complete! Documentation saved to: {}",
+        output_file.display()
+    );
     println!("{}", "=".repeat(80));
 
     Ok(())

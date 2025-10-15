@@ -1,6 +1,6 @@
 //! File browser and dropdown functionality
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use workflow_manager_sdk::FieldType;
 
 use super::*;
@@ -12,7 +12,10 @@ impl App {
             if let Some(workflow) = self.workflows.get(idx) {
                 if let Some(field) = workflow.info.fields.get(self.edit_field_index) {
                     // Only open for file_path and state_file fields
-                    if matches!(field.field_type, FieldType::FilePath { .. } | FieldType::StateFile { .. }) {
+                    if matches!(
+                        field.field_type,
+                        FieldType::FilePath { .. } | FieldType::StateFile { .. }
+                    ) {
                         self.show_file_browser = true;
                         self.file_browser_search.clear();
                         self.load_file_browser_items();
@@ -63,12 +66,10 @@ impl App {
         }
 
         // Sort: directories first, then files
-        items.sort_by(|a, b| {
-            match (a.is_dir(), b.is_dir()) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => a.file_name().cmp(&b.file_name()),
-            }
+        items.sort_by(|a, b| match (a.is_dir(), b.is_dir()) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.file_name().cmp(&b.file_name()),
         });
 
         self.file_browser_items = items;
@@ -127,7 +128,8 @@ impl App {
                 } else {
                     self.current_dir.join(parent)
                 };
-                let prefix = path.file_name()
+                let prefix = path
+                    .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("")
                     .to_string();
@@ -152,12 +154,10 @@ impl App {
                 .collect();
 
             // Sort: directories first, then files
-            matches.sort_by(|a, b| {
-                match (a.is_dir(), b.is_dir()) {
-                    (true, false) => std::cmp::Ordering::Less,
-                    (false, true) => std::cmp::Ordering::Greater,
-                    _ => a.file_name().cmp(&b.file_name()),
-                }
+            matches.sort_by(|a, b| match (a.is_dir(), b.is_dir()) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.file_name().cmp(&b.file_name()),
             });
 
             // Add parent directory as first item (if it exists)

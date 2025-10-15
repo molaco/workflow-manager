@@ -121,14 +121,20 @@ EXAMPLE COMMANDS:
 */
 
 use clap::Parser;
-use workflow_manager_sdk::{WorkflowDefinition, log_phase_start, log_phase_complete, log_task_start, log_task_complete, log_task_failed, log_state_file};
 use claude_agent_sdk::{
     query, ClaudeAgentOptions, ContentBlock, Message, SystemPrompt, SystemPromptPreset,
 };
 use futures::{stream::FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::{path::{Path, PathBuf}, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::{fs, sync::Semaphore};
+use workflow_manager_sdk::{
+    log_phase_complete, log_phase_start, log_state_file, log_task_complete, log_task_failed,
+    log_task_start, WorkflowDefinition,
+};
 
 // Use flexible YAML instead of rigid structs
 type CodebaseAnalysis = serde_yaml::Value;
@@ -280,7 +286,9 @@ struct Args {
 
 /// Phase 0: Analyze codebase structure
 async fn analyze_codebase(codebase_path: &Path) -> anyhow::Result<CodebaseAnalysis> {
-    use workflow_manager_sdk::{log_agent_start, log_agent_message, log_agent_complete, log_agent_failed};
+    use workflow_manager_sdk::{
+        log_agent_complete, log_agent_failed, log_agent_message, log_agent_start,
+    };
 
     let task_id = "analyze";
     let agent_name = "Suborchestrator Agent";
@@ -365,7 +373,8 @@ YAML OUTPUT REQUIREMENTS (CRITICAL):
 - Validate YAML structure before outputting - check for any repeated keys
 - Proper YAML indentation (2 spaces, no tabs)
 
-Provide detailed structural analysis with accurate, verified metrics."#.to_string(),
+Provide detailed structural analysis with accurate, verified metrics."#
+                .to_string(),
         )
         .allowed_tools(vec![
             "Read".to_string(),
@@ -400,22 +409,21 @@ Provide detailed structural analysis with accurate, verified metrics."#.to_strin
 
     // Extract and parse YAML
     let yaml_content = extract_yaml(&response_text);
-    let analysis: CodebaseAnalysis = serde_yaml::from_str(&yaml_content)
-        .map_err(|e| {
-            let error_msg = format!("Failed to parse analysis YAML: {}", e);
-            log_agent_failed!(task_id, agent_name, &error_msg);
+    let analysis: CodebaseAnalysis = serde_yaml::from_str(&yaml_content).map_err(|e| {
+        let error_msg = format!("Failed to parse analysis YAML: {}", e);
+        log_agent_failed!(task_id, agent_name, &error_msg);
 
-            // If duplicate key error, provide helpful context
-            if error_msg.contains("duplicate") {
-                eprintln!("\n❌ YAML PARSING ERROR: Duplicate keys detected");
-                eprintln!("The analysis contains duplicate keys which is invalid YAML.");
-                eprintln!("Common fix: Combine duplicate keys into a single key with an array.");
-                eprintln!("\nGenerated YAML preview (first 500 chars):");
-                eprintln!("{}", &yaml_content.chars().take(500).collect::<String>());
-            }
+        // If duplicate key error, provide helpful context
+        if error_msg.contains("duplicate") {
+            eprintln!("\n❌ YAML PARSING ERROR: Duplicate keys detected");
+            eprintln!("The analysis contains duplicate keys which is invalid YAML.");
+            eprintln!("Common fix: Combine duplicate keys into a single key with an array.");
+            eprintln!("\nGenerated YAML preview (first 500 chars):");
+            eprintln!("{}", &yaml_content.chars().take(500).collect::<String>());
+        }
 
-            anyhow::anyhow!("{}", error_msg)
-        })?;
+        anyhow::anyhow!("{}", error_msg)
+    })?;
 
     log_agent_complete!(task_id, agent_name, "Codebase analysis complete");
     Ok(analysis)
@@ -428,7 +436,9 @@ async fn generate_prompts(
     prompt_writer: &str,
     output_style: &str,
 ) -> anyhow::Result<PromptsData> {
-    use workflow_manager_sdk::{log_agent_start, log_agent_message, log_agent_complete, log_agent_failed};
+    use workflow_manager_sdk::{
+        log_agent_complete, log_agent_failed, log_agent_message, log_agent_start,
+    };
 
     let task_id = "generate";
     let agent_name = "Suborchestrator Agent";
@@ -476,23 +486,26 @@ async fn generate_prompts(
     }
 
     let yaml_content = extract_yaml(&response_text);
-    let prompts_data: PromptsData = serde_yaml::from_str(&yaml_content)
-        .map_err(|e| {
-            let error_msg = format!("Failed to parse prompts YAML: {}", e);
-            log_agent_failed!(task_id, agent_name, &error_msg);
+    let prompts_data: PromptsData = serde_yaml::from_str(&yaml_content).map_err(|e| {
+        let error_msg = format!("Failed to parse prompts YAML: {}", e);
+        log_agent_failed!(task_id, agent_name, &error_msg);
 
-            // If duplicate key error, provide helpful context
-            if error_msg.contains("duplicate") {
-                eprintln!("\n❌ YAML PARSING ERROR: Duplicate keys detected in prompts");
-                eprintln!("The prompts YAML contains duplicate keys which is invalid.");
-                eprintln!("\nGenerated YAML preview (first 500 chars):");
-                eprintln!("{}", &yaml_content.chars().take(500).collect::<String>());
-            }
+        // If duplicate key error, provide helpful context
+        if error_msg.contains("duplicate") {
+            eprintln!("\n❌ YAML PARSING ERROR: Duplicate keys detected in prompts");
+            eprintln!("The prompts YAML contains duplicate keys which is invalid.");
+            eprintln!("\nGenerated YAML preview (first 500 chars):");
+            eprintln!("{}", &yaml_content.chars().take(500).collect::<String>());
+        }
 
-            anyhow::anyhow!("{}", error_msg)
-        })?;
+        anyhow::anyhow!("{}", error_msg)
+    })?;
 
-    log_agent_complete!(task_id, agent_name, format!("Generated {} prompts", prompts_data.prompts.len()));
+    log_agent_complete!(
+        task_id,
+        agent_name,
+        format!("Generated {} prompts", prompts_data.prompts.len())
+    );
     Ok(prompts_data)
 }
 
@@ -503,13 +516,19 @@ async fn execute_research_prompt(
     timestamp: &str,
     prefix: Option<&str>,
 ) -> anyhow::Result<ResearchResult> {
-    use workflow_manager_sdk::{log_agent_start, log_agent_message, log_agent_complete, log_agent_failed};
+    use workflow_manager_sdk::{
+        log_agent_complete, log_agent_failed, log_agent_message, log_agent_start,
+    };
 
     let prefix = prefix.unwrap_or("");
     let task_id = format!("research_{}", result_number);
     let agent_name = format!("Research Agent {}", result_number);
 
-    log_agent_start!(&task_id, &agent_name, format!("Executing: {}", prompt.title));
+    log_agent_start!(
+        &task_id,
+        &agent_name,
+        format!("Executing: {}", prompt.title)
+    );
 
     println!("\n{}", "-".repeat(80));
     println!("{}EXECUTING: {}", prefix, prompt.title);
@@ -546,10 +565,18 @@ async fn execute_research_prompt(
                             log_agent_message!(&task_id, &agent_name, text);
                         }
                         ContentBlock::ToolUse { name, .. } => {
-                            log_agent_message!(&task_id, &agent_name, format!("🔧 Using tool: {}", name));
+                            log_agent_message!(
+                                &task_id,
+                                &agent_name,
+                                format!("🔧 Using tool: {}", name)
+                            );
                         }
                         ContentBlock::ToolResult { tool_use_id, .. } => {
-                            log_agent_message!(&task_id, &agent_name, format!("✓ Tool result: {}", tool_use_id));
+                            log_agent_message!(
+                                &task_id,
+                                &agent_name,
+                                format!("✓ Tool result: {}", tool_use_id)
+                            );
                         }
                         _ => {}
                     }
@@ -564,15 +591,27 @@ async fn execute_research_prompt(
 
     // Write response directly to file (no serialization issues)
     let yaml_content = extract_yaml(&response_text);
-    let response_filename = format!("./RESULTS/research_result_{}_{}.yaml", result_number, timestamp);
-    fs::write(&response_filename, &yaml_content).await
+    let response_filename = format!(
+        "./RESULTS/research_result_{}_{}.yaml",
+        result_number, timestamp
+    );
+    fs::write(&response_filename, &yaml_content)
+        .await
         .map_err(|e| {
-            log_agent_failed!(&task_id, &agent_name, format!("Failed to write file: {}", e));
+            log_agent_failed!(
+                &task_id,
+                &agent_name,
+                format!("Failed to write file: {}", e)
+            );
             e
         })?;
 
     println!("{}Response saved to: {}", prefix, response_filename);
-    log_agent_complete!(&task_id, &agent_name, format!("Saved to {}", response_filename));
+    log_agent_complete!(
+        &task_id,
+        &agent_name,
+        format!("Saved to {}", response_filename)
+    );
 
     Ok(ResearchResult {
         title: prompt.title.clone(),
@@ -587,7 +626,11 @@ async fn validate_yaml_file(file_path: &str) -> anyhow::Result<(String, bool, St
     use tokio::process::Command;
 
     let output = Command::new("uv")
-        .args(&["run", "/home/molaco/Documents/japanese/SCRIPTS/check_yaml.py", file_path])
+        .args([
+            "run",
+            "/home/molaco/Documents/japanese/SCRIPTS/check_yaml.py",
+            file_path,
+        ])
         .output()
         .await?;
 
@@ -595,7 +638,9 @@ async fn validate_yaml_file(file_path: &str) -> anyhow::Result<(String, bool, St
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined_output = format!("{}{}", stdout, stderr);
 
-    let is_valid = output.status.success() && !combined_output.contains("❌") && !combined_output.contains("Error");
+    let is_valid = output.status.success()
+        && !combined_output.contains("❌")
+        && !combined_output.contains("Error");
 
     Ok((file_path.to_string(), is_valid, combined_output))
 }
@@ -607,7 +652,9 @@ async fn execute_fix_yaml(
     prefix: Option<&str>,
     fixer_number: usize,
 ) -> anyhow::Result<()> {
-    use workflow_manager_sdk::{log_agent_start, log_agent_message, log_agent_complete, log_agent_failed};
+    use workflow_manager_sdk::{
+        log_agent_complete, log_agent_failed, log_agent_message, log_agent_start,
+    };
 
     let prefix = prefix.unwrap_or("");
     let task_id = format!("fix_yaml_{}", fixer_number);
@@ -620,14 +667,24 @@ async fn execute_fix_yaml(
     println!("{}", "-".repeat(80));
 
     // Read the broken YAML
-    let broken_yaml = fs::read_to_string(file_path).await
-        .map_err(|e| {
-            log_agent_failed!(&task_id, &agent_name, format!("Failed to read file: {}", e));
-            e
-        })?;
+    let broken_yaml = fs::read_to_string(file_path).await.map_err(|e| {
+        log_agent_failed!(&task_id, &agent_name, format!("Failed to read file: {}", e));
+        e
+    })?;
 
-    log_agent_message!(&task_id, &agent_name, format!("Read {} bytes from file", broken_yaml.len()));
-    log_agent_message!(&task_id, &agent_name, format!("Error: {}", error_message.lines().next().unwrap_or("Unknown error")));
+    log_agent_message!(
+        &task_id,
+        &agent_name,
+        format!("Read {} bytes from file", broken_yaml.len())
+    );
+    log_agent_message!(
+        &task_id,
+        &agent_name,
+        format!(
+            "Error: {}",
+            error_message.lines().next().unwrap_or("Unknown error")
+        )
+    );
 
     let fix_prompt = format!(
         r#"The following YAML file has validation errors. Please fix it and output ONLY the corrected YAML.
@@ -677,10 +734,18 @@ Output the fixed YAML wrapped in ```yaml code blocks."#,
                             log_agent_message!(&task_id, &agent_name, text);
                         }
                         ContentBlock::ToolUse { name, .. } => {
-                            log_agent_message!(&task_id, &agent_name, format!("🔧 Using tool: {}", name));
+                            log_agent_message!(
+                                &task_id,
+                                &agent_name,
+                                format!("🔧 Using tool: {}", name)
+                            );
                         }
                         ContentBlock::ToolResult { tool_use_id, .. } => {
-                            log_agent_message!(&task_id, &agent_name, format!("✓ Tool result: {}", tool_use_id));
+                            log_agent_message!(
+                                &task_id,
+                                &agent_name,
+                                format!("✓ Tool result: {}", tool_use_id)
+                            );
                         }
                         _ => {}
                     }
@@ -693,14 +758,21 @@ Output the fixed YAML wrapped in ```yaml code blocks."#,
 
     // Extract and write fixed YAML
     let fixed_yaml = extract_yaml(&response_text);
-    fs::write(file_path, &fixed_yaml).await
-        .map_err(|e| {
-            log_agent_failed!(&task_id, &agent_name, format!("Failed to write fixed YAML: {}", e));
-            e
-        })?;
+    fs::write(file_path, &fixed_yaml).await.map_err(|e| {
+        log_agent_failed!(
+            &task_id,
+            &agent_name,
+            format!("Failed to write fixed YAML: {}", e)
+        );
+        e
+    })?;
 
     println!("\n{}Fixed YAML written to: {}", prefix, file_path);
-    log_agent_complete!(&task_id, &agent_name, format!("Fixed and saved {} bytes", fixed_yaml.len()));
+    log_agent_complete!(
+        &task_id,
+        &agent_name,
+        format!("Fixed and saved {} bytes", fixed_yaml.len())
+    );
 
     Ok(())
 }
@@ -711,13 +783,19 @@ async fn summarize_research_result(
     result_number: usize,
     prefix: Option<&str>,
 ) -> anyhow::Result<String> {
-    use workflow_manager_sdk::{log_agent_start, log_agent_message, log_agent_complete, log_agent_failed};
+    use workflow_manager_sdk::{
+        log_agent_complete, log_agent_failed, log_agent_message, log_agent_start,
+    };
 
     let prefix = prefix.unwrap_or("");
     let task_id = format!("summarize_{}", result_number);
     let agent_name = format!("Summarizer {}", result_number);
 
-    log_agent_start!(&task_id, &agent_name, format!("Summarizing: {}", result.title));
+    log_agent_start!(
+        &task_id,
+        &agent_name,
+        format!("Summarizing: {}", result.title)
+    );
 
     println!("\n{}", "-".repeat(80));
     println!("{}SUMMARIZING: {}", prefix, result.title);
@@ -731,7 +809,11 @@ async fn summarize_research_result(
             anyhow::anyhow!("Failed to read {}: {}", result.response_file, e)
         })?;
 
-    log_agent_message!(&task_id, &agent_name, format!("Read {} bytes from result file", response_content.len()));
+    log_agent_message!(
+        &task_id,
+        &agent_name,
+        format!("Read {} bytes from result file", response_content.len())
+    );
 
     let summarize_prompt = format!(
         r#"Summarize the following research finding concisely. Extract only the key insights, facts, and actionable information.
@@ -750,15 +832,15 @@ async fn summarize_research_result(
 - Focus on actionable insights and important facts
 - Be concise but preserve technical details
 - Output as structured markdown"#,
-        result.title,
-        result.query,
-        response_content
+        result.title, result.query, response_content
     );
 
     let preset = SystemPromptPreset {
         prompt_type: "preset".to_string(),
         preset: "claude_code".to_string(),
-        append: Some("You are a technical summarizer. Extract only essential information.".to_string()),
+        append: Some(
+            "You are a technical summarizer. Extract only essential information.".to_string(),
+        ),
     };
 
     let options = ClaudeAgentOptions::builder()
@@ -786,10 +868,18 @@ async fn summarize_research_result(
                             log_agent_message!(&task_id, &agent_name, text);
                         }
                         ContentBlock::ToolUse { name, .. } => {
-                            log_agent_message!(&task_id, &agent_name, format!("🔧 Using tool: {}", name));
+                            log_agent_message!(
+                                &task_id,
+                                &agent_name,
+                                format!("🔧 Using tool: {}", name)
+                            );
                         }
                         ContentBlock::ToolResult { tool_use_id, .. } => {
-                            log_agent_message!(&task_id, &agent_name, format!("✓ Tool result: {}", tool_use_id));
+                            log_agent_message!(
+                                &task_id,
+                                &agent_name,
+                                format!("✓ Tool result: {}", tool_use_id)
+                            );
                         }
                         _ => {}
                     }
@@ -801,7 +891,11 @@ async fn summarize_research_result(
     }
 
     println!("\n");
-    log_agent_complete!(&task_id, &agent_name, format!("Summary complete ({} chars)", response_text.len()));
+    log_agent_complete!(
+        &task_id,
+        &agent_name,
+        format!("Summary complete ({} chars)", response_text.len())
+    );
     Ok(response_text)
 }
 
@@ -818,8 +912,11 @@ async fn map_phase_summarize(
     batch_size: usize,
 ) -> anyhow::Result<Vec<LabeledDoc>> {
     println!("\n{}", "=".repeat(80));
-    println!("PHASE 4 MAP: Summarizing {} Research Results (concurrency: {})",
-        research_results.len(), batch_size);
+    println!(
+        "PHASE 4 MAP: Summarizing {} Research Results (concurrency: {})",
+        research_results.len(),
+        batch_size
+    );
     println!("{}", "=".repeat(80));
 
     let sem = Arc::new(Semaphore::new(batch_size));
@@ -832,7 +929,10 @@ async fn map_phase_summarize(
         let prefix = format!("[Summarizer {}]: ", result_number);
 
         tasks.push(async move {
-            let _permit = sem.acquire().await.map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
+            let _permit = sem
+                .acquire()
+                .await
+                .map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
 
             let task_id = format!("summarize_{}", result_number);
             log_task_start!(4, &task_id, format!("Summarizing result {}", result_number));
@@ -864,15 +964,26 @@ async fn combine_two_docs(
     prefix: Option<&str>,
     combiner_number: usize,
 ) -> anyhow::Result<LabeledDoc> {
-    use workflow_manager_sdk::{log_agent_start, log_agent_message, log_agent_complete};
+    use workflow_manager_sdk::{log_agent_complete, log_agent_message, log_agent_start};
 
     let prefix = prefix.unwrap_or("");
     let task_id = format!("combine_{}", combiner_number);
     let agent_name = format!("Combiner {}", combiner_number);
 
     let (combine_prompt, new_label) = if let Some(doc2) = doc2 {
-        log_agent_start!(&task_id, &agent_name, format!("Combining: {} + {}", doc1.label, doc2.label));
-        println!("{}Combining: {} + {} → {}{}", prefix, doc1.label, doc2.label, doc1.label, &doc2.label[3..]);
+        log_agent_start!(
+            &task_id,
+            &agent_name,
+            format!("Combining: {} + {}", doc1.label, doc2.label)
+        );
+        println!(
+            "{}Combining: {} + {} → {}{}",
+            prefix,
+            doc1.label,
+            doc2.label,
+            doc1.label,
+            &doc2.label[3..]
+        );
         let new_label = format!("{}{}", doc1.label, &doc2.label[3..]);
         let prompt = format!(
             r#"Combine these two documentation sections into a single cohesive section.
@@ -893,7 +1004,11 @@ async fn combine_two_docs(
         );
         (prompt, new_label)
     } else {
-        log_agent_start!(&task_id, &agent_name, format!("Processing single: {}", doc1.label));
+        log_agent_start!(
+            &task_id,
+            &agent_name,
+            format!("Processing single: {}", doc1.label)
+        );
         println!("{}Processing single: {} (no pair)", prefix, doc1.label);
         let new_label = doc1.label.clone();
         let prompt = format!(
@@ -911,7 +1026,14 @@ async fn combine_two_docs(
         (prompt, new_label)
     };
 
-    log_agent_message!(&task_id, &agent_name, format!("Input: {} chars", doc1.content.len() + doc2.map_or(0, |d| d.content.len())));
+    log_agent_message!(
+        &task_id,
+        &agent_name,
+        format!(
+            "Input: {} chars",
+            doc1.content.len() + doc2.map_or(0, |d| d.content.len())
+        )
+    );
 
     let preset = SystemPromptPreset {
         prompt_type: "preset".to_string(),
@@ -938,16 +1060,28 @@ async fn combine_two_docs(
                             response_text.push_str(text);
                             // Only log summary for combining to reduce noise
                             if text.len() > 100 {
-                                log_agent_message!(&task_id, &agent_name, format!("{}...", &text[..100]));
+                                log_agent_message!(
+                                    &task_id,
+                                    &agent_name,
+                                    format!("{}...", &text[..100])
+                                );
                             } else {
                                 log_agent_message!(&task_id, &agent_name, text);
                             }
                         }
                         ContentBlock::ToolUse { name, .. } => {
-                            log_agent_message!(&task_id, &agent_name, format!("🔧 Using tool: {}", name));
+                            log_agent_message!(
+                                &task_id,
+                                &agent_name,
+                                format!("🔧 Using tool: {}", name)
+                            );
                         }
                         ContentBlock::ToolResult { tool_use_id, .. } => {
-                            log_agent_message!(&task_id, &agent_name, format!("✓ Tool result: {}", tool_use_id));
+                            log_agent_message!(
+                                &task_id,
+                                &agent_name,
+                                format!("✓ Tool result: {}", tool_use_id)
+                            );
                         }
                         _ => {}
                     }
@@ -958,7 +1092,15 @@ async fn combine_two_docs(
         }
     }
 
-    log_agent_complete!(&task_id, &agent_name, format!("Combined into {} ({} chars)", new_label, response_text.len()));
+    log_agent_complete!(
+        &task_id,
+        &agent_name,
+        format!(
+            "Combined into {} ({} chars)",
+            new_label,
+            response_text.len()
+        )
+    );
 
     Ok(LabeledDoc {
         content: response_text,
@@ -972,10 +1114,15 @@ async fn parallel_reduce_round(
     batch_size: usize,
     round_number: usize,
 ) -> anyhow::Result<Vec<LabeledDoc>> {
-    let num_pairs = (docs.len() + 1) / 2;
+    let num_pairs = docs.len().div_ceil(2);
     println!("\n{}", "-".repeat(80));
-    println!("REDUCE ROUND {}: {} docs → {} docs (concurrency: {})",
-        round_number, docs.len(), num_pairs, batch_size);
+    println!(
+        "REDUCE ROUND {}: {} docs → {} docs (concurrency: {})",
+        round_number,
+        docs.len(),
+        num_pairs,
+        batch_size
+    );
     println!("{}", "-".repeat(80));
 
     let sem = Arc::new(Semaphore::new(batch_size));
@@ -989,7 +1136,9 @@ async fn parallel_reduce_round(
         let prefix = format!("[Combiner {}]: ", combiner_number);
 
         tasks.push(async move {
-            let _permit = sem.acquire().await
+            let _permit = sem
+                .acquire()
+                .await
                 .map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
 
             let task_id = format!("combine_round{}_pair{}", round_number, combiner_number);
@@ -1000,7 +1149,8 @@ async fn parallel_reduce_round(
             };
             log_task_start!(4, &task_id, desc);
 
-            let result = combine_two_docs(&doc1, doc2.as_ref(), Some(&prefix), combiner_number).await;
+            let result =
+                combine_two_docs(&doc1, doc2.as_ref(), Some(&prefix), combiner_number).await;
 
             if let Ok(ref combined) = result {
                 log_task_complete!(&task_id, format!("Combined into {}", combined.label));
@@ -1026,36 +1176,58 @@ async fn synthesize_documentation(
     output_path: &Path,
     batch_size: usize,
 ) -> anyhow::Result<()> {
-    use workflow_manager_sdk::{log_task_start, log_task_complete};
+    use workflow_manager_sdk::{log_task_complete, log_task_start};
 
     println!("\n{}", "=".repeat(80));
     println!("PHASE 4: Map-Reduce Documentation Synthesis");
     println!("{}", "=".repeat(80));
 
     // Map phase: Summarize each result
-    log_task_start!(4, "map_phase", format!("Summarizing {} research results", research_results.len()));
+    log_task_start!(
+        4,
+        "map_phase",
+        format!("Summarizing {} research results", research_results.len())
+    );
     let mut current_docs = map_phase_summarize(research_results, batch_size).await?;
-    log_task_complete!("map_phase", format!("Created {} summaries", current_docs.len()));
+    log_task_complete!(
+        "map_phase",
+        format!("Created {} summaries", current_docs.len())
+    );
 
     // Reduce phase: Iteratively combine until one document
     let mut round_number = 1;
     while current_docs.len() > 1 {
         let task_id = format!("reduce_round_{}", round_number);
-        log_task_start!(4, &task_id, format!("Reduce round {}: {} → {} docs", round_number, current_docs.len(), (current_docs.len() + 1) / 2));
+        log_task_start!(
+            4,
+            &task_id,
+            format!(
+                "Reduce round {}: {} → {} docs",
+                round_number,
+                current_docs.len(),
+                current_docs.len().div_ceil(2)
+            )
+        );
         current_docs = parallel_reduce_round(current_docs, batch_size, round_number).await?;
         log_task_complete!(&task_id, format!("Round {} complete", round_number));
         round_number += 1;
     }
 
-    let final_doc = current_docs.into_iter().next()
+    let final_doc = current_docs
+        .into_iter()
+        .next()
         .ok_or_else(|| anyhow::anyhow!("No final document generated"))?;
 
     let final_content = final_doc.content;
 
     // Final polish
-    log_task_start!(4, "final_polish", "Creating final comprehensive documentation");
+    log_task_start!(
+        4,
+        "final_polish",
+        "Creating final comprehensive documentation"
+    );
 
-    use workflow_manager_sdk::{log_agent_start, log_agent_message, log_agent_complete};
+    use workflow_manager_sdk::{log_agent_complete, log_agent_message, log_agent_start};
 
     let task_id = "final_synthesis";
     let agent_name = "Final Synthesizer";
@@ -1066,7 +1238,14 @@ async fn synthesize_documentation(
     println!("FINAL SYNTHESIS: Creating comprehensive documentation");
     println!("{}", "=".repeat(80));
 
-    log_agent_message!(task_id, agent_name, format!("Input: {} chars of synthesized research", final_content.len()));
+    log_agent_message!(
+        task_id,
+        agent_name,
+        format!(
+            "Input: {} chars of synthesized research",
+            final_content.len()
+        )
+    );
 
     let final_prompt = format!(
         r#"Create the final comprehensive documentation based on the synthesized research below.
@@ -1089,7 +1268,9 @@ Save the final documentation to: {}"#,
     let preset = SystemPromptPreset {
         prompt_type: "preset".to_string(),
         preset: "claude_code".to_string(),
-        append: Some("You are a technical writer creating final comprehensive documentation.".to_string()),
+        append: Some(
+            "You are a technical writer creating final comprehensive documentation.".to_string(),
+        ),
     };
 
     let options = ClaudeAgentOptions::builder()
@@ -1112,14 +1293,26 @@ Save the final documentation to: {}"#,
                             doc_length += text.len();
                             // Log periodic progress
                             if doc_length % 1000 < text.len() {
-                                log_agent_message!(task_id, agent_name, format!("Writing... ({} chars)", doc_length));
+                                log_agent_message!(
+                                    task_id,
+                                    agent_name,
+                                    format!("Writing... ({} chars)", doc_length)
+                                );
                             }
                         }
                         ContentBlock::ToolUse { name, .. } => {
-                            log_agent_message!(task_id, agent_name, format!("🔧 Using tool: {}", name));
+                            log_agent_message!(
+                                task_id,
+                                agent_name,
+                                format!("🔧 Using tool: {}", name)
+                            );
                         }
                         ContentBlock::ToolResult { tool_use_id, .. } => {
-                            log_agent_message!(task_id, agent_name, format!("✓ Tool result: {}", tool_use_id));
+                            log_agent_message!(
+                                task_id,
+                                agent_name,
+                                format!("✓ Tool result: {}", tool_use_id)
+                            );
                         }
                         _ => {}
                     }
@@ -1130,7 +1323,11 @@ Save the final documentation to: {}"#,
         }
     }
 
-    log_agent_complete!(task_id, agent_name, format!("Final documentation complete ({} chars)", doc_length));
+    log_agent_complete!(
+        task_id,
+        agent_name,
+        format!("Final documentation complete ({} chars)", doc_length)
+    );
     log_task_complete!("final_polish", "Documentation complete");
     println!("\n");
     Ok(())
@@ -1224,7 +1421,11 @@ async fn main() -> anyhow::Result<()> {
     // Phase 0: Analyze codebase
     if phases_to_run.contains(&0) {
         log_phase_start!(0, "Analyze Codebase", 5);
-        log_task_start!(0, "analyze", "Analyzing codebase structure and dependencies");
+        log_task_start!(
+            0,
+            "analyze",
+            "Analyzing codebase structure and dependencies"
+        );
 
         let codebase_path = args
             .dir
@@ -1280,8 +1481,15 @@ async fn main() -> anyhow::Result<()> {
         println!("[Phase 1] Prompts saved to: {}", prompts_path.display());
         println!("Generated {} research prompts", prompts.prompts.len());
 
-        log_task_complete!("generate", format!("Generated {} prompts", prompts.prompts.len()));
-        log_state_file!(1, prompts_path.display().to_string(), "Research prompts for Phase 2");
+        log_task_complete!(
+            "generate",
+            format!("Generated {} prompts", prompts.prompts.len())
+        );
+        log_state_file!(
+            1,
+            prompts_path.display().to_string(),
+            "Research prompts for Phase 2"
+        );
         log_phase_complete!(1, "Generate Prompts");
 
         prompts_data = Some(prompts);
@@ -1307,7 +1515,10 @@ async fn main() -> anyhow::Result<()> {
         let sem = Arc::new(Semaphore::new(args.batch_size));
 
         println!("{}", "=".repeat(80));
-        println!("PHASE 2: Executing {} Research Prompts (concurrency: {})", total_prompts, args.batch_size);
+        println!(
+            "PHASE 2: Executing {} Research Prompts (concurrency: {})",
+            total_prompts, args.batch_size
+        );
         println!("{}", "=".repeat(80));
 
         // Push all tasks to FuturesUnordered
@@ -1320,12 +1531,22 @@ async fn main() -> anyhow::Result<()> {
             let prefix = format!("[Suborchestrator {}]: ", result_number);
 
             tasks.push(async move {
-                let _permit = sem.acquire().await.map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
+                let _permit = sem
+                    .acquire()
+                    .await
+                    .map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
 
                 let task_id = format!("research_{}", result_number);
-                log_task_start!(2, &task_id, format!("Research task {}/{}", result_number, total_prompts), total_prompts);
+                log_task_start!(
+                    2,
+                    &task_id,
+                    format!("Research task {}/{}", result_number, total_prompts),
+                    total_prompts
+                );
 
-                let result = execute_research_prompt(&prompt, result_number, &timestamp, Some(&prefix)).await?;
+                let result =
+                    execute_research_prompt(&prompt, result_number, &timestamp, Some(&prefix))
+                        .await?;
                 log_task_complete!(&task_id, format!("Completed research {}", result_number));
                 Ok::<_, anyhow::Error>(result)
             });
@@ -1344,7 +1565,11 @@ async fn main() -> anyhow::Result<()> {
         fs::write(&results_path, results_yaml).await?;
         println!("\n[Phase 2] Results saved to: {}", results_path.display());
 
-        log_state_file!(2, results_path.display().to_string(), "Research results for Phase 3 validation");
+        log_state_file!(
+            2,
+            results_path.display().to_string(),
+            "Research results for Phase 3 validation"
+        );
         log_phase_complete!(2, "Execute Research");
     } else if let Some(results_file) = &args.results_file {
         let content = fs::read_to_string(results_file).await?;
@@ -1392,7 +1617,10 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        log_task_complete!("validate_initial", format!("Found {} files with errors", files_with_errors.len()));
+        log_task_complete!(
+            "validate_initial",
+            format!("Found {} files with errors", files_with_errors.len())
+        );
 
         // Loop to fix and re-validate until all are valid
         let mut fix_iteration = 0;
@@ -1404,9 +1632,20 @@ async fn main() -> anyhow::Result<()> {
 
             fix_iteration += 1;
             let task_id = format!("fix_iteration_{}", fix_iteration);
-            log_task_start!(3, &task_id, format!("Fixing {} YAML files (iteration {})", files_with_errors.len(), fix_iteration));
+            log_task_start!(
+                3,
+                &task_id,
+                format!(
+                    "Fixing {} YAML files (iteration {})",
+                    files_with_errors.len(),
+                    fix_iteration
+                )
+            );
 
-            println!("\n⚠ Found {} files with errors. Fixing...", files_with_errors.len());
+            println!(
+                "\n⚠ Found {} files with errors. Fixing...",
+                files_with_errors.len()
+            );
 
             let current_batch = std::mem::take(&mut files_with_errors);
 
@@ -1428,7 +1667,11 @@ async fn main() -> anyhow::Result<()> {
                         .map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
 
                     let fix_task_id = format!("fix_yaml_{}", fixer_number);
-                    log_task_start!(3, &fix_task_id, format!("Fixing YAML file {}", fixer_number));
+                    log_task_start!(
+                        3,
+                        &fix_task_id,
+                        format!("Fixing YAML file {}", fixer_number)
+                    );
 
                     let result = execute_fix_yaml(&file, &error, Some(&prefix), fixer_number).await;
 
@@ -1455,7 +1698,10 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
 
-            log_task_complete!(&task_id, format!("{} files still invalid", files_with_errors.len()));
+            log_task_complete!(
+                &task_id,
+                format!("{} files still invalid", files_with_errors.len())
+            );
         }
 
         log_phase_complete!(3, "Validate YAML");
@@ -1476,7 +1722,11 @@ async fn main() -> anyhow::Result<()> {
 
         synthesize_documentation(&research_results, &output_path, args.batch_size).await?;
 
-        log_state_file!(4, output_path.display().to_string(), "Final synthesized documentation");
+        log_state_file!(
+            4,
+            output_path.display().to_string(),
+            "Final synthesized documentation"
+        );
         log_phase_complete!(4, "Synthesize Docs");
 
         println!("\n{}", "=".repeat(80));

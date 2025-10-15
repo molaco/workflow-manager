@@ -11,10 +11,10 @@ use super::workflow::WorkflowPhase;
 #[derive(Debug)]
 pub struct WorkflowTab {
     // Identity
-    pub id: String,                               // Unique: "research_20251014_120000"
-    pub workflow_idx: usize,                      // Index in App.workflows catalog
-    pub workflow_name: String,                    // "Research Agent Workflow"
-    pub instance_number: usize,                   // Counter for display: #1, #2, #3
+    pub id: String,             // Unique: "research_20251014_120000"
+    pub workflow_idx: usize,    // Index in App.workflows catalog
+    pub workflow_name: String,  // "Research Agent Workflow"
+    pub instance_number: usize, // Counter for display: #1, #2, #3
     pub start_time: Option<chrono::DateTime<chrono::Local>>,
 
     // Execution state
@@ -35,7 +35,7 @@ pub struct WorkflowTab {
     pub selected_phase: usize,
     pub selected_task: Option<String>,
     pub selected_agent: Option<String>,
-    pub agent_scroll_offsets: HashMap<String, usize>,  // agent_id -> scroll offset
+    pub agent_scroll_offsets: HashMap<String, usize>, // agent_id -> scroll offset
 
     // Session persistence
     pub saved_logs: Option<Vec<String>>,

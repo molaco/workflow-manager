@@ -14,7 +14,7 @@ use claude_agent_sdk::types::{
 use claude_agent_sdk::ClaudeSDKClient;
 use std::collections::HashMap;
 use std::sync::Arc;
-use workflow_manager_sdk::{WorkflowDefinition, WorkflowInfo, WorkflowStatus};
+use workflow_manager_sdk::WorkflowDefinition;
 
 #[derive(Parser, Debug, Clone, WorkflowDefinition)]
 #[workflow(
@@ -283,4 +283,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-

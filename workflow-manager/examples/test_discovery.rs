@@ -1,5 +1,5 @@
-use workflow_manager::discovery;
 use std::process::Command;
+use workflow_manager::discovery;
 
 fn main() {
     println!("Testing workflow discovery...\n");
@@ -16,7 +16,10 @@ fn main() {
             println!("  Status: {}", out.status);
             println!("  Stdout length: {}", out.stdout.len());
             if out.stdout.len() > 0 {
-                println!("  Output: {}", String::from_utf8_lossy(&out.stdout[..100.min(out.stdout.len())]));
+                println!(
+                    "  Output: {}",
+                    String::from_utf8_lossy(&out.stdout[..100.min(out.stdout.len())])
+                );
             }
         }
         Err(e) => println!("  Error: {}", e),
@@ -47,7 +50,10 @@ fn main() {
         println!("  Binary: {}", workflow.binary_path.display());
         println!("  Fields: {}", workflow.fields.len());
         for field in &workflow.fields {
-            println!("    - {} ({}): {}", field.name, field.label, field.description);
+            println!(
+                "    - {} ({}): {}",
+                field.name, field.label, field.description
+            );
         }
     }
 }

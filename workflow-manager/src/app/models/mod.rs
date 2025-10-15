@@ -2,15 +2,15 @@
 //!
 //! This module contains all data structures used by the workflow manager.
 
+mod app;
 mod history;
-mod workflow;
 mod tab;
 mod view;
-mod app;
+mod workflow;
 
 // Re-export all public types
+pub use app::*;
 pub use history::*;
-pub use workflow::*;
 pub use tab::*;
 pub use view::*;
-pub use app::*;
+pub use workflow::*;

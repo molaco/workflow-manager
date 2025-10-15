@@ -1,6 +1,6 @@
+use anyhow::Result;
 use clap::Parser;
 use workflow_manager_sdk::WorkflowDefinition;
-use anyhow::Result;
 
 #[derive(Parser, Debug, Clone, WorkflowDefinition)]
 #[workflow(

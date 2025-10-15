@@ -1,8 +1,10 @@
-use clap::Parser;
-use workflow_manager_sdk::{WorkflowDefinition, log_phase_start, log_phase_complete, log_task_start, log_task_complete};
 use anyhow::Result;
+use clap::Parser;
 use claude_agent_sdk::{query, ClaudeAgentOptions, Message};
 use futures::StreamExt;
+use workflow_manager_sdk::{
+    log_phase_complete, log_phase_start, log_task_complete, log_task_start, WorkflowDefinition,
+};
 
 #[derive(Parser, Debug, Clone, WorkflowDefinition)]
 #[workflow(
@@ -64,8 +66,7 @@ async fn main() -> Result<()> {
     let question = args.question.as_deref().unwrap_or("What is 2 + 2?");
 
     // Build options
-    let mut options_builder = ClaudeAgentOptions::builder()
-        .max_turns(args.max_turns as u32);
+    let mut options_builder = ClaudeAgentOptions::builder().max_turns(args.max_turns as u32);
 
     if let Some(system_prompt) = &args.system_prompt {
         options_builder = options_builder.system_prompt(system_prompt.clone());

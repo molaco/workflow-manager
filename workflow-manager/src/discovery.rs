@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use workflow_manager_sdk::{FullWorkflowMetadata, WorkflowMetadata, FieldSchema};
+use workflow_manager_sdk::{FieldSchema, FullWorkflowMetadata, WorkflowMetadata};
 
 /// Represents a discovered workflow with its metadata and binary path
 #[derive(Debug, Clone)]
@@ -53,9 +53,11 @@ pub fn discover_workflows() -> Vec<DiscoveredWorkflow> {
                 // Skip if it looks like a hash suffix (has dash followed by hex)
                 if filename.contains('-') {
                     // Allow hyphens in the name (e.g., my-workflow) but not hash suffixes
-                    if let Some(after_dash) = filename.split('-').last() {
+                    if let Some(after_dash) = filename.split('-').next_back() {
                         // If after the last dash looks like a hash (long hex string), skip it
-                        if after_dash.len() > 10 && after_dash.chars().all(|c| c.is_ascii_hexdigit()) {
+                        if after_dash.len() > 10
+                            && after_dash.chars().all(|c| c.is_ascii_hexdigit())
+                        {
                             continue;
                         }
                     }
@@ -135,7 +137,7 @@ fn extract_workflow_metadata(binary_path: &Path) -> Result<DiscoveredWorkflow> {
     let output = Command::new(binary_path)
         .arg("--workflow-metadata")
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())  // Suppress stderr
+        .stderr(std::process::Stdio::null()) // Suppress stderr
         .output();
 
     let output = match output {
@@ -215,12 +217,18 @@ mod tests {
 
         // Print discovered workflows for debugging
         for workflow in &workflows {
-            println!("Discovered: {} ({})", workflow.metadata.name, workflow.metadata.id);
+            println!(
+                "Discovered: {} ({})",
+                workflow.metadata.name, workflow.metadata.id
+            );
             println!("  Binary: {}", workflow.binary_path.display());
             println!("  Fields: {}", workflow.fields.len());
         }
 
         // Should find at least the test_workflow
-        assert!(!workflows.is_empty(), "Should discover at least one workflow");
+        assert!(
+            !workflows.is_empty(),
+            "Should discover at least one workflow"
+        );
     }
 }

@@ -4,9 +4,9 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
     WorkflowList,
-    WorkflowDetail(usize), // workflow index
-    WorkflowEdit(usize),   // workflow index
+    WorkflowDetail(usize),  // workflow index
+    WorkflowEdit(usize),    // workflow index
     WorkflowRunning(usize), // workflow index (will be deprecated)
-    Tabs,                  // Main tabbed view
-    Chat,                  // Chat interface with Claude
+    Tabs,                   // Main tabbed view
+    Chat,                   // Chat interface with Claude
 }

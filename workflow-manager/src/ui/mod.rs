@@ -4,7 +4,6 @@
 //! including workflow lists, edit forms, running workflows, tabs, and chat interface.
 
 use ratatui::{
-    backend::Backend,
     layout::{Constraint, Direction, Layout},
     widgets::Paragraph,
     Frame,
@@ -13,31 +12,21 @@ use ratatui::{
 use crate::models::{App, View};
 
 // Module declarations
-mod header_footer;
-mod workflow_views;
-mod tab_views;
 mod chat_view;
 mod components;
+mod header_footer;
+mod tab_views;
+mod workflow_views;
 
 // Re-export public functions
-pub use header_footer::{render_header, render_footer};
-pub use workflow_views::{
-    render_workflow_list,
-    render_workflow_detail,
-    render_workflow_edit,
-    render_workflow_running,
-};
-pub use tab_views::{
-    render_tab_bar,
-    render_empty_tabs,
-    render_close_confirmation,
-    render_tab_content,
-};
 pub use chat_view::render_chat;
-pub use components::{
-    render_dropdown,
-    render_file_browser,
-    centered_rect,
+pub use components::{render_dropdown, render_file_browser};
+pub use header_footer::{render_footer, render_header};
+pub use tab_views::{
+    render_close_confirmation, render_empty_tabs, render_tab_bar, render_tab_content,
+};
+pub use workflow_views::{
+    render_workflow_detail, render_workflow_edit, render_workflow_list, render_workflow_running,
 };
 
 /// Main UI rendering function - orchestrates all view rendering
@@ -61,8 +50,8 @@ pub fn ui(f: &mut Frame, app: &App) {
         let tab_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),     // Tab bar
-                Constraint::Min(0),        // Content
+                Constraint::Length(3), // Tab bar
+                Constraint::Min(0),    // Content
             ])
             .split(chunks[1]);
 

@@ -4,14 +4,5 @@
 
 // Re-export all public items from the app module
 pub use crate::app::{
-    App,
-    View,
-    WorkflowTab,
-    WorkflowPhase,
-    WorkflowTask,
-    WorkflowAgent,
-    WorkflowHistory,
-    PhaseStatus,
-    TaskStatus,
-    AgentStatus,
+    AgentStatus, App, PhaseStatus, TaskStatus, View, WorkflowHistory, WorkflowPhase, WorkflowTab,
 };

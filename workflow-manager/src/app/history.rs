@@ -1,8 +1,8 @@
 //! History and session management
 
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use serde::{Deserialize, Serialize};
 use workflow_manager_sdk::WorkflowStatus;
 
 use super::*;
@@ -20,7 +20,9 @@ impl App {
             saved_logs: Vec<String>,
         }
 
-        let saved_tabs: Vec<SavedTab> = self.open_tabs.iter()
+        let saved_tabs: Vec<SavedTab> = self
+            .open_tabs
+            .iter()
             .map(|t| SavedTab {
                 workflow_idx: t.workflow_idx,
                 workflow_name: t.workflow_name.clone(),
@@ -98,7 +100,8 @@ impl App {
 
                         // Update counter
                         let workflow = &self.workflows[saved.workflow_idx];
-                        let counter = self.workflow_counters
+                        let counter = self
+                            .workflow_counters
                             .entry(workflow.info.id.clone())
                             .or_insert(0);
                         if saved.instance_number >= *counter {
@@ -120,7 +123,8 @@ impl App {
                 for field in &workflow.info.fields {
                     if let Some(field_history) = workflow_history.get(&field.name) {
                         if let Some(latest_value) = field_history.first() {
-                            self.field_values.insert(field.name.clone(), latest_value.clone());
+                            self.field_values
+                                .insert(field.name.clone(), latest_value.clone());
                         }
                     }
                 }
@@ -139,16 +143,12 @@ impl App {
             let workflow_id = workflow.info.id.clone();
 
             // Get or create workflow history
-            let workflow_history = self.history.workflows
-                .entry(workflow_id)
-                .or_insert_with(HashMap::new);
+            let workflow_history = self.history.workflows.entry(workflow_id).or_default();
 
             // Save each field value
             for (field_name, value) in &self.field_values {
                 if !value.is_empty() {
-                    let field_history = workflow_history
-                        .entry(field_name.clone())
-                        .or_insert_with(Vec::new);
+                    let field_history = workflow_history.entry(field_name.clone()).or_default();
 
                     // Add to history if not already present
                     if !field_history.contains(value) {

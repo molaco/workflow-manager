@@ -25,13 +25,14 @@ fn list_workflows_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
             let runtime = runtime.clone();
             Box::pin(async move {
                 match runtime.list_workflows() {
-                    Ok(workflows) => {
-                        match serde_json::to_string_pretty(&workflows) {
-                            Ok(json) => Ok(ToolResult::text(json)),
-                            Err(e) => Ok(ToolResult::error(format!("Serialization error: {}", e))),
-                        }
-                    }
-                    Err(e) => Ok(ToolResult::error(format!("Failed to list workflows: {}", e))),
+                    Ok(workflows) => match serde_json::to_string_pretty(&workflows) {
+                        Ok(json) => Ok(ToolResult::text(json)),
+                        Err(e) => Ok(ToolResult::error(format!("Serialization error: {}", e))),
+                    },
+                    Err(e) => Ok(ToolResult::error(format!(
+                        "Failed to list workflows: {}",
+                        e
+                    ))),
                 }
             })
         },
@@ -76,7 +77,9 @@ fn execute_workflow_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
                             "workflow_id": handle.workflow_id,
                             "status": "running"
                         });
-                        Ok(ToolResult::text(serde_json::to_string_pretty(&result).unwrap()))
+                        Ok(ToolResult::text(
+                            serde_json::to_string_pretty(&result).unwrap(),
+                        ))
                     }
                     Err(e) => Ok(ToolResult::error(format!("Execution failed: {}", e))),
                 }
@@ -165,7 +168,9 @@ fn get_workflow_status_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
                             "handle_id": handle_id.to_string(),
                             "status": format!("{:?}", status)
                         });
-                        Ok(ToolResult::text(serde_json::to_string_pretty(&result).unwrap()))
+                        Ok(ToolResult::text(
+                            serde_json::to_string_pretty(&result).unwrap(),
+                        ))
                     }
                     Err(e) => Ok(ToolResult::error(format!("Failed to get status: {}", e))),
                 }
@@ -205,7 +210,9 @@ fn cancel_workflow_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
                             "handle_id": handle_id.to_string(),
                             "status": "cancelled"
                         });
-                        Ok(ToolResult::text(serde_json::to_string_pretty(&result).unwrap()))
+                        Ok(ToolResult::text(
+                            serde_json::to_string_pretty(&result).unwrap(),
+                        ))
                     }
                     Err(e) => Ok(ToolResult::error(format!("Failed to cancel: {}", e))),
                 }

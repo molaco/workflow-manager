@@ -4,25 +4,19 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    backend::CrosstermBackend,
-    Terminal,
-};
+use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
-use std::path::PathBuf;
-use workflow_manager_sdk::{Workflow, WorkflowSource, WorkflowStatus, FieldType};
+use workflow_manager_sdk::FieldType;
 
-mod chat;
-mod runtime;
-mod mcp_tools;
-mod discovery;
-mod models;
-mod ui;
 mod app;
+mod chat;
+mod discovery;
+mod mcp_tools;
+mod models;
+mod runtime;
+mod ui;
 mod utils;
 
-use chat::ChatInterface;
-use runtime::ProcessBasedRuntime;
 use models::*;
 
 fn main() -> Result<()> {
@@ -51,10 +45,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_app<B: ratatui::backend::Backend>(
-    terminal: &mut Terminal<B>,
-    app: &mut App,
-) -> Result<()> {
+fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
     loop {
         // Poll all running tabs for output
         app.poll_all_tabs();
@@ -138,9 +129,12 @@ fn run_app<B: ratatui::backend::Backend>(
                                 // Tab completion - file paths or history
                                 if let View::WorkflowEdit(idx) = app.current_view {
                                     if let Some(workflow) = app.workflows.get(idx) {
-                                        if let Some(field) = workflow.info.fields.get(app.edit_field_index) {
+                                        if let Some(field) =
+                                            workflow.info.fields.get(app.edit_field_index)
+                                        {
                                             match field.field_type {
-                                                FieldType::FilePath { .. } | FieldType::StateFile { .. } => {
+                                                FieldType::FilePath { .. }
+                                                | FieldType::StateFile { .. } => {
                                                     app.complete_path();
                                                 }
                                                 FieldType::Text | FieldType::Number { .. } => {
@@ -165,7 +159,11 @@ fn run_app<B: ratatui::backend::Backend>(
                                 // Exit chat view
                                 app.current_view = View::Tabs;
                             }
-                            KeyCode::Char('q') | KeyCode::Char('Q') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                            KeyCode::Char('q') | KeyCode::Char('Q')
+                                if key
+                                    .modifiers
+                                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                            {
                                 // Ctrl+Q to quit
                                 app.should_quit = true;
                             }
@@ -187,7 +185,9 @@ fn run_app<B: ratatui::backend::Backend>(
                                         chat.input_buffer.clear();
 
                                         // Send message via tokio runtime
-                                        if let Err(e) = app.tokio_runtime.block_on(chat.send_message(msg)) {
+                                        if let Err(e) =
+                                            app.tokio_runtime.block_on(chat.send_message(msg))
+                                        {
                                             chat.messages.push(crate::chat::ChatMessage {
                                                 role: crate::chat::ChatRole::Assistant,
                                                 content: format!("Error: {}", e),
@@ -295,17 +295,15 @@ fn run_app<B: ratatui::backend::Backend>(
                                     app.edit_current_tab();
                                 }
                             }
-                            KeyCode::Char('l') | KeyCode::Char('L') => {
-                                match app.current_view {
-                                    View::WorkflowDetail(_) | View::WorkflowEdit(_) => {
-                                        app.launch_workflow_in_tab();
-                                    }
-                                    View::Tabs => {
-                                        app.scroll_agent_messages_down();
-                                    }
-                                    _ => {}
+                            KeyCode::Char('l') | KeyCode::Char('L') => match app.current_view {
+                                View::WorkflowDetail(_) | View::WorkflowEdit(_) => {
+                                    app.launch_workflow_in_tab();
                                 }
-                            }
+                                View::Tabs => {
+                                    app.scroll_agent_messages_down();
+                                }
+                                _ => {}
+                            },
                             KeyCode::Char('1') => {
                                 if matches!(app.current_view, View::WorkflowRunning(_)) {
                                     app.toggle_expand_phases();
@@ -334,7 +332,10 @@ fn run_app<B: ratatui::backend::Backend>(
                                 }
                             }
                             KeyCode::Char('t') | KeyCode::Char('T') => {
-                                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
+                                if key
+                                    .modifiers
+                                    .contains(crossterm::event::KeyModifiers::CONTROL)
+                                {
                                     // Ctrl+T: New tab - enter workflow selection mode
                                     app.in_new_tab_flow = true;
                                     app.current_view = View::WorkflowList;
@@ -343,7 +344,10 @@ fn run_app<B: ratatui::backend::Backend>(
                                 }
                             }
                             KeyCode::Char('w') | KeyCode::Char('W') => {
-                                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
+                                if key
+                                    .modifiers
+                                    .contains(crossterm::event::KeyModifiers::CONTROL)
+                                {
                                     // Ctrl+W: Close tab
                                     if matches!(app.current_view, View::Tabs) {
                                         app.close_current_tab();

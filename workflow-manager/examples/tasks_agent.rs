@@ -93,14 +93,18 @@ EXAMPLE COMMANDS:
 */
 
 use clap::Parser;
-use claude_agent_sdk::{
-    query, ClaudeAgentOptions, ContentBlock, Message, AgentDefinition,
-};
+use claude_agent_sdk::{query, AgentDefinition, ClaudeAgentOptions, ContentBlock, Message};
 use futures::{stream::FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::{path::{Path, PathBuf}, sync::Arc};
-use tokio::{fs, sync::{Semaphore, RwLock}};
 use std::io::{self, Write};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+use tokio::{
+    fs,
+    sync::{RwLock, Semaphore},
+};
 
 /// Shared state for live task display
 #[derive(Clone)]
@@ -290,10 +294,7 @@ struct Args {
 }
 
 /// Phase 0: Generate tasks_overview.yaml from IMPL.md
-async fn generate_overview(
-    impl_md: &str,
-    overview_template: &str,
-) -> anyhow::Result<String> {
+async fn generate_overview(impl_md: &str, overview_template: &str) -> anyhow::Result<String> {
     println!("{}", "=".repeat(80));
     println!("PHASE 0: Main Orchestrator - Generate Task Overview");
     println!("{}", "=".repeat(80));
@@ -334,7 +335,11 @@ Make sure to just give your response. You must not create or write any files jus
 
     let options = ClaudeAgentOptions::builder()
         .system_prompt(system_prompt.to_string())
-        .allowed_tools(vec!["Read".to_string(), "Grep".to_string(), "Glob".to_string()])
+        .allowed_tools(vec![
+            "Read".to_string(),
+            "Grep".to_string(),
+            "Glob".to_string(),
+        ])
         .permission_mode(claude_agent_sdk::PermissionMode::BypassPermissions)
         .build();
 
@@ -400,13 +405,19 @@ files:
       Multi-line description
       with more details.
 
-Output valid YAML only, no markdown."#.to_string(),
-        tools: Some(vec!["Read".to_string(), "Grep".to_string(), "Glob".to_string()]),
+Output valid YAML only, no markdown."#
+            .to_string(),
+        tools: Some(vec![
+            "Read".to_string(),
+            "Grep".to_string(),
+            "Glob".to_string(),
+        ]),
         model: Some("sonnet".to_string()),
     };
 
     let functions_agent = AgentDefinition {
-        description: "Specialist that specifies functions, structs, traits, and other code items".to_string(),
+        description: "Specialist that specifies functions, structs, traits, and other code items"
+            .to_string(),
         prompt: r#"You are a functions specification specialist.
 
 Identify all functions, structs, enums, traits, and other items to be implemented.
@@ -437,8 +448,13 @@ functions:
         postconditions: |
           - Outcome 1
 
-Output valid YAML only, no markdown."#.to_string(),
-        tools: Some(vec!["Read".to_string(), "Grep".to_string(), "Glob".to_string()]),
+Output valid YAML only, no markdown."#
+            .to_string(),
+        tools: Some(vec![
+            "Read".to_string(),
+            "Grep".to_string(),
+            "Glob".to_string(),
+        ]),
         model: Some("sonnet".to_string()),
     };
 
@@ -461,7 +477,8 @@ formal_verification:
   explanation: |
     Explanation here
 
-Output valid YAML only, no markdown."#.to_string(),
+Output valid YAML only, no markdown."#
+            .to_string(),
         tools: Some(vec!["Read".to_string()]),
         model: Some("sonnet".to_string()),
     };
@@ -495,7 +512,8 @@ tests:
   coverage:
     - "Behavior 1"
 
-Output valid YAML only, no markdown."#.to_string(),
+Output valid YAML only, no markdown."#
+            .to_string(),
         tools: Some(vec!["Read".to_string(), "Grep".to_string()]),
         model: Some("sonnet".to_string()),
     };
@@ -511,7 +529,10 @@ Output valid YAML only, no markdown."#.to_string(),
     let agents_json = serde_json::to_string(&agents_map)?;
     let mut extra_args = std::collections::HashMap::new();
     extra_args.insert("agents".to_string(), Some(agents_json));
-    extra_args.insert("include-partial-messages".to_string(), Some("true".to_string()));
+    extra_args.insert(
+        "include-partial-messages".to_string(),
+        Some("true".to_string()),
+    );
 
     // System prompt for suborchestrator
     let system_prompt = format!(
@@ -590,7 +611,11 @@ IMPORTANT: Run all agents in parallel for maximum efficiency:
 
     let mut options = ClaudeAgentOptions::builder()
         .system_prompt(system_prompt)
-        .allowed_tools(vec!["Read".to_string(), "Grep".to_string(), "Glob".to_string()])
+        .allowed_tools(vec![
+            "Read".to_string(),
+            "Grep".to_string(),
+            "Glob".to_string(),
+        ])
         .permission_mode(claude_agent_sdk::PermissionMode::BypassPermissions)
         .build();
 
@@ -619,26 +644,60 @@ IMPORTANT: Run all agents in parallel for maximum efficiency:
 
                                     // Match agent-specific output patterns
                                     // Looking for lines mentioning agent names or delegation
-                                    if line_lower.contains("files") && (line_lower.contains("agent") || line_lower.contains("specialist") || line_lower.contains("@files")) {
-                                        let msg = if line.len() > 60 { format!("{}...", &line[..57]) } else { line.to_string() };
+                                    if line_lower.contains("files")
+                                        && (line_lower.contains("agent")
+                                            || line_lower.contains("specialist")
+                                            || line_lower.contains("@files"))
+                                    {
+                                        let msg = if line.len() > 60 {
+                                            format!("{}...", &line[..57])
+                                        } else {
+                                            line.to_string()
+                                        };
                                         log.update_sub_agent("files", &msg).await;
                                     }
-                                    if line_lower.contains("functions") && (line_lower.contains("agent") || line_lower.contains("specialist") || line_lower.contains("@functions")) {
-                                        let msg = if line.len() > 60 { format!("{}...", &line[..57]) } else { line.to_string() };
+                                    if line_lower.contains("functions")
+                                        && (line_lower.contains("agent")
+                                            || line_lower.contains("specialist")
+                                            || line_lower.contains("@functions"))
+                                    {
+                                        let msg = if line.len() > 60 {
+                                            format!("{}...", &line[..57])
+                                        } else {
+                                            line.to_string()
+                                        };
                                         log.update_sub_agent("functions", &msg).await;
                                     }
-                                    if line_lower.contains("formal") && (line_lower.contains("verification") || line_lower.contains("agent") || line_lower.contains("@formal")) {
-                                        let msg = if line.len() > 60 { format!("{}...", &line[..57]) } else { line.to_string() };
+                                    if line_lower.contains("formal")
+                                        && (line_lower.contains("verification")
+                                            || line_lower.contains("agent")
+                                            || line_lower.contains("@formal"))
+                                    {
+                                        let msg = if line.len() > 60 {
+                                            format!("{}...", &line[..57])
+                                        } else {
+                                            line.to_string()
+                                        };
                                         log.update_sub_agent("formal", &msg).await;
                                     }
-                                    if line_lower.contains("test") && (line_lower.contains("agent") || line_lower.contains("specialist") || line_lower.contains("@tests")) {
-                                        let msg = if line.len() > 60 { format!("{}...", &line[..57]) } else { line.to_string() };
+                                    if line_lower.contains("test")
+                                        && (line_lower.contains("agent")
+                                            || line_lower.contains("specialist")
+                                            || line_lower.contains("@tests"))
+                                    {
+                                        let msg = if line.len() > 60 {
+                                            format!("{}...", &line[..57])
+                                        } else {
+                                            line.to_string()
+                                        };
                                         log.update_sub_agent("tests", &msg).await;
                                     }
                                 }
 
                                 // Update main status with last line
-                                if let Some(last_line) = text.lines().filter(|l| !l.trim().is_empty()).last() {
+                                if let Some(last_line) =
+                                    text.lines().filter(|l| !l.trim().is_empty()).last()
+                                {
                                     let truncated = if last_line.len() > 80 {
                                         format!("{}...", &last_line[..77])
                                     } else {
@@ -657,23 +716,35 @@ IMPORTANT: Run all agents in parallel for maximum efficiency:
                                         let prompt_str = prompt_val.as_str().unwrap_or("");
 
                                         // Detect which sub-agent based on prompt content
-                                        let agent_name = if prompt_str.contains("files identification") || prompt_str.contains("@files") {
+                                        let agent_name = if prompt_str
+                                            .contains("files identification")
+                                            || prompt_str.contains("@files")
+                                        {
                                             Some("files")
-                                        } else if prompt_str.contains("functions specification") || prompt_str.contains("@functions") {
+                                        } else if prompt_str.contains("functions specification")
+                                            || prompt_str.contains("@functions")
+                                        {
                                             Some("functions")
-                                        } else if prompt_str.contains("formal verification") || prompt_str.contains("@formal") {
+                                        } else if prompt_str.contains("formal verification")
+                                            || prompt_str.contains("@formal")
+                                        {
                                             Some("formal")
-                                        } else if prompt_str.contains("test") && (prompt_str.contains("specialist") || prompt_str.contains("@tests")) {
+                                        } else if prompt_str.contains("test")
+                                            && (prompt_str.contains("specialist")
+                                                || prompt_str.contains("@tests"))
+                                        {
                                             Some("tests")
                                         } else {
                                             None
                                         };
 
                                         if let Some(agent) = agent_name {
-                                            let desc = input.get("description")
+                                            let desc = input
+                                                .get("description")
                                                 .and_then(|v| v.as_str())
                                                 .unwrap_or("Working...");
-                                            log.update_sub_agent(agent, &format!("⚙️ {}", desc)).await;
+                                            log.update_sub_agent(agent, &format!("⚙️ {}", desc))
+                                                .await;
                                         }
                                     }
                                 }
@@ -687,14 +758,23 @@ IMPORTANT: Run all agents in parallel for maximum efficiency:
                 // Tool results - extract which agent completed
                 if let Some(ref log) = logger {
                     // UserContent is Option<UserContent>, which can be String or Blocks
-                    if let Some(claude_agent_sdk::types::UserContent::Blocks(blocks)) = &message.content {
+                    if let Some(claude_agent_sdk::types::UserContent::Blocks(blocks)) =
+                        &message.content
+                    {
                         for block in blocks {
-                            if let ContentBlock::ToolResult { tool_use_id: _, content, .. } = block {
+                            if let ContentBlock::ToolResult {
+                                tool_use_id: _,
+                                content,
+                                ..
+                            } = block
+                            {
                                 // Try to detect which agent from the result content
                                 let content_str = format!("{:?}", content);
                                 if content_str.contains("files:") && content_str.len() > 50 {
                                     log.update_sub_agent("files", "✓ Complete").await;
-                                } else if content_str.contains("functions:") && content_str.len() > 50 {
+                                } else if content_str.contains("functions:")
+                                    && content_str.len() > 50
+                                {
                                     log.update_sub_agent("functions", "✓ Complete").await;
                                 } else if content_str.contains("formal_verification:") {
                                     log.update_sub_agent("formal", "✓ Complete").await;
@@ -755,10 +835,7 @@ async fn display_live_status(loggers: &[TaskLogger]) {
 }
 
 /// Generate simple execution plan (fixed-size batches)
-fn generate_simple_batches(
-    tasks: &[TaskOverview],
-    batch_size: usize,
-) -> Vec<Vec<TaskOverview>> {
+fn generate_simple_batches(tasks: &[TaskOverview], batch_size: usize) -> Vec<Vec<TaskOverview>> {
     println!("\n{}", "=".repeat(80));
     println!("Batch Planning: Simple batching with size={}", batch_size);
     println!("{}", "=".repeat(80));
@@ -773,9 +850,7 @@ fn generate_simple_batches(
 }
 
 /// Generate AI-based execution plan (dependency analysis)
-async fn generate_execution_plan(
-    tasks_overview_yaml: &str,
-) -> anyhow::Result<ExecutionPlan> {
+async fn generate_execution_plan(tasks_overview_yaml: &str) -> anyhow::Result<ExecutionPlan> {
     println!("\n{}", "=".repeat(80));
     println!("Batch Planning: Analyzing dependencies with AI agent");
     println!("{}", "=".repeat(80));
@@ -842,23 +917,19 @@ Output only the YAML, no markdown formatting."#,
     let yaml_content = clean_yaml(&response_text);
     let plan_wrapper: serde_yaml::Value = serde_yaml::from_str(&yaml_content)?;
     let plan: ExecutionPlan = serde_yaml::from_value(
-        plan_wrapper.get("execution_plan")
+        plan_wrapper
+            .get("execution_plan")
             .ok_or_else(|| anyhow::anyhow!("Missing execution_plan key"))?
-            .clone()
+            .clone(),
     )?;
 
     Ok(plan)
 }
 
 /// Parse execution plan and group tasks into batches
-fn parse_execution_plan(
-    plan: &ExecutionPlan,
-    tasks: &[TaskOverview],
-) -> Vec<Vec<TaskOverview>> {
-    let mut task_map: std::collections::HashMap<u32, TaskOverview> = tasks
-        .iter()
-        .map(|t| (t.task.id, t.clone()))
-        .collect();
+fn parse_execution_plan(plan: &ExecutionPlan, tasks: &[TaskOverview]) -> Vec<Vec<TaskOverview>> {
+    let mut task_map: std::collections::HashMap<u32, TaskOverview> =
+        tasks.iter().map(|t| (t.task.id, t.clone())).collect();
 
     let mut batches = Vec::new();
     for batch_def in &plan.batches {
@@ -903,19 +974,22 @@ async fn review_tasks(
 
     // Create batches
     let batches: Vec<_> = task_pairs.chunks(batch_size).collect();
-    println!("Created {} batch(es) with batch_size={}\n", batches.len(), batch_size);
+    println!(
+        "Created {} batch(es) with batch_size={}\n",
+        batches.len(),
+        batch_size
+    );
 
     let mut all_results = Vec::new();
 
     for (batch_num, batch) in batches.iter().enumerate() {
-        println!("\n→ Processing Review Batch {}/{}", batch_num + 1, batches.len());
-
-        let result = review_batch(
-            batch,
-            impl_md,
-            task_template,
+        println!(
+            "\n→ Processing Review Batch {}/{}",
             batch_num + 1,
-        ).await?;
+            batches.len()
+        );
+
+        let result = review_batch(batch, impl_md, task_template, batch_num + 1).await?;
 
         all_results.extend(result);
     }
@@ -967,9 +1041,13 @@ SUMMARY: [Brief summary]"#.to_string(),
     let agents_json = serde_json::to_string(&agents_map)?;
     let mut extra_args = std::collections::HashMap::new();
     extra_args.insert("agents".to_string(), Some(agents_json));
-    extra_args.insert("include-partial-messages".to_string(), Some("true".to_string()));
+    extra_args.insert(
+        "include-partial-messages".to_string(),
+        Some("true".to_string()),
+    );
 
-    let task_list: Vec<_> = batch.iter()
+    let task_list: Vec<_> = batch
+        .iter()
         .map(|(overview, _)| format!("  - Task {}: {}", overview.task.id, overview.task.name))
         .collect();
 
@@ -1127,7 +1205,11 @@ async fn generate_review_report(
         report.push_str(&format!(
             "\nTask {}: {}\n",
             result.task_id,
-            if result.success { "APPROVED" } else { "NEEDS REVISION" }
+            if result.success {
+                "APPROVED"
+            } else {
+                "NEEDS REVISION"
+            }
         ));
         report.push_str(&format!("Summary: {}\n", result.summary));
         if !result.issues.is_empty() {
@@ -1288,9 +1370,8 @@ async fn main() -> anyhow::Result<()> {
             println!("  Running {} task(s)...\n", batch.len());
 
             // Create loggers for each task
-            let loggers: Vec<TaskLogger> = batch.iter()
-                .map(|t| TaskLogger::new(t.task.id))
-                .collect();
+            let loggers: Vec<TaskLogger> =
+                batch.iter().map(|t| TaskLogger::new(t.task.id)).collect();
 
             // Print initial status lines (placeholders) - 1 main + 4 sub-agents
             for logger in &loggers {
@@ -1310,7 +1391,10 @@ async fn main() -> anyhow::Result<()> {
                 let logger = loggers[i].clone();
 
                 tasks.push(async move {
-                    let _permit = sem.acquire().await.map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
+                    let _permit = sem
+                        .acquire()
+                        .await
+                        .map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
                     expand_task(&task, &task_template, Some(logger), false).await
                 });
             }
@@ -1331,13 +1415,15 @@ async fn main() -> anyhow::Result<()> {
             // Cancel display task and show final status
             display_task.abort();
             display_live_status(&loggers).await;
-            println!();  // Add newline after final status
+            println!(); // Add newline after final status
         }
 
         // Save tasks
         let tasks_yaml = all_expanded.join("\n---\n");
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-        let tasks_path = args.output.clone()
+        let tasks_path = args
+            .output
+            .clone()
             .unwrap_or_else(|| format!("tasks_{}.yaml", timestamp));
         fs::write(&tasks_path, &tasks_yaml).await?;
         println!("\n[Phase 1] Saved: {}", tasks_path);
@@ -1390,7 +1476,8 @@ async fn main() -> anyhow::Result<()> {
             &impl_md,
             &task_template,
             review_batch_size,
-        ).await?;
+        )
+        .await?;
 
         let report_path = PathBuf::from("task_review_report.txt");
         generate_review_report(&results, &report_path).await?;

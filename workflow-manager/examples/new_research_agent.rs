@@ -126,7 +126,10 @@ use claude_agent_sdk::{
 };
 use futures::{stream::FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::{path::{Path, PathBuf}, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::{fs, sync::Semaphore};
 
 // Use flexible YAML instead of rigid structs
@@ -400,7 +403,10 @@ async fn execute_research_prompt(
 
     // Write response directly to file (no serialization issues)
     let yaml_content = extract_yaml(&response_text);
-    let response_filename = format!("./RESULTS/research_result_{}_{}.yaml", result_number, timestamp);
+    let response_filename = format!(
+        "./RESULTS/research_result_{}_{}.yaml",
+        result_number, timestamp
+    );
     fs::write(&response_filename, &yaml_content).await?;
 
     println!("{}Response saved to: {}", prefix, response_filename);
@@ -418,7 +424,11 @@ async fn validate_yaml_file(file_path: &str) -> anyhow::Result<(String, bool, St
     use tokio::process::Command;
 
     let output = Command::new("uv")
-        .args(&["run", "/home/molaco/Documents/japanese/SCRIPTS/check_yaml.py", file_path])
+        .args(&[
+            "run",
+            "/home/molaco/Documents/japanese/SCRIPTS/check_yaml.py",
+            file_path,
+        ])
         .output()
         .await?;
 
@@ -426,7 +436,9 @@ async fn validate_yaml_file(file_path: &str) -> anyhow::Result<(String, bool, St
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined_output = format!("{}{}", stdout, stderr);
 
-    let is_valid = output.status.success() && !combined_output.contains("❌") && !combined_output.contains("Error");
+    let is_valid = output.status.success()
+        && !combined_output.contains("❌")
+        && !combined_output.contains("Error");
 
     Ok((file_path.to_string(), is_valid, combined_output))
 }
@@ -540,15 +552,15 @@ async fn summarize_research_result(
 - Focus on actionable insights and important facts
 - Be concise but preserve technical details
 - Output as structured markdown"#,
-        result.title,
-        result.query,
-        response_content
+        result.title, result.query, response_content
     );
 
     let preset = SystemPromptPreset {
         prompt_type: "preset".to_string(),
         preset: "claude_code".to_string(),
-        append: Some("You are a technical summarizer. Extract only essential information.".to_string()),
+        append: Some(
+            "You are a technical summarizer. Extract only essential information.".to_string(),
+        ),
     };
 
     let options = ClaudeAgentOptions::builder()
@@ -597,8 +609,11 @@ async fn map_phase_summarize(
     batch_size: usize,
 ) -> anyhow::Result<Vec<LabeledDoc>> {
     println!("\n{}", "=".repeat(80));
-    println!("PHASE 4 MAP: Summarizing {} Research Results (concurrency: {})",
-        research_results.len(), batch_size);
+    println!(
+        "PHASE 4 MAP: Summarizing {} Research Results (concurrency: {})",
+        research_results.len(),
+        batch_size
+    );
     println!("{}", "=".repeat(80));
 
     let sem = Arc::new(Semaphore::new(batch_size));
@@ -611,7 +626,10 @@ async fn map_phase_summarize(
         let prefix = format!("[Summarizer {}]: ", result_number);
 
         tasks.push(async move {
-            let _permit = sem.acquire().await.map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
+            let _permit = sem
+                .acquire()
+                .await
+                .map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
             let content = summarize_research_result(&result, result_number, Some(&prefix)).await?;
             Ok::<LabeledDoc, anyhow::Error>(LabeledDoc {
                 content,
@@ -638,7 +656,14 @@ async fn combine_two_docs(
     let prefix = prefix.unwrap_or("");
 
     let (combine_prompt, new_label) = if let Some(doc2) = doc2 {
-        println!("{}Combining: {} + {} → {}{}", prefix, doc1.label, doc2.label, doc1.label, &doc2.label[3..]);
+        println!(
+            "{}Combining: {} + {} → {}{}",
+            prefix,
+            doc1.label,
+            doc2.label,
+            doc1.label,
+            &doc2.label[3..]
+        );
         let new_label = format!("{}{}", doc1.label, &doc2.label[3..]);
         let prompt = format!(
             r#"Combine these two documentation sections into a single cohesive section.
@@ -720,8 +745,13 @@ async fn parallel_reduce_round(
 ) -> anyhow::Result<Vec<LabeledDoc>> {
     let num_pairs = (docs.len() + 1) / 2;
     println!("\n{}", "-".repeat(80));
-    println!("REDUCE ROUND {}: {} docs → {} docs (concurrency: {})",
-        round_number, docs.len(), num_pairs, batch_size);
+    println!(
+        "REDUCE ROUND {}: {} docs → {} docs (concurrency: {})",
+        round_number,
+        docs.len(),
+        num_pairs,
+        batch_size
+    );
     println!("{}", "-".repeat(80));
 
     let sem = Arc::new(Semaphore::new(batch_size));
@@ -734,7 +764,9 @@ async fn parallel_reduce_round(
         let prefix = format!("[Combiner {}]: ", pair_idx + 1);
 
         tasks.push(async move {
-            let _permit = sem.acquire().await
+            let _permit = sem
+                .acquire()
+                .await
                 .map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
             combine_two_docs(&doc1, doc2.as_ref(), Some(&prefix)).await
         });
@@ -768,7 +800,9 @@ async fn synthesize_documentation(
         round_number += 1;
     }
 
-    let final_doc = current_docs.into_iter().next()
+    let final_doc = current_docs
+        .into_iter()
+        .next()
         .ok_or_else(|| anyhow::anyhow!("No final document generated"))?;
 
     let final_content = final_doc.content;
@@ -799,7 +833,9 @@ Save the final documentation to: {}"#,
     let preset = SystemPromptPreset {
         prompt_type: "preset".to_string(),
         preset: "claude_code".to_string(),
-        append: Some("You are a technical writer creating final comprehensive documentation.".to_string()),
+        append: Some(
+            "You are a technical writer creating final comprehensive documentation.".to_string(),
+        ),
     };
 
     let options = ClaudeAgentOptions::builder()
@@ -973,7 +1009,10 @@ async fn main() -> anyhow::Result<()> {
         let sem = Arc::new(Semaphore::new(args.batch_size));
 
         println!("{}", "=".repeat(80));
-        println!("PHASE 2: Executing {} Research Prompts (concurrency: {})", total_prompts, args.batch_size);
+        println!(
+            "PHASE 2: Executing {} Research Prompts (concurrency: {})",
+            total_prompts, args.batch_size
+        );
         println!("{}", "=".repeat(80));
 
         // Push all tasks to FuturesUnordered
@@ -986,7 +1025,10 @@ async fn main() -> anyhow::Result<()> {
             let prefix = format!("[Suborchestrator {}]: ", result_number);
 
             tasks.push(async move {
-                let _permit = sem.acquire().await.map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
+                let _permit = sem
+                    .acquire()
+                    .await
+                    .map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
                 execute_research_prompt(&prompt, result_number, &timestamp, Some(&prefix)).await
             });
         }
@@ -1053,7 +1095,10 @@ async fn main() -> anyhow::Result<()> {
                 break;
             }
 
-            println!("\n⚠ Found {} files with errors. Fixing...", files_with_errors.len());
+            println!(
+                "\n⚠ Found {} files with errors. Fixing...",
+                files_with_errors.len()
+            );
 
             let current_batch = std::mem::take(&mut files_with_errors);
 

@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use workflow_manager_sdk::Workflow;
 
-use crate::chat::ChatInterface;
 use super::{View, WorkflowHistory, WorkflowPhase, WorkflowTab};
+use crate::chat::ChatInterface;
 
 /// Main application state
 pub struct App {
@@ -17,7 +17,7 @@ pub struct App {
     pub active_tab_idx: usize,
     pub workflow_counters: HashMap<String, usize>,
     pub show_close_confirmation: bool,
-    pub in_new_tab_flow: bool,  // When true, we're selecting workflow for a new tab
+    pub in_new_tab_flow: bool, // When true, we're selecting workflow for a new tab
 
     pub selected: usize,
     pub current_view: View,

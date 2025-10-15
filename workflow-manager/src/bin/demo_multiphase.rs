@@ -1,14 +1,11 @@
-use clap::Parser;
-use workflow_manager_sdk::{
-    WorkflowDefinition,
-    log_phase_start, log_phase_complete,
-    log_task_start, log_task_complete, log_task_progress,
-    log_agent_start, log_agent_complete, log_agent_message,
-    log_state_file,
-};
 use anyhow::Result;
+use clap::Parser;
 use std::time::Duration;
 use tokio::time::sleep;
+use workflow_manager_sdk::{
+    log_agent_complete, log_agent_message, log_agent_start, log_phase_complete, log_phase_start,
+    log_state_file, log_task_complete, log_task_progress, log_task_start, WorkflowDefinition,
+};
 
 #[derive(Parser, Debug, Clone, WorkflowDefinition)]
 #[workflow(

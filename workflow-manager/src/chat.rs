@@ -1,4 +1,7 @@
-use claude_agent_sdk::types::{ClaudeAgentOptions, ContentBlock, McpServerConfig, McpServers, Message, PermissionMode, SdkMcpServerMarker, ToolName};
+use claude_agent_sdk::types::{
+    ClaudeAgentOptions, ContentBlock, McpServerConfig, McpServers, Message, PermissionMode,
+    SdkMcpServerMarker, ToolName,
+};
 use claude_agent_sdk::ClaudeSDKClient;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -110,7 +113,10 @@ impl ChatInterface {
     }
 
     /// Send a message to Claude
-    pub async fn send_message(&mut self, message: String) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn send_message(
+        &mut self,
+        message: String,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if message.trim().is_empty() {
             return Ok(());
         }
@@ -142,7 +148,8 @@ impl ChatInterface {
                                     assistant_content.push('\n');
                                 }
                                 ContentBlock::ToolUse { name, input, .. } => {
-                                    let input_str = serde_json::to_string_pretty(input).unwrap_or_default();
+                                    let input_str =
+                                        serde_json::to_string_pretty(input).unwrap_or_default();
                                     tool_calls.push(ToolCall {
                                         name: name.clone(),
                                         input: input_str,

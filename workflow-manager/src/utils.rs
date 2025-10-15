@@ -1,7 +1,6 @@
 //! Utility functions for workflow and history management
 
 use anyhow::Result;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use workflow_manager_sdk::{Workflow, WorkflowInfo, WorkflowSource, WorkflowStatus};
 
@@ -44,20 +43,22 @@ pub fn load_workflows() -> Vec<Workflow> {
     let mut workflows = Vec::new();
 
     // Load built-in workflows using discovery module
-    workflows.extend(crate::discovery::discover_workflows().into_iter().map(|dw| {
-        Workflow {
-            info: WorkflowInfo {
-                id: dw.metadata.id.clone(),
-                name: dw.metadata.name.clone(),
-                description: dw.metadata.description.clone(),
-                status: WorkflowStatus::NotStarted,
-                metadata: dw.metadata,
-                fields: dw.fields,
-                progress_messages: vec![],
-            },
-            source: WorkflowSource::BuiltIn,
-        }
-    }));
+    workflows.extend(
+        crate::discovery::discover_workflows()
+            .into_iter()
+            .map(|dw| Workflow {
+                info: WorkflowInfo {
+                    id: dw.metadata.id.clone(),
+                    name: dw.metadata.name.clone(),
+                    description: dw.metadata.description.clone(),
+                    status: WorkflowStatus::NotStarted,
+                    metadata: dw.metadata,
+                    fields: dw.fields,
+                    progress_messages: vec![],
+                },
+                source: WorkflowSource::BuiltIn,
+            }),
+    );
 
     workflows
 }

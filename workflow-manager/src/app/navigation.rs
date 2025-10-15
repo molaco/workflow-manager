@@ -58,10 +58,13 @@ impl App {
                 if let Some(ref task_id) = tab.selected_task {
                     if let Some(phase) = phases.get(tab.selected_phase) {
                         if let Some(task) = phase.tasks.iter().find(|t| &t.id == task_id) {
-                            if let Some(agent_idx) = task.agents.iter().position(|a| &a.id == agent_id) {
+                            if let Some(agent_idx) =
+                                task.agents.iter().position(|a| &a.id == agent_id)
+                            {
                                 if agent_idx + 1 < task.agents.len() {
                                     // Move to next agent in same task
-                                    tab.selected_agent = Some(task.agents[agent_idx + 1].id.clone());
+                                    tab.selected_agent =
+                                        Some(task.agents[agent_idx + 1].id.clone());
                                     return;
                                 }
                             }
@@ -80,7 +83,10 @@ impl App {
                         let task = &phase.tasks[task_idx];
 
                         // If task is expanded and has agents, dive into first agent (but only if we didn't just exit an agent)
-                        if !just_exited_agent && tab.expanded_tasks.contains(task_id) && !task.agents.is_empty() {
+                        if !just_exited_agent
+                            && tab.expanded_tasks.contains(task_id)
+                            && !task.agents.is_empty()
+                        {
                             tab.selected_agent = Some(task.agents[0].id.clone());
                             return;
                         }
@@ -132,10 +138,13 @@ impl App {
                 if let Some(ref task_id) = tab.selected_task {
                     if let Some(phase) = phases.get(tab.selected_phase) {
                         if let Some(task) = phase.tasks.iter().find(|t| &t.id == task_id) {
-                            if let Some(agent_idx) = task.agents.iter().position(|a| &a.id == agent_id) {
+                            if let Some(agent_idx) =
+                                task.agents.iter().position(|a| &a.id == agent_id)
+                            {
                                 if agent_idx > 0 {
                                     // Move to previous agent
-                                    tab.selected_agent = Some(task.agents[agent_idx - 1].id.clone());
+                                    tab.selected_agent =
+                                        Some(task.agents[agent_idx - 1].id.clone());
                                     return;
                                 } else {
                                     // Move back to task level
@@ -158,8 +167,11 @@ impl App {
                             tab.selected_task = Some(prev_task.id.clone());
 
                             // If previous task is expanded and has agents, select last agent
-                            if tab.expanded_tasks.contains(&prev_task.id) && !prev_task.agents.is_empty() {
-                                tab.selected_agent = Some(prev_task.agents.last().unwrap().id.clone());
+                            if tab.expanded_tasks.contains(&prev_task.id)
+                                && !prev_task.agents.is_empty()
+                            {
+                                tab.selected_agent =
+                                    Some(prev_task.agents.last().unwrap().id.clone());
                             }
                             return;
                         } else {
@@ -177,12 +189,15 @@ impl App {
 
                 // If moving to previous phase that's expanded with tasks, select last task
                 if let Some(phase) = phases.get(tab.selected_phase) {
-                    if tab.expanded_phases.contains(&tab.selected_phase) && !phase.tasks.is_empty() {
+                    if tab.expanded_phases.contains(&tab.selected_phase) && !phase.tasks.is_empty()
+                    {
                         let last_task = phase.tasks.last().unwrap();
                         tab.selected_task = Some(last_task.id.clone());
 
                         // If last task is expanded with agents, select last agent
-                        if tab.expanded_tasks.contains(&last_task.id) && !last_task.agents.is_empty() {
+                        if tab.expanded_tasks.contains(&last_task.id)
+                            && !last_task.agents.is_empty()
+                        {
                             tab.selected_agent = Some(last_task.agents.last().unwrap().id.clone());
                         }
                     }
@@ -198,7 +213,10 @@ impl App {
         let tab = &mut self.open_tabs[self.active_tab_idx];
 
         if let Some(ref agent_id) = tab.selected_agent {
-            let offset = tab.agent_scroll_offsets.entry(agent_id.clone()).or_insert(0);
+            let offset = tab
+                .agent_scroll_offsets
+                .entry(agent_id.clone())
+                .or_insert(0);
             if *offset > 0 {
                 *offset -= 1;
             }
@@ -217,7 +235,10 @@ impl App {
                 for phase in phases.iter() {
                     for task in &phase.tasks {
                         if let Some(agent) = task.agents.iter().find(|a| &a.id == agent_id) {
-                            let offset = tab.agent_scroll_offsets.entry(agent_id.clone()).or_insert(0);
+                            let offset = tab
+                                .agent_scroll_offsets
+                                .entry(agent_id.clone())
+                                .or_insert(0);
                             let window_size = 5;
                             let max_offset = agent.messages.len().saturating_sub(window_size);
                             if *offset < max_offset {
@@ -242,7 +263,11 @@ impl App {
             // If we're on an agent, try to move to next agent in same task
             if let Some(ref agent_id) = self.selected_agent {
                 let phase = &phases[self.selected_phase];
-                if let Some(task) = phase.tasks.iter().find(|t| Some(&t.id) == self.selected_task.as_ref()) {
+                if let Some(task) = phase
+                    .tasks
+                    .iter()
+                    .find(|t| Some(&t.id) == self.selected_task.as_ref())
+                {
                     let current_idx = task.agents.iter().position(|a| &a.id == agent_id);
                     if let Some(idx) = current_idx {
                         if idx + 1 < task.agents.len() {
@@ -308,7 +333,11 @@ impl App {
             // If we're on an agent, try to move to previous agent
             if let Some(ref agent_id) = self.selected_agent {
                 let phase = &phases[self.selected_phase];
-                if let Some(task) = phase.tasks.iter().find(|t| Some(&t.id) == self.selected_task.as_ref()) {
+                if let Some(task) = phase
+                    .tasks
+                    .iter()
+                    .find(|t| Some(&t.id) == self.selected_task.as_ref())
+                {
                     let current_idx = task.agents.iter().position(|a| &a.id == agent_id);
                     if let Some(idx) = current_idx {
                         if idx > 0 {
@@ -331,8 +360,11 @@ impl App {
                         let prev_task = &phase.tasks[idx - 1];
                         self.selected_task = Some(prev_task.id.clone());
                         // If previous task is expanded with agents, jump to last agent
-                        if self.expanded_tasks.contains(&prev_task.id) && !prev_task.agents.is_empty() {
-                            self.selected_agent = Some(prev_task.agents[prev_task.agents.len() - 1].id.clone());
+                        if self.expanded_tasks.contains(&prev_task.id)
+                            && !prev_task.agents.is_empty()
+                        {
+                            self.selected_agent =
+                                Some(prev_task.agents[prev_task.agents.len() - 1].id.clone());
                         }
                         return;
                     }
@@ -355,8 +387,11 @@ impl App {
                         let last_task = &phase.tasks[phase.tasks.len() - 1];
                         self.selected_task = Some(last_task.id.clone());
                         // If last task is expanded with agents, jump to last agent
-                        if self.expanded_tasks.contains(&last_task.id) && !last_task.agents.is_empty() {
-                            self.selected_agent = Some(last_task.agents[last_task.agents.len() - 1].id.clone());
+                        if self.expanded_tasks.contains(&last_task.id)
+                            && !last_task.agents.is_empty()
+                        {
+                            self.selected_agent =
+                                Some(last_task.agents[last_task.agents.len() - 1].id.clone());
                         }
                     }
                 }
@@ -372,7 +407,10 @@ impl App {
 
             for phase in phases.iter() {
                 // Check if this phase is selected
-                if self.selected_phase == phase.id && self.selected_task.is_none() && self.selected_agent.is_none() {
+                if self.selected_phase == phase.id
+                    && self.selected_task.is_none()
+                    && self.selected_agent.is_none()
+                {
                     selected_line = current_line;
                 }
                 current_line += 1; // Phase header
@@ -380,7 +418,10 @@ impl App {
                 if self.expanded_phases.contains(&phase.id) {
                     for task in &phase.tasks {
                         // Check if this task is selected
-                        if self.selected_phase == phase.id && Some(&task.id) == self.selected_task.as_ref() && self.selected_agent.is_none() {
+                        if self.selected_phase == phase.id
+                            && Some(&task.id) == self.selected_task.as_ref()
+                            && self.selected_agent.is_none()
+                        {
                             selected_line = current_line;
                         }
                         current_line += 1; // Task header
@@ -421,9 +462,12 @@ impl App {
             if selected_line < self.workflow_scroll_offset + padding {
                 // Selected line is above visible area, scroll up
                 self.workflow_scroll_offset = selected_line.saturating_sub(padding);
-            } else if selected_line >= self.workflow_scroll_offset + visible_lines.saturating_sub(padding) {
+            } else if selected_line
+                >= self.workflow_scroll_offset + visible_lines.saturating_sub(padding)
+            {
                 // Selected line is below visible area, scroll down
-                self.workflow_scroll_offset = selected_line.saturating_sub(visible_lines.saturating_sub(padding).saturating_sub(1));
+                self.workflow_scroll_offset = selected_line
+                    .saturating_sub(visible_lines.saturating_sub(padding).saturating_sub(1));
             }
         }
     }

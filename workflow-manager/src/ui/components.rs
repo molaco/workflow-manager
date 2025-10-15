@@ -1,5 +1,7 @@
 //! Reusable UI components (dropdowns, file browser, helpers)
 
+use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
@@ -8,8 +10,6 @@ use ratatui::{
     Frame,
 };
 use std::path::PathBuf;
-use fuzzy_matcher::FuzzyMatcher;
-use fuzzy_matcher::skim::SkimMatcherV2;
 
 use crate::models::App;
 
@@ -44,7 +44,10 @@ pub fn render_dropdown(f: &mut Frame, area: Rect, app: &App) {
                 let is_selected = i == app.dropdown_selected;
 
                 let style = if is_selected {
-                    Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 };
@@ -70,10 +73,7 @@ pub fn render_dropdown(f: &mut Frame, area: Rect, app: &App) {
                 let name = if is_parent {
                     "../".to_string()
                 } else {
-                    let base_name = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("?");
+                    let base_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
                     if is_dir {
                         format!("{}/", base_name)
                     } else {
@@ -82,7 +82,10 @@ pub fn render_dropdown(f: &mut Frame, area: Rect, app: &App) {
                 };
 
                 let style = if is_selected {
-                    Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else if is_dir {
                     Style::default().fg(Color::Cyan)
                 } else {
@@ -109,14 +112,13 @@ pub fn render_dropdown(f: &mut Frame, area: Rect, app: &App) {
         .take(visible_items)
         .collect();
 
-    let list = List::new(visible_items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow))
-                .title(title)
-                .style(Style::default().bg(Color::DarkGray)),
-        );
+    let list = List::new(visible_items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(title)
+            .style(Style::default().bg(Color::DarkGray)),
+    );
 
     f.render_widget(ratatui::widgets::Clear, dropdown_area);
     f.render_widget(list, dropdown_area);
@@ -151,13 +153,12 @@ pub fn render_file_browser(f: &mut Frame, area: Rect, app: &App) {
             let is_dir = path.is_dir();
 
             let icon = if is_dir { "📁" } else { "📄" };
-            let name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("..");
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("..");
 
             let style = if is_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else if is_dir {
                 Style::default().fg(Color::Cyan)
             } else {
@@ -178,13 +179,12 @@ pub fn render_file_browser(f: &mut Frame, area: Rect, app: &App) {
         format!(" File Browser [search: {}] ", app.file_browser_search)
     };
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(title)
-                .style(Style::default().bg(Color::Black)),
-        );
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .style(Style::default().bg(Color::Black)),
+    );
 
     f.render_widget(ratatui::widgets::Clear, popup_area);
     f.render_widget(list, popup_area);

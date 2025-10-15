@@ -21,7 +21,12 @@ pub fn render_header(f: &mut Frame, area: Rect, app: &App) {
     };
 
     let header = Paragraph::new(Line::from(vec![
-        Span::styled(title, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("      "),
         Span::styled("[Q]", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw("uit"),
@@ -51,7 +56,12 @@ pub fn render_footer(f: &mut Frame, area: Rect, app: &App) {
         View::WorkflowEdit(_) => {
             if app.is_editing {
                 Line::from(vec![
-                    Span::styled("TYPE", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "TYPE",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw(" to edit  "),
                     Span::styled("[Enter]", Style::default().add_modifier(Modifier::BOLD)),
                     Span::raw(" Save  "),

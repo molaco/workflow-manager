@@ -1,7 +1,7 @@
 //! Tab rendering functions
 
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
@@ -9,8 +9,8 @@ use ratatui::{
 };
 use workflow_manager_sdk::WorkflowStatus;
 
-use crate::models::*;
 use super::components::centered_rect;
+use crate::models::*;
 
 pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App) {
     // Calculate visible tabs for horizontal scrolling
@@ -79,7 +79,9 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App) {
     spans.push(Span::raw(" "));
     spans.push(Span::styled(
         "[+ New]",
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD),
     ));
 
     let tabs_line = Line::from(spans);
@@ -96,16 +98,18 @@ pub fn render_empty_tabs(f: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             "No workflows running",
-            Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
             "Press [Ctrl+T] or click [+ New]",
-            Style::default().fg(Color::Cyan)
+            Style::default().fg(Color::Cyan),
         )),
         Line::from(Span::styled(
             "to start a new workflow",
-            Style::default().fg(Color::Cyan)
+            Style::default().fg(Color::Cyan),
         )),
     ];
 
@@ -123,31 +127,42 @@ pub fn render_close_confirmation(f: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             "Close Running Workflow?",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
             "This workflow is still running.",
-            Style::default().fg(Color::White)
+            Style::default().fg(Color::White),
         )),
         Line::from(Span::styled(
             "Closing will kill the process.",
-            Style::default().fg(Color::White)
+            Style::default().fg(Color::White),
         )),
         Line::from(""),
-        Line::from(Line::from(vec![
-            Span::styled("[Y]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Line::from(vec![
+            Span::styled(
+                "[Y]",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" Yes  "),
-            Span::styled("[N]", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[N]",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" No"),
-        ])),
+        ]),
     ];
 
-    let paragraph = Paragraph::new(text)
-        .block(Block::default()
+    let paragraph = Paragraph::new(text).block(
+        Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Yellow))
-            .style(Style::default().bg(Color::Black)));
+            .style(Style::default().bg(Color::Black)),
+    );
 
     f.render_widget(paragraph, popup_area);
 }
@@ -182,18 +197,27 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
 
             let is_expanded = tab.expanded_phases.contains(&phase.id);
             let expand_icon = if is_expanded { "▼" } else { "▶" };
-            let is_selected = tab.selected_phase == phase.id && tab.selected_task.is_none() && tab.selected_agent.is_none();
+            let is_selected = tab.selected_phase == phase.id
+                && tab.selected_task.is_none()
+                && tab.selected_agent.is_none();
 
             let mut phase_spans = vec![
                 Span::styled(format!("{} ", phase_icon), Style::default().fg(phase_color)),
-                Span::styled(format!("{} ", expand_icon), Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    format!("{} ", expand_icon),
+                    Style::default().fg(Color::Cyan),
+                ),
                 Span::styled(
                     format!("Phase {}: {}", phase.id, phase.name),
                     if is_selected {
-                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD | Modifier::REVERSED)
                     } else {
-                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
-                    }
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD)
+                    },
                 ),
             ];
 
@@ -206,7 +230,8 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                         } else {
                             format!(" - {}", last_msg)
                         };
-                        phase_spans.push(Span::styled(preview, Style::default().fg(Color::DarkGray)));
+                        phase_spans
+                            .push(Span::styled(preview, Style::default().fg(Color::DarkGray)));
                     }
                 }
             }
@@ -231,21 +256,26 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
 
                     let task_expanded = tab.expanded_tasks.contains(&task.id);
                     let task_expand_icon = if task_expanded { "▼" } else { "▶" };
-                    let is_task_selected = tab.selected_phase == phase.id &&
-                                          Some(&task.id) == tab.selected_task.as_ref() &&
-                                          tab.selected_agent.is_none();
+                    let is_task_selected = tab.selected_phase == phase.id
+                        && Some(&task.id) == tab.selected_task.as_ref()
+                        && tab.selected_agent.is_none();
 
                     let mut task_spans = vec![
                         Span::raw("  "),
                         Span::styled(format!("{} ", task_icon), Style::default().fg(task_color)),
-                        Span::styled(format!("{} ", task_expand_icon), Style::default().fg(Color::Cyan)),
+                        Span::styled(
+                            format!("{} ", task_expand_icon),
+                            Style::default().fg(Color::Cyan),
+                        ),
                         Span::styled(
                             &task.description,
                             if is_task_selected {
-                                Style::default().fg(Color::White).add_modifier(Modifier::REVERSED)
+                                Style::default()
+                                    .fg(Color::White)
+                                    .add_modifier(Modifier::REVERSED)
                             } else {
                                 Style::default().fg(Color::White)
-                            }
+                            },
                         ),
                     ];
 
@@ -257,7 +287,8 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                             } else {
                                 format!(" - {}", last_msg)
                             };
-                            task_spans.push(Span::styled(preview, Style::default().fg(Color::DarkGray)));
+                            task_spans
+                                .push(Span::styled(preview, Style::default().fg(Color::DarkGray)));
                         }
                     }
 
@@ -293,15 +324,23 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
 
                             let agent_spans = vec![
                                 Span::raw("    "),
-                                Span::styled(format!("{} ", agent_icon), Style::default().fg(agent_color)),
-                                Span::styled(format!("{} ", agent_expand_icon), Style::default().fg(Color::Cyan)),
+                                Span::styled(
+                                    format!("{} ", agent_icon),
+                                    Style::default().fg(agent_color),
+                                ),
+                                Span::styled(
+                                    format!("{} ", agent_expand_icon),
+                                    Style::default().fg(Color::Cyan),
+                                ),
                                 Span::styled(
                                     format!("@{}", agent.name),
                                     if is_agent_selected {
-                                        Style::default().fg(Color::Magenta).add_modifier(Modifier::REVERSED)
+                                        Style::default()
+                                            .fg(Color::Magenta)
+                                            .add_modifier(Modifier::REVERSED)
                                     } else {
                                         Style::default().fg(Color::Magenta)
-                                    }
+                                    },
                                 ),
                             ];
 
@@ -314,7 +353,10 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                                     } else {
                                         format!(" - {}", last_msg)
                                     };
-                                    agent_line_spans.push(Span::styled(preview, Style::default().fg(Color::DarkGray)));
+                                    agent_line_spans.push(Span::styled(
+                                        preview,
+                                        Style::default().fg(Color::DarkGray),
+                                    ));
                                 }
                             }
                             lines.push(Line::from(agent_line_spans));
@@ -327,7 +369,11 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                                 if total_messages > 0 {
                                     // Default to showing the LAST 5 messages (most recent)
                                     let default_offset = total_messages.saturating_sub(window_size);
-                                    let scroll_offset = tab.agent_scroll_offsets.get(&agent.id).copied().unwrap_or(default_offset);
+                                    let scroll_offset = tab
+                                        .agent_scroll_offsets
+                                        .get(&agent.id)
+                                        .copied()
+                                        .unwrap_or(default_offset);
 
                                     let start = scroll_offset.min(total_messages.saturating_sub(1));
                                     let end = (start + window_size).min(total_messages);
@@ -341,11 +387,18 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
 
                                     // Show scroll indicator if there are more messages
                                     if total_messages > window_size {
-                                        let indicator = format!("      [Showing {}-{} of {}]",
-                                            start + 1, end, total_messages);
-                                        lines.push(Line::from(vec![
-                                            Span::styled(indicator, Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC)),
-                                        ]));
+                                        let indicator = format!(
+                                            "      [Showing {}-{} of {}]",
+                                            start + 1,
+                                            end,
+                                            total_messages
+                                        );
+                                        lines.push(Line::from(vec![Span::styled(
+                                            indicator,
+                                            Style::default()
+                                                .fg(Color::Cyan)
+                                                .add_modifier(Modifier::ITALIC),
+                                        )]));
                                     }
                                 }
                             }
@@ -381,10 +434,12 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
     }
 
     let content = Paragraph::new(lines)
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .title(title)
-            .style(Style::default().fg(Color::White)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .style(Style::default().fg(Color::White)),
+        )
         .scroll((tab.scroll_offset as u16, 0));
 
     f.render_widget(content, area);

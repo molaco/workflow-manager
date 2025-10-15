@@ -13,18 +13,13 @@ mod models;
 pub use models::*;
 
 // Declare submodules
-mod tabs;
-mod navigation;
 mod file_browser;
 mod history;
+mod navigation;
+mod tabs;
 mod workflow_ops;
 
 // Re-export methods from submodules
-pub use tabs::*;
-pub use navigation::*;
-pub use file_browser::*;
-pub use history::*;
-pub use workflow_ops::*;
 
 impl App {
     pub fn new() -> Self {
@@ -79,7 +74,8 @@ impl App {
         // Initialize runtime
         match crate::runtime::ProcessBasedRuntime::new() {
             Ok(runtime) => {
-                let runtime_arc = Arc::new(runtime) as Arc<dyn workflow_manager_sdk::WorkflowRuntime>;
+                let runtime_arc =
+                    Arc::new(runtime) as Arc<dyn workflow_manager_sdk::WorkflowRuntime>;
                 app.runtime = Some(runtime_arc.clone());
                 app.chat = Some(ChatInterface::new(runtime_arc));
             }

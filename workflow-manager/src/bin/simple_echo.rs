@@ -1,6 +1,6 @@
-use clap::Parser;
-use workflow_manager_sdk::{WorkflowDefinition, WorkflowInfo, WorkflowStatus};
 use anyhow::Result;
+use clap::Parser;
+use workflow_manager_sdk::WorkflowDefinition;
 
 #[derive(Parser, Debug, Clone, WorkflowDefinition)]
 #[workflow(
@@ -90,4 +90,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-
