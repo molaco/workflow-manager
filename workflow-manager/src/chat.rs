@@ -5,9 +5,21 @@ use claude_agent_sdk::types::{
 use claude_agent_sdk::ClaudeSDKClient;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
+use tokio::sync::{mpsc, Mutex};
 use workflow_manager_sdk::WorkflowRuntime;
 
 use crate::mcp_tools::create_workflow_mcp_server;
+
+/// Response from background chat task
+#[derive(Debug)]
+pub enum ChatResponse {
+    Success {
+        content: String,
+        tool_calls: Vec<ToolCall>,
+    },
+    Error(String),
+}
 
 /// A chat message in the conversation
 #[derive(Debug, Clone)]
@@ -43,10 +55,16 @@ pub struct ChatInterface {
     pub messages: Vec<ChatMessage>,
     /// Current input buffer
     pub input_buffer: String,
-    /// Claude SDK client
-    client: Option<ClaudeSDKClient>,
+    /// Claude SDK client (wrapped for async access)
+    client: Option<Arc<Mutex<ClaudeSDKClient>>>,
+    /// Channel for receiving responses from background task
+    pub response_rx: Option<mpsc::UnboundedReceiver<ChatResponse>>,
     /// Whether we're waiting for a response
     pub waiting_for_response: bool,
+    /// When we started waiting for response (for timing display)
+    pub response_start_time: Option<Instant>,
+    /// Current spinner frame (for animation)
+    pub spinner_frame: usize,
     /// Scroll position for message history (deprecated, use message_scroll)
     pub scroll_offset: usize,
     /// Scroll position for chat messages pane
@@ -57,6 +75,8 @@ pub struct ChatInterface {
     pub active_pane: ActivePane,
     /// Runtime for workflow operations
     runtime: Arc<dyn WorkflowRuntime>,
+    /// Tokio runtime handle for spawning tasks
+    tokio_handle: tokio::runtime::Handle,
     /// Initialization state
     pub initialized: bool,
     pub init_error: Option<String>,
@@ -64,7 +84,7 @@ pub struct ChatInterface {
 
 impl ChatInterface {
     /// Create a new chat interface
-    pub fn new(runtime: Arc<dyn WorkflowRuntime>) -> Self {
+    pub fn new(runtime: Arc<dyn WorkflowRuntime>, tokio_handle: tokio::runtime::Handle) -> Self {
         Self {
             messages: vec![
                 ChatMessage {
@@ -75,12 +95,16 @@ impl ChatInterface {
             ],
             input_buffer: String::new(),
             client: None,
+            response_rx: None,
             waiting_for_response: false,
+            response_start_time: None,
+            spinner_frame: 0,
             scroll_offset: 0,
             message_scroll: 0,
             log_scroll: 0,
             active_pane: ActivePane::ChatMessages,
             runtime,
+            tokio_handle,
             initialized: false,
             init_error: None,
         }
@@ -120,114 +144,173 @@ impl ChatInterface {
             ..Default::default()
         };
 
-        // Create client
+        // Create client and wrap in Arc<Mutex<>>
         let client = ClaudeSDKClient::new(options, None).await?;
-        self.client = Some(client);
+        self.client = Some(Arc::new(Mutex::new(client)));
         self.initialized = true;
 
         Ok(())
     }
 
-    /// Send a message to Claude
-    pub async fn send_message(
-        &mut self,
-        message: String,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    /// Send a message to Claude asynchronously (spawns background task)
+    /// Note: User message should be added to history BEFORE calling this
+    pub fn send_message_async(&mut self, message: String) {
         if message.trim().is_empty() {
-            return Ok(());
+            return;
         }
-
-        // Add user message to history
-        self.messages.push(ChatMessage {
-            role: ChatRole::User,
-            content: message.clone(),
-            tool_calls: Vec::new(),
-        });
 
         self.waiting_for_response = true;
+        self.response_start_time = Some(Instant::now());
 
-        // Send to Claude
-        if let Some(client) = &mut self.client {
-            client.send_message(message).await?;
+        // Create channel for receiving response
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.response_rx = Some(rx);
 
-            // Collect response
-            let mut assistant_content = String::new();
-            let mut tool_calls = Vec::new();
+        // Clone client Arc for background task
+        if let Some(client) = self.client.clone() {
+            self.tokio_handle.spawn(async move {
+                // Send message and collect response
+                let result = Self::send_message_internal(client, message).await;
 
-            while let Some(msg) = client.next_message().await {
-                match msg {
-                    Ok(Message::Assistant { message, .. }) => {
-                        for block in &message.content {
-                            match block {
-                                ContentBlock::Text { text } => {
-                                    assistant_content.push_str(text);
-                                    assistant_content.push('\n');
-                                }
-                                ContentBlock::ToolUse { name, input, .. } => {
-                                    let input_str =
-                                        serde_json::to_string_pretty(input).unwrap_or_default();
-                                    tool_calls.push(ToolCall {
-                                        name: name.clone(),
-                                        input: input_str,
-                                        output: String::new(), // Will be filled by tool result
-                                    });
-                                }
-                                ContentBlock::ToolResult { content, .. } => {
-                                    // ToolResult blocks are internal - Claude processes them
-                                    // We just record that a tool was called
-                                    // The actual result will be in Claude's text response
-
-                                    let result_text = if let Some(content_value) = content {
-                                        match content_value {
-                                            claude_agent_sdk::types::ContentValue::String(text) => {
-                                                // Truncate long results for display
-                                                if text.len() > 200 {
-                                                    format!("{}... [truncated]", &text[..200])
-                                                } else {
-                                                    text.clone()
-                                                }
-                                            }
-                                            claude_agent_sdk::types::ContentValue::Blocks(_) => {
-                                                "[Structured data returned]".to_string()
-                                            }
-                                        }
-                                    } else {
-                                        String::new()
-                                    };
-
-                                    // Update the last tool call with result
-                                    if let Some(last_tool) = tool_calls.last_mut() {
-                                        last_tool.output = result_text;
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    Ok(Message::Result { is_error, .. }) => {
-                        if is_error {
-                            assistant_content.push_str("\n[Error occurred during conversation]");
-                        }
-                        break;
-                    }
-                    Err(e) => {
-                        assistant_content.push_str(&format!("\n[Error: {}]", e));
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-
-            // Add assistant response to history
-            self.messages.push(ChatMessage {
-                role: ChatRole::Assistant,
-                content: assistant_content.trim().to_string(),
-                tool_calls,
+                // Send result back via channel
+                let _ = tx.send(result);
             });
         }
+    }
 
-        self.waiting_for_response = false;
-        Ok(())
+    /// Internal method to send message and collect response (runs in background task)
+    async fn send_message_internal(
+        client: Arc<Mutex<ClaudeSDKClient>>,
+        message: String,
+    ) -> ChatResponse {
+        // Lock client and send message
+        let send_result = {
+            let mut client_guard = client.lock().await;
+            client_guard.send_message(message).await
+        };
+
+        if let Err(e) = send_result {
+            return ChatResponse::Error(format!("Failed to send message: {}", e));
+        }
+
+        // Collect response
+        let mut assistant_content = String::new();
+        let mut tool_calls = Vec::new();
+
+        loop {
+            let msg_result = {
+                let mut client_guard = client.lock().await;
+                client_guard.next_message().await
+            };
+
+            match msg_result {
+                Some(Ok(Message::Assistant { message, .. })) => {
+                    for block in &message.content {
+                        match block {
+                            ContentBlock::Text { text } => {
+                                assistant_content.push_str(text);
+                                assistant_content.push('\n');
+                            }
+                            ContentBlock::ToolUse { name, input, .. } => {
+                                let input_str =
+                                    serde_json::to_string_pretty(input).unwrap_or_default();
+                                tool_calls.push(ToolCall {
+                                    name: name.clone(),
+                                    input: input_str,
+                                    output: String::new(),
+                                });
+                            }
+                            ContentBlock::ToolResult { content, .. } => {
+                                let result_text = if let Some(content_value) = content {
+                                    match content_value {
+                                        claude_agent_sdk::types::ContentValue::String(text) => {
+                                            if text.len() > 200 {
+                                                format!("{}... [truncated]", &text[..200])
+                                            } else {
+                                                text.clone()
+                                            }
+                                        }
+                                        claude_agent_sdk::types::ContentValue::Blocks(_) => {
+                                            "[Structured data returned]".to_string()
+                                        }
+                                    }
+                                } else {
+                                    String::new()
+                                };
+
+                                if let Some(last_tool) = tool_calls.last_mut() {
+                                    last_tool.output = result_text;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Some(Ok(Message::Result { is_error, .. })) => {
+                    if is_error {
+                        assistant_content.push_str("\n[Error occurred during conversation]");
+                    }
+                    break;
+                }
+                Some(Err(e)) => {
+                    return ChatResponse::Error(format!("Error during conversation: {}", e));
+                }
+                None => break,
+                _ => {}
+            }
+        }
+
+        ChatResponse::Success {
+            content: assistant_content.trim().to_string(),
+            tool_calls,
+        }
+    }
+
+    /// Poll for response from background task (non-blocking)
+    pub fn poll_response(&mut self) {
+        if let Some(rx) = &mut self.response_rx {
+            // Non-blocking receive
+            match rx.try_recv() {
+                Ok(response) => {
+                    // Response received
+                    self.waiting_for_response = false;
+                    self.response_start_time = None;
+                    self.response_rx = None;
+
+                    // Add to message history
+                    match response {
+                        ChatResponse::Success { content, tool_calls } => {
+                            self.messages.push(ChatMessage {
+                                role: ChatRole::Assistant,
+                                content,
+                                tool_calls,
+                            });
+                        }
+                        ChatResponse::Error(error) => {
+                            self.messages.push(ChatMessage {
+                                role: ChatRole::Assistant,
+                                content: format!("Error: {}", error),
+                                tool_calls: Vec::new(),
+                            });
+                        }
+                    }
+                }
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    // No response yet, keep waiting
+                }
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    // Channel closed unexpectedly
+                    self.waiting_for_response = false;
+                    self.response_start_time = None;
+                    self.response_rx = None;
+                    self.messages.push(ChatMessage {
+                        role: ChatRole::Assistant,
+                        content: "Error: Response channel disconnected".to_string(),
+                        tool_calls: Vec::new(),
+                    });
+                }
+            }
+        }
     }
 
     /// Clear input buffer
@@ -278,5 +361,21 @@ impl ChatInterface {
         self.scroll_offset = 0;
         self.message_scroll = 0;
         self.log_scroll = 0;
+    }
+
+    /// Update spinner animation frame
+    pub fn update_spinner(&mut self) {
+        self.spinner_frame = (self.spinner_frame + 1) % 8;
+    }
+
+    /// Get spinner character for current frame
+    pub fn get_spinner_char(&self) -> char {
+        const SPINNER: [char; 8] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧'];
+        SPINNER[self.spinner_frame]
+    }
+
+    /// Get elapsed time since response started
+    pub fn get_elapsed_seconds(&self) -> Option<u64> {
+        self.response_start_time.map(|start| start.elapsed().as_secs())
     }
 }

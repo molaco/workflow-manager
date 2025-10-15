@@ -50,6 +50,16 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
         // Poll all running tabs for output
         app.poll_all_tabs();
 
+        // Poll chat for response from background task
+        if let Some(chat) = &mut app.chat {
+            chat.poll_response();
+
+            // Update chat spinner animation if waiting for response
+            if chat.waiting_for_response {
+                chat.update_spinner();
+            }
+        }
+
         terminal.draw(|f| ui::ui(f, app))?;
 
         if event::poll(std::time::Duration::from_millis(50))? {
@@ -178,22 +188,21 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                                 }
                             }
                             KeyCode::Enter => {
-                                // Send message to Claude
+                                // Send message to Claude asynchronously
                                 if let Some(chat) = &mut app.chat {
                                     if !chat.input_buffer.is_empty() {
                                         let msg = chat.input_buffer.clone();
                                         chat.input_buffer.clear();
 
-                                        // Send message via tokio runtime
-                                        if let Err(e) =
-                                            app.tokio_runtime.block_on(chat.send_message(msg))
-                                        {
-                                            chat.messages.push(crate::chat::ChatMessage {
-                                                role: crate::chat::ChatRole::Assistant,
-                                                content: format!("Error: {}", e),
-                                                tool_calls: Vec::new(),
-                                            });
-                                        }
+                                        // Add user message to conversation immediately
+                                        chat.messages.push(crate::chat::ChatMessage {
+                                            role: crate::chat::ChatRole::User,
+                                            content: msg.clone(),
+                                            tool_calls: Vec::new(),
+                                        });
+
+                                        // Send message asynchronously (spawns background task)
+                                        chat.send_message_async(msg);
                                     }
                                 }
                             }

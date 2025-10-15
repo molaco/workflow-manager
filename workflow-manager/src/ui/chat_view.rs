@@ -73,12 +73,37 @@ pub fn render_chat(f: &mut Frame, area: Rect, app: &App) {
     }
 
     if chat.waiting_for_response {
-        message_lines.push(Line::from(Span::styled(
-            "Claude is thinking...",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::ITALIC),
-        )));
+        // Animated loading indicator like Claude Code
+        let spinner = chat.get_spinner_char();
+        let elapsed = chat.get_elapsed_seconds().unwrap_or(0);
+
+        message_lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", spinner),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Thinking",
+                Style::default().fg(Color::Yellow),
+            ),
+            Span::styled(
+                "…",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+
+        message_lines.push(Line::from(vec![
+            Span::styled(
+                "  (esc to interrupt",
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                format!(" · {}s)", elapsed),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
     }
 
     // Highlight active pane border

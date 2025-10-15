@@ -77,7 +77,7 @@ impl App {
                 let runtime_arc =
                     Arc::new(runtime) as Arc<dyn workflow_manager_sdk::WorkflowRuntime>;
                 app.runtime = Some(runtime_arc.clone());
-                app.chat = Some(ChatInterface::new(runtime_arc));
+                app.chat = Some(ChatInterface::new(runtime_arc, app.tokio_runtime.handle().clone()));
             }
             Err(e) => {
                 eprintln!("Warning: Failed to initialize workflow runtime: {}", e);
