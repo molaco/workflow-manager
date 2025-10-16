@@ -50,12 +50,13 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
         // Poll all running tabs for output
         app.poll_all_tabs();
 
-        // Poll chat for response from background task
+        // Poll chat for initialization and responses
         if let Some(chat) = &mut app.chat {
+            chat.poll_initialization();
             chat.poll_response();
 
-            // Update chat spinner animation if waiting for response
-            if chat.waiting_for_response {
+            // Update chat spinner animation if initializing or waiting for response
+            if !chat.initialized || chat.waiting_for_response {
                 chat.update_spinner();
             }
         }
@@ -190,7 +191,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                             KeyCode::Enter => {
                                 // Send message to Claude asynchronously
                                 if let Some(chat) = &mut app.chat {
-                                    if !chat.input_buffer.is_empty() {
+                                    if !chat.input_buffer.is_empty() && chat.initialized {
                                         let msg = chat.input_buffer.clone();
                                         chat.input_buffer.clear();
 

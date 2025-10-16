@@ -11,6 +11,12 @@ use workflow_manager_sdk::WorkflowRuntime;
 
 use crate::mcp_tools::create_workflow_mcp_server;
 
+/// Initialization result from background task
+pub enum InitResult {
+    Success(Arc<Mutex<ClaudeSDKClient>>),
+    Error(String),
+}
+
 /// Response from background chat task
 #[derive(Debug)]
 pub enum ChatResponse {
@@ -57,6 +63,8 @@ pub struct ChatInterface {
     pub input_buffer: String,
     /// Claude SDK client (wrapped for async access)
     client: Option<Arc<Mutex<ClaudeSDKClient>>>,
+    /// Channel for receiving initialization result
+    init_rx: Option<mpsc::UnboundedReceiver<InitResult>>,
     /// Channel for receiving responses from background task
     pub response_rx: Option<mpsc::UnboundedReceiver<ChatResponse>>,
     /// Whether we're waiting for a response
@@ -83,18 +91,13 @@ pub struct ChatInterface {
 }
 
 impl ChatInterface {
-    /// Create a new chat interface
+    /// Create a new chat interface and start background initialization
     pub fn new(runtime: Arc<dyn WorkflowRuntime>, tokio_handle: tokio::runtime::Handle) -> Self {
-        Self {
-            messages: vec![
-                ChatMessage {
-                    role: ChatRole::Assistant,
-                    content: "Hello! I'm Claude. I can help you manage and execute workflows.\n\nTry asking me to:\n• List available workflows\n• Execute a workflow\n• Check workflow status\n• Get workflow logs".to_string(),
-                    tool_calls: Vec::new(),
-                }
-            ],
+        let mut chat = Self {
+            messages: Vec::new(),
             input_buffer: String::new(),
             client: None,
+            init_rx: None,
             response_rx: None,
             waiting_for_response: false,
             response_start_time: None,
@@ -103,21 +106,35 @@ impl ChatInterface {
             message_scroll: 0,
             log_scroll: 0,
             active_pane: ActivePane::ChatMessages,
-            runtime,
-            tokio_handle,
+            runtime: runtime.clone(),
+            tokio_handle: tokio_handle.clone(),
             initialized: false,
             init_error: None,
-        }
+        };
+
+        // Start initialization in background
+        chat.start_initialization(runtime, tokio_handle);
+
+        chat
     }
 
-    /// Initialize Claude SDK client with MCP tools
-    pub async fn initialize(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if self.initialized {
-            return Ok(());
-        }
+    /// Start initialization in background
+    fn start_initialization(&mut self, runtime: Arc<dyn WorkflowRuntime>, tokio_handle: tokio::runtime::Handle) {
+        // Create channel for initialization result
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.init_rx = Some(rx);
 
+        // Spawn initialization task
+        tokio_handle.spawn(async move {
+            let result = Self::initialize_internal(runtime).await;
+            let _ = tx.send(result);
+        });
+    }
+
+    /// Internal initialization logic (runs in background task)
+    async fn initialize_internal(runtime: Arc<dyn WorkflowRuntime>) -> InitResult {
         // Create MCP server with workflow tools
-        let mcp_server = create_workflow_mcp_server(self.runtime.clone());
+        let mcp_server = create_workflow_mcp_server(runtime);
 
         // Register MCP server
         let mut mcp_servers = HashMap::new();
@@ -144,12 +161,36 @@ impl ChatInterface {
             ..Default::default()
         };
 
-        // Create client and wrap in Arc<Mutex<>>
-        let client = ClaudeSDKClient::new(options, None).await?;
-        self.client = Some(Arc::new(Mutex::new(client)));
-        self.initialized = true;
+        // Create client
+        match ClaudeSDKClient::new(options, None).await {
+            Ok(client) => InitResult::Success(Arc::new(Mutex::new(client))),
+            Err(e) => InitResult::Error(format!("Failed to initialize Claude client: {}", e)),
+        }
+    }
 
-        Ok(())
+    /// Poll for initialization completion (non-blocking)
+    pub fn poll_initialization(&mut self) {
+        if let Some(rx) = &mut self.init_rx {
+            match rx.try_recv() {
+                Ok(InitResult::Success(client)) => {
+                    self.client = Some(client);
+                    self.initialized = true;
+                    self.init_rx = None;
+                }
+                Ok(InitResult::Error(error)) => {
+                    self.init_error = Some(error);
+                    self.initialized = false;
+                    self.init_rx = None;
+                }
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    // Still initializing
+                }
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    self.init_error = Some("Initialization task disconnected".to_string());
+                    self.init_rx = None;
+                }
+            }
+        }
     }
 
     /// Send a message to Claude asynchronously (spawns background task)
@@ -372,6 +413,12 @@ impl ChatInterface {
     pub fn get_spinner_char(&self) -> char {
         const SPINNER: [char; 8] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧'];
         SPINNER[self.spinner_frame]
+    }
+
+    /// Get loading indicator for title bar
+    pub fn get_loading_indicator(&self) -> &'static str {
+        const INDICATORS: [&str; 4] = ["...", ".. ", ".  ", "   "];
+        INDICATORS[self.spinner_frame % 4]
     }
 
     /// Get elapsed time since response started

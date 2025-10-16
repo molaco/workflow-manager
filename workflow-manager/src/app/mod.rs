@@ -67,7 +67,6 @@ impl App {
             workflow_scroll_offset: 0,
             chat: None,
             runtime: None,
-            chat_initialized: false,
             tokio_runtime,
         };
 
@@ -94,20 +93,7 @@ impl App {
     }
 
     pub fn open_chat(&mut self) {
-        // Initialize chat if needed
-        if !self.chat_initialized {
-            if let Some(chat) = &mut self.chat {
-                // Initialize Claude client asynchronously
-                match self.tokio_runtime.block_on(chat.initialize()) {
-                    Ok(_) => {
-                        self.chat_initialized = true;
-                    }
-                    Err(e) => {
-                        chat.init_error = Some(format!("Failed to initialize: {}", e));
-                    }
-                }
-            }
-        }
+        // Initialization happens automatically in background on startup
         self.current_view = View::Chat;
     }
 }

@@ -87,7 +87,7 @@ pub fn render_dropdown(f: &mut Frame, area: Rect, app: &App) {
                         .bg(Color::Yellow)
                         .add_modifier(Modifier::BOLD)
                 } else if is_dir {
-                    Style::default().fg(Color::Cyan)
+                    Style::default().fg(Color::White)
                 } else {
                     Style::default().fg(Color::White)
                 };
@@ -160,7 +160,7 @@ pub fn render_file_browser(f: &mut Frame, area: Rect, app: &App) {
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
             } else if is_dir {
-                Style::default().fg(Color::Cyan)
+                Style::default().fg(Color::White)
             } else {
                 Style::default().fg(Color::White)
             };

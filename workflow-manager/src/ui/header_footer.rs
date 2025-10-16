@@ -24,7 +24,7 @@ pub fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(
             title,
             Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("      "),
@@ -59,7 +59,7 @@ pub fn render_footer(f: &mut Frame, area: Rect, app: &App) {
                     Span::styled(
                         "TYPE",
                         Style::default()
-                            .fg(Color::Green)
+                            .fg(Color::White)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" to edit  "),

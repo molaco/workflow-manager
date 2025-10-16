@@ -64,7 +64,6 @@ pub struct App {
     // Chat interface
     pub chat: Option<ChatInterface>,
     pub runtime: Option<Arc<dyn workflow_manager_sdk::WorkflowRuntime>>,
-    pub chat_initialized: bool,
 
     // Tokio runtime for async operations
     pub tokio_runtime: tokio::runtime::Runtime,

@@ -80,7 +80,7 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App) {
     spans.push(Span::styled(
         "[+ New]",
         Style::default()
-            .fg(Color::Green)
+            .fg(Color::White)
             .add_modifier(Modifier::BOLD),
     ));
 
@@ -105,11 +105,11 @@ pub fn render_empty_tabs(f: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             "Press [Ctrl+T] or click [+ New]",
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(Color::White),
         )),
         Line::from(Span::styled(
             "to start a new workflow",
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(Color::White),
         )),
     ];
 
@@ -145,7 +145,7 @@ pub fn render_close_confirmation(f: &mut Frame, area: Rect) {
             Span::styled(
                 "[Y]",
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" Yes  "),
@@ -191,7 +191,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
             let phase_color = match phase.status {
                 PhaseStatus::NotStarted => Color::Gray,
                 PhaseStatus::Running => Color::Yellow,
-                PhaseStatus::Completed => Color::Green,
+                PhaseStatus::Completed => Color::White,
                 PhaseStatus::Failed => Color::Red,
             };
 
@@ -205,7 +205,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                 Span::styled(format!("{} ", phase_icon), Style::default().fg(phase_color)),
                 Span::styled(
                     format!("{} ", expand_icon),
-                    Style::default().fg(Color::Cyan),
+                    Style::default().fg(Color::White),
                 ),
                 Span::styled(
                     format!("Phase {}: {}", phase.id, phase.name),
@@ -250,7 +250,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                     let task_color = match task.status {
                         TaskStatus::NotStarted => Color::Gray,
                         TaskStatus::Running => Color::Yellow,
-                        TaskStatus::Completed => Color::Green,
+                        TaskStatus::Completed => Color::White,
                         TaskStatus::Failed => Color::Red,
                     };
 
@@ -265,7 +265,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                         Span::styled(format!("{} ", task_icon), Style::default().fg(task_color)),
                         Span::styled(
                             format!("{} ", task_expand_icon),
-                            Style::default().fg(Color::Cyan),
+                            Style::default().fg(Color::White),
                         ),
                         Span::styled(
                             &task.description,
@@ -314,7 +314,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                             let agent_color = match agent.status {
                                 AgentStatus::NotStarted => Color::Gray,
                                 AgentStatus::Running => Color::Yellow,
-                                AgentStatus::Completed => Color::Green,
+                                AgentStatus::Completed => Color::White,
                                 AgentStatus::Failed => Color::Red,
                             };
 
@@ -330,7 +330,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                                 ),
                                 Span::styled(
                                     format!("{} ", agent_expand_icon),
-                                    Style::default().fg(Color::Cyan),
+                                    Style::default().fg(Color::White),
                                 ),
                                 Span::styled(
                                     format!("@{}", agent.name),
@@ -396,7 +396,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                                         lines.push(Line::from(vec![Span::styled(
                                             indicator,
                                             Style::default()
-                                                .fg(Color::Cyan)
+                                                .fg(Color::White)
                                                 .add_modifier(Modifier::ITALIC),
                                         )]));
                                     }
@@ -410,12 +410,12 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                 if !phase.output_files.is_empty() {
                     lines.push(Line::from(vec![
                         Span::raw("  "),
-                        Span::styled("Output files:", Style::default().fg(Color::Cyan)),
+                        Span::styled("Output files:", Style::default().fg(Color::White)),
                     ]));
                     for (path, desc) in &phase.output_files {
                         lines.push(Line::from(vec![
                             Span::raw("    "),
-                            Span::styled("📄 ", Style::default().fg(Color::Green)),
+                            Span::styled("📄 ", Style::default().fg(Color::White)),
                             Span::styled(path, Style::default().fg(Color::Yellow)),
                             Span::raw(" - "),
                             Span::styled(desc, Style::default().fg(Color::Gray)),

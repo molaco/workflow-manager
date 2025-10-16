@@ -39,85 +39,147 @@ pub fn render_chat(f: &mut Frame, area: Rect, app: &App) {
 
     // === RENDER CHAT MESSAGES ===
     let mut message_lines = Vec::new();
-    for msg in &chat.messages {
-        let role_style = match msg.role {
-            chat::ChatRole::User => Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-            chat::ChatRole::Assistant => Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        };
-        let role_text = match msg.role {
-            chat::ChatRole::User => "You",
-            chat::ChatRole::Assistant => "Claude",
-        };
 
-        message_lines.push(Line::from(vec![Span::styled(
-            format!("{}: ", role_text),
-            role_style,
-        )]));
-        message_lines.push(Line::from(msg.content.clone()));
-
-        // Show tool calls (simplified - details in logs pane)
-        if !msg.tool_calls.is_empty() {
-            message_lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  🔧 {} tool(s) used (see logs →)", msg.tool_calls.len()),
-                    Style::default().fg(Color::Yellow),
-                ),
-            ]));
-        }
+    // Show loading animation if not initialized
+    if !chat.initialized && chat.init_error.is_none() {
+        let spinner = chat.get_spinner_char();
 
         message_lines.push(Line::from(""));
-    }
-
-    if chat.waiting_for_response {
-        // Animated loading indicator like Claude Code
-        let spinner = chat.get_spinner_char();
-        let elapsed = chat.get_elapsed_seconds().unwrap_or(0);
-
+        message_lines.push(Line::from(""));
+        message_lines.push(Line::from(""));
         message_lines.push(Line::from(vec![
             Span::styled(
-                format!("{} ", spinner),
+                format!("    {} ", spinner),
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "Thinking",
+                "Initializing Claude...",
                 Style::default().fg(Color::Yellow),
             ),
-            Span::styled(
-                "…",
-                Style::default().fg(Color::DarkGray),
-            ),
         ]));
+        message_lines.push(Line::from(""));
+        message_lines.push(Line::from(Span::styled(
+            "    Please wait while we set up your AI assistant",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else if let Some(error) = &chat.init_error {
+        // Show error state
+        message_lines.push(Line::from(""));
+        message_lines.push(Line::from(""));
+        message_lines.push(Line::from(Span::styled(
+            "    ✗ Initialization Failed",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )));
+        message_lines.push(Line::from(""));
+        message_lines.push(Line::from(Span::styled(
+            format!("    {}", error),
+            Style::default().fg(Color::Red),
+        )));
+    } else {
+        // Normal chat mode - show messages
+        for msg in &chat.messages {
+            let role_style = match msg.role {
+                chat::ChatRole::User => Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+                chat::ChatRole::Assistant => Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            };
+            let role_text = match msg.role {
+                chat::ChatRole::User => "You",
+                chat::ChatRole::Assistant => "Claude",
+            };
 
-        message_lines.push(Line::from(vec![
-            Span::styled(
-                "  (esc to interrupt",
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled(
-                format!(" · {}s)", elapsed),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]));
+            message_lines.push(Line::from(vec![Span::styled(
+                format!("{}: ", role_text),
+                role_style,
+            )]));
+            message_lines.push(Line::from(msg.content.clone()));
+
+            // Show tool calls (simplified - details in logs pane)
+            if !msg.tool_calls.is_empty() {
+                message_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("  🔧 {} tool(s) used (see logs →)", msg.tool_calls.len()),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                ]));
+            }
+
+            message_lines.push(Line::from(""));
+        }
+
+        if chat.waiting_for_response {
+            // Animated loading indicator like Claude Code
+            let spinner = chat.get_spinner_char();
+            let elapsed = chat.get_elapsed_seconds().unwrap_or(0);
+
+            message_lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{} ", spinner),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Thinking",
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::styled(
+                    "…",
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+
+            message_lines.push(Line::from(vec![
+                Span::styled(
+                    "  (esc to interrupt",
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!(" · {}s)", elapsed),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+        }
     }
 
-    // Highlight active pane border
-    let chat_border_style = if matches!(chat.active_pane, ActivePane::ChatMessages) {
-        Style::default().fg(Color::Cyan)
+    // Determine title and border style
+    let (chat_title, chat_border_style) = if !chat.initialized && chat.init_error.is_none() {
+        // Loading state - animated dots
+        let indicator = chat.get_loading_indicator();
+        (
+            format!(" Chat with Claude [{}] ", indicator),
+            Style::default().fg(Color::Yellow),
+        )
+    } else if chat.init_error.is_some() {
+        // Error state
+        (
+            " Chat with Claude [✗] ".to_string(),
+            Style::default().fg(Color::Red),
+        )
+    } else if matches!(chat.active_pane, ActivePane::ChatMessages) {
+        // Ready state - active pane
+        (
+            " Chat with Claude [✓] ".to_string(),
+            Style::default().fg(Color::White),
+        )
     } else {
-        Style::default().fg(Color::DarkGray)
+        // Ready state - inactive pane
+        (
+            " Chat with Claude [✓] ".to_string(),
+            Style::default().fg(Color::DarkGray),
+        )
     };
 
     let messages_widget = Paragraph::new(message_lines)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Chat with Claude ")
+                .title(chat_title)
                 .border_style(chat_border_style),
         )
         .wrap(Wrap { trim: false })
@@ -126,12 +188,30 @@ pub fn render_chat(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(messages_widget, messages_area);
 
     // === RENDER INPUT BOX ===
-    let input_widget = Paragraph::new(chat.input_buffer.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Type your message (Enter to send, Tab to switch pane) ")
-            .style(Style::default().fg(Color::White)),
-    );
+    let (input_title, input_style) = if let Some(error) = &chat.init_error {
+        (
+            format!(" Error: {} ", error),
+            Style::default().fg(Color::Red),
+        )
+    } else if !chat.initialized {
+        (
+            " Please wait... ".to_string(),
+            Style::default().fg(Color::DarkGray),
+        )
+    } else {
+        (
+            " Type your message (Enter to send, Tab to switch pane) ".to_string(),
+            Style::default().fg(Color::White),
+        )
+    };
+
+    let input_widget = Paragraph::new(chat.input_buffer.as_str())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(input_title)
+                .style(input_style),
+        );
 
     f.render_widget(input_widget, input_area);
 
@@ -156,7 +236,7 @@ pub fn render_chat(f: &mut Frame, area: Rect, app: &App) {
                 Span::styled(
                     format!("═══ {} ═══", context),
                     Style::default()
-                        .fg(Color::Blue)
+                        .fg(Color::White)
                         .add_modifier(Modifier::BOLD),
                 ),
             ]));
@@ -169,7 +249,7 @@ pub fn render_chat(f: &mut Frame, area: Rect, app: &App) {
                         format!("🔧 Tool #{}: ", tool_idx + 1),
                         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(&tool_call.name, Style::default().fg(Color::Cyan)),
+                    Span::styled(&tool_call.name, Style::default().fg(Color::White)),
                 ]));
 
                 // Input (parameters)

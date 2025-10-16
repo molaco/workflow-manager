@@ -90,7 +90,7 @@ pub fn render_workflow_detail(f: &mut Frame, area: Rect, app: &App, idx: usize) 
             Span::styled(
                 &workflow.info.name,
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
@@ -135,7 +135,7 @@ pub fn render_workflow_detail(f: &mut Frame, area: Rect, app: &App, idx: usize) 
         Span::styled(
             format!("{} configured", configured_count),
             Style::default().fg(if configured_count > 0 {
-                Color::Green
+                Color::White
             } else {
                 Color::DarkGray
             }),
@@ -164,7 +164,7 @@ pub fn render_workflow_detail(f: &mut Frame, area: Rect, app: &App, idx: usize) 
 
         info_lines.push(Line::from(vec![
             Span::styled("  • ", Style::default().fg(Color::DarkGray)),
-            Span::styled(&field.label, Style::default().fg(Color::Cyan)),
+            Span::styled(&field.label, Style::default().fg(Color::White)),
             Span::raw(": "),
             Span::styled(display_value, value_style),
         ]));
@@ -176,7 +176,7 @@ pub fn render_workflow_detail(f: &mut Frame, area: Rect, app: &App, idx: usize) 
         Span::styled(
             "[L]",
             Style::default()
-                .fg(Color::Green)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" Launch workflow"),
@@ -249,7 +249,7 @@ pub fn render_workflow_edit(f: &mut Frame, area: Rect, app: &App, idx: usize) {
 
             let value_style = if is_editing_this {
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else if is_selected {
                 Style::default()
@@ -289,7 +289,7 @@ pub fn render_workflow_edit(f: &mut Frame, area: Rect, app: &App, idx: usize) {
                 Line::from(vec![Span::styled(
                     format!("{}{}: ", field.label, required_marker),
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(Color::White)
                         .add_modifier(Modifier::BOLD),
                 )]),
                 Line::from(vec![Span::styled(
@@ -300,7 +300,7 @@ pub fn render_workflow_edit(f: &mut Frame, area: Rect, app: &App, idx: usize) {
                     Span::raw("  "),
                     Span::styled(display_text, value_style),
                     if is_editing_this {
-                        Span::styled(" █", Style::default().fg(Color::Green))
+                        Span::styled(" █", Style::default().fg(Color::White))
                     } else {
                         Span::raw("")
                     },
@@ -365,7 +365,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
             let phase_color = match phase.status {
                 PhaseStatus::NotStarted => Color::Gray,
                 PhaseStatus::Running => Color::Yellow,
-                PhaseStatus::Completed => Color::Green,
+                PhaseStatus::Completed => Color::White,
                 PhaseStatus::Failed => Color::Red,
             };
 
@@ -379,7 +379,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                 Span::styled(format!("{} ", phase_icon), Style::default().fg(phase_color)),
                 Span::styled(
                     format!("{} ", expand_icon),
-                    Style::default().fg(Color::Cyan),
+                    Style::default().fg(Color::White),
                 ),
                 Span::styled(
                     format!("Phase {}: {}", phase.id, phase.name),
@@ -424,7 +424,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                     let task_color = match task.status {
                         TaskStatus::NotStarted => Color::Gray,
                         TaskStatus::Running => Color::Yellow,
-                        TaskStatus::Completed => Color::Green,
+                        TaskStatus::Completed => Color::White,
                         TaskStatus::Failed => Color::Red,
                     };
 
@@ -439,7 +439,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                         Span::styled(format!("{} ", task_icon), Style::default().fg(task_color)),
                         Span::styled(
                             format!("{} ", task_expand_icon),
-                            Style::default().fg(Color::Cyan),
+                            Style::default().fg(Color::White),
                         ),
                         Span::styled(
                             &task.description,
@@ -488,7 +488,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                             let agent_color = match agent.status {
                                 AgentStatus::NotStarted => Color::Gray,
                                 AgentStatus::Running => Color::Yellow,
-                                AgentStatus::Completed => Color::Green,
+                                AgentStatus::Completed => Color::White,
                                 AgentStatus::Failed => Color::Red,
                             };
 
@@ -504,7 +504,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                                 ),
                                 Span::styled(
                                     format!("{} ", agent_expand_icon),
-                                    Style::default().fg(Color::Cyan),
+                                    Style::default().fg(Color::White),
                                 ),
                                 Span::styled(
                                     format!("@{}", agent.name),
@@ -547,12 +547,12 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                 if !phase.output_files.is_empty() {
                     lines.push(Line::from(vec![
                         Span::raw("  "),
-                        Span::styled("Output files:", Style::default().fg(Color::Cyan)),
+                        Span::styled("Output files:", Style::default().fg(Color::White)),
                     ]));
                     for (path, desc) in &phase.output_files {
                         lines.push(Line::from(vec![
                             Span::raw("    "),
-                            Span::styled(format!("📄 {}", path), Style::default().fg(Color::Blue)),
+                            Span::styled(format!("📄 {}", path), Style::default().fg(Color::White)),
                             Span::raw(" - "),
                             Span::styled(desc, Style::default().fg(Color::Gray)),
                         ]));
@@ -574,7 +574,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
             lines.push(Line::from(vec![Span::styled(
                 "Workflow Output:",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             )]));
             lines.push(Line::from(""));
