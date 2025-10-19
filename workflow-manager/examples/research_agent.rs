@@ -28,6 +28,41 @@ struct ResearchResult {
     focus: Vec<String>,
 }
 
+/// Clean YAML response by removing markdown code blocks, prose, and document separators
+fn clean_yaml(text: &str) -> anyhow::Result<String> {
+    // Step 1: Extract from markdown code blocks if present (like tasks_agent.rs)
+    let mut yaml = if text.contains("```yaml") {
+        let start = text.find("```yaml").unwrap() + 7;
+        let end = text[start..].find("```").unwrap() + start;
+        text[start..end].trim().to_string()
+    } else if text.contains("```") {
+        let start = text.find("```").unwrap() + 3;
+        let end = text[start..].find("```").unwrap() + start;
+        text[start..end].trim().to_string()
+    } else {
+        text.trim().to_string()
+    };
+
+    // Step 2: Find where actual YAML starts (look for "objective:")
+    // This handles prose text like "Perfect! Now I have all the data..."
+    if let Some(obj_pos) = yaml.find("objective:") {
+        yaml = yaml[obj_pos..].to_string();
+    } else {
+        // No "objective:" found - agent likely generated prose instead of YAML
+        return Err(anyhow::anyhow!(
+            "Could not find 'objective:' in response. The agent appears to have generated explanatory text instead of YAML.\n\nFirst 500 chars of response:\n{}",
+            &text.chars().take(500).collect::<String>()
+        ));
+    }
+
+    // Step 3: Strip YAML document separators (---)
+    // These cause "multiple documents" errors in serde_yaml::from_str
+    yaml = yaml.replace("---", "");
+
+    // Step 4: Return cleaned YAML
+    Ok(yaml.trim().to_string())
+}
+
 /// Phase 1: Generate research prompts based on objective
 async fn generate_prompts(
     objective: &str,
@@ -38,8 +73,18 @@ async fn generate_prompts(
     println!("PHASE 1: Generating Research Prompts");
     println!("{}", "=".repeat(80));
 
-    // Build system prompt
-    let system_prompt = format!("{}\n\n# Output Style\n{}", prompt_writer, output_style);
+    // Build system prompt with strong YAML-only instructions
+    let system_prompt = format!(
+        "{}\n\n# Output Style\n{}\n\n\
+        CRITICAL INSTRUCTIONS:\n\
+        - Output ONLY valid YAML\n\
+        - NO markdown code blocks (no ```yaml or ```)\n\
+        - NO commentary or explanations\n\
+        - NO prose text before or after the YAML\n\
+        - Start directly with 'objective:'\n\
+        - Use proper YAML indentation",
+        prompt_writer, output_style
+    );
 
     // Create options for prompt generation
     let options = ClaudeAgentOptions::builder()
@@ -52,9 +97,13 @@ async fn generate_prompts(
         .permission_mode(claude_agent_sdk::PermissionMode::BypassPermissions)
         .build();
 
-    // Send query
+    // Send query with reinforced instructions
     let query_text = format!(
-        "Generate research prompts for: {}\n\nIMPORTANT: Return ONLY valid YAML with proper newlines and indentation.",
+        "Generate research prompts for: {}\n\n\
+        IMPORTANT: Output ONLY the YAML structure, no markdown code blocks, no extra commentary.\n\
+        Start your response directly with:\n\
+        objective: <the objective text>\n\
+        prompts:\n  - ...",
         objective
     );
 
@@ -80,33 +129,19 @@ async fn generate_prompts(
 
     println!("\n");
 
-    // Extract YAML from markdown code blocks if present
-    let mut yaml_content = if response_text.contains("```yaml") {
-        let yaml_start = response_text.find("```yaml").unwrap() + 7;
-        let yaml_end = response_text[yaml_start..].find("```").unwrap() + yaml_start;
-        response_text[yaml_start..yaml_end].trim().to_string()
-    } else if response_text.contains("```") {
-        let yaml_start = response_text.find("```").unwrap() + 3;
-        let yaml_end = response_text[yaml_start..].find("```").unwrap() + yaml_start;
-        response_text[yaml_start..yaml_end].trim().to_string()
+    // Clean and parse YAML response
+    let yaml_content = clean_yaml(&response_text)?;
+
+    // Debug: Save cleaned YAML to file for inspection
+    let debug_path = format!("debug_cleaned_yaml_{}.yaml", chrono::Local::now().format("%Y%m%d_%H%M%S"));
+    if let Err(e) = fs::write(&debug_path, &yaml_content).await {
+        eprintln!("Warning: Could not write debug YAML: {}", e);
     } else {
-        response_text.trim().to_string()
-    };
-
-    // Fix common YAML formatting issues
-    if yaml_content.starts_with("objective:") && !yaml_content.contains("objective:\n") {
-        yaml_content = yaml_content.replacen("objective:", "objective:\n", 1);
-    }
-    if yaml_content.contains("\"prompts:") {
-        yaml_content = yaml_content.replace("\"prompts:", "\"\nprompts:");
-    }
-    if yaml_content.contains("prompts:  -") {
-        yaml_content = yaml_content.replace("prompts:  -", "prompts:\n  -");
+        println!("Debug: Cleaned YAML saved to {}", debug_path);
     }
 
-    // Parse YAML
     let prompts_data: PromptsData = serde_yaml::from_str(&yaml_content)
-        .map_err(|e| anyhow::anyhow!("Failed to parse YAML: {}\n\nRaw: {}", e, yaml_content))?;
+        .map_err(|e| anyhow::anyhow!("Failed to parse YAML: {}\n\nCleaned YAML saved to: {}\n\nError: {}", e, debug_path, yaml_content))?;
 
     Ok(prompts_data)
 }

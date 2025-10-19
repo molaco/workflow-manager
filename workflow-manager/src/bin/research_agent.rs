@@ -486,7 +486,9 @@ async fn generate_prompts(
     }
 
     let yaml_content = extract_yaml(&response_text);
-    let prompts_data: PromptsData = serde_yaml::from_str(&yaml_content).map_err(|e| {
+
+    // Parse YAML flexibly first (like Python's yaml.safe_load)
+    let prompts_yaml: serde_yaml::Value = serde_yaml::from_str(&yaml_content).map_err(|e| {
         let error_msg = format!("Failed to parse prompts YAML: {}", e);
         log_agent_failed!(task_id, agent_name, &error_msg);
 
@@ -500,6 +502,37 @@ async fn generate_prompts(
 
         anyhow::anyhow!("{}", error_msg)
     })?;
+
+    // Extract fields with safe defaults
+    let objective = prompts_yaml["objective"]
+        .as_str()
+        .unwrap_or("Unknown objective")
+        .to_string();
+
+    let prompts_array = prompts_yaml["prompts"]
+        .as_sequence()
+        .cloned()
+        .unwrap_or_default();
+
+    let prompts: Vec<ResearchPrompt> = prompts_array
+        .iter()
+        .filter_map(|p| {
+            Some(ResearchPrompt {
+                title: p["title"].as_str()?.to_string(),
+                query: p["query"].as_str()?.to_string(),
+                focus: p["focus"]
+                    .as_sequence()
+                    .map(|seq| {
+                        seq.iter()
+                            .filter_map(|f| f.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            })
+        })
+        .collect();
+
+    let prompts_data = PromptsData { objective, prompts };
 
     log_agent_complete!(
         task_id,
@@ -1337,11 +1370,15 @@ Save the final documentation to: {}"#,
 fn extract_yaml(text: &str) -> String {
     let yaml = if text.contains("```yaml") {
         let yaml_start = text.find("```yaml").unwrap() + 7;
-        let yaml_end = text[yaml_start..].find("```").unwrap() + yaml_start;
+        let yaml_end = text[yaml_start..].rfind("```")
+            .map(|pos| pos + yaml_start)
+            .unwrap_or(text.len());
         text[yaml_start..yaml_end].trim().to_string()
     } else if text.contains("```") {
         let yaml_start = text.find("```").unwrap() + 3;
-        let yaml_end = text[yaml_start..].find("```").unwrap() + yaml_start;
+        let yaml_end = text[yaml_start..].rfind("```")
+            .map(|pos| pos + yaml_start)
+            .unwrap_or(text.len());
         text[yaml_start..yaml_end].trim().to_string()
     } else {
         text.trim().to_string()
@@ -1414,6 +1451,22 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Change working directory to target directory if specified
+    if let Some(dir) = &args.dir {
+        let target_dir = PathBuf::from(dir).canonicalize().map_err(|e| {
+            anyhow::anyhow!("Invalid directory path '{}': {}", dir, e)
+        })?;
+        std::env::set_current_dir(&target_dir).map_err(|e| {
+            anyhow::anyhow!("Failed to change directory to '{}': {}", target_dir.display(), e)
+        })?;
+        println!("📁 Working directory: {}", target_dir.display());
+        println!();
+    }
+
+    // Create directory structure for workflow artifacts
+    fs::create_dir_all("./RESULTS").await?;
+    fs::create_dir_all("./OUTPUT").await?;
+
     let mut codebase_analysis: Option<CodebaseAnalysis> = None;
     let mut prompts_data: Option<PromptsData> = None;
     let mut research_results: Vec<ResearchResult> = Vec::new();
@@ -1437,7 +1490,7 @@ async fn main() -> anyhow::Result<()> {
 
         // Save analysis to file
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-        let analysis_path = PathBuf::from(format!("codebase_analysis_{}.yaml", timestamp));
+        let analysis_path = PathBuf::from(format!("./OUTPUT/codebase_analysis_{}.yaml", timestamp));
         let analysis_yaml = serde_yaml::to_string(&analysis)?;
         fs::write(&analysis_path, analysis_yaml).await?;
         println!("[Phase 0] Analysis saved to: {}", analysis_path.display());
@@ -1475,7 +1528,7 @@ async fn main() -> anyhow::Result<()> {
 
         // Save prompts to file
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-        let prompts_path = PathBuf::from(format!("research_prompts_{}.yaml", timestamp));
+        let prompts_path = PathBuf::from(format!("./OUTPUT/research_prompts_{}.yaml", timestamp));
         let prompts_yaml = serde_yaml::to_string(&prompts)?;
         fs::write(&prompts_path, prompts_yaml).await?;
         println!("[Phase 1] Prompts saved to: {}", prompts_path.display());
@@ -1715,10 +1768,12 @@ async fn main() -> anyhow::Result<()> {
             anyhow::bail!("No research results to synthesize");
         }
 
-        let output_path = args.output.as_ref().map(PathBuf::from).unwrap_or_else(|| {
+        let output_path = if let Some(output) = &args.output {
+            PathBuf::from(output)
+        } else {
             let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-            PathBuf::from(format!("research_output_{}.md", timestamp))
-        });
+            PathBuf::from(format!("./OUTPUT/research_output_{}.md", timestamp))
+        };
 
         synthesize_documentation(&research_results, &output_path, args.batch_size).await?;
 
