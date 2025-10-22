@@ -1,569 +1,460 @@
-# Workflow Manager TUI Refactoring Plan
+# Refactoring Plan: research_agent.rs to Library + Binary
 
-**Goal**: Refactor `src/main.rs` (4042 lines) into manageable, maintainable modules
+## Overview
+Refactor `src/bin/research_agent.rs` into a library-based architecture for better modularity, testability, and reusability.
 
-**Strategy**: Incremental refactoring from Approach 4 (minimal split) → Approach 1 (domain-driven modules)
+## Goals
+- Separate business logic from CLI orchestration
+- Enable direct library usage from TUI or other Rust code
+- Improve code organization and maintainability
+- Enable unit testing of individual phases
+- Allow parallel compilation of modules
 
-**Process**: Each phase builds on the previous, with testing and review between phases
-
----
-
-## Current State
+## Target Structure
 
 ```
-src/main.rs: 4042 lines
-├── 10 structs/enums (data models)
-├── 51 App methods (business logic)
-├── 13 render functions (UI)
-└── 10 standalone functions (utilities)
+workflow-manager/
+├── src/
+│   ├── lib.rs                          # Library root
+│   ├── research/
+│   │   ├── mod.rs                      # Module exports
+│   │   ├── types.rs                    # Data structures
+│   │   ├── cli.rs                      # CLI argument parsing
+│   │   ├── phase0_analyze.rs           # Codebase analysis
+│   │   ├── phase1_prompts.rs           # Prompt generation
+│   │   ├── phase2_research.rs          # Research execution
+│   │   ├── phase3_validate.rs          # YAML validation
+│   │   ├── phase4_synthesize.rs        # Documentation synthesis
+│   │   └── workflow.rs                 # Workflow orchestration
+│   └── bin/
+│       └── research_agent.rs           # Thin CLI wrapper
+└── tests/
+    └── research/
+        ├── test_phase0.rs
+        ├── test_phase1.rs
+        └── ...
 ```
 
----
+## Detailed Module Breakdown
 
-## Phase 0: Preparation ✓
+### 1. `src/lib.rs`
+**Purpose:** Library root that exposes the research module
 
-**Goal**: Set up testing infrastructure before refactoring
-
-### Tasks:
-- [x] Create this refactoring plan
-- [ ] Create test suite for critical workflows
-- [ ] Document current functionality
-- [ ] Create backup branch
-
-### Testing Checklist (use for all phases):
-```
-Manual Tests:
-[ ] App launches without errors
-[ ] Workflow list displays correctly
-[ ] Can navigate with arrow keys
-[ ] Can view workflow detail (Enter)
-[ ] Can edit workflow (E key)
-[ ] File browser opens and works (/)
-[ ] History dropdown works (Tab)
-[ ] Can launch workflow in new tab (Enter in edit view)
-[ ] Tab navigation works (Tab/Shift+Tab)
-[ ] Tab close works (C or Ctrl+W)
-[ ] Running workflow shows phases/tasks/agents
-[ ] Can expand/collapse items (Space)
-[ ] Chat opens (A key) and responds
-[ ] Chat can list workflows via MCP tools
-[ ] Session persistence works (quit and restart)
-[ ] No panics or crashes during normal use
-```
-
-### Verification:
-```bash
-cargo build --release
-cargo test
-cargo run --release  # Manual testing
-```
-
-**Commit**: "docs: Add refactoring plan for main.rs split"
-
----
-
-## Phase 1: Extract Data Models (Minimal Split - Part 1)
-
-**Goal**: Move all data structures to `models.rs`
-
-**Estimated Time**: 1 hour
-**Risk Level**: Low ⚠️
-
-### Files Changed:
-- `src/main.rs` → remove structs/enums, add `use crate::models::*`
-- `src/models.rs` → NEW (create this file)
-
-### What Moves:
+**Contents:**
 ```rust
-// To models.rs:
-- struct WorkflowHistory
-- enum PhaseStatus
-- enum TaskStatus
-- enum AgentStatus
-- struct WorkflowAgent
-- struct WorkflowTask
-- struct WorkflowPhase
-- struct WorkflowTab
-- enum View
-- struct App (just the struct definition, not impl)
+pub mod research;
 ```
 
-### Implementation Steps:
-1. Create `src/models.rs`
-2. Copy all struct/enum definitions to models.rs
-3. Make all fields `pub` where needed
-4. Add `mod models;` to main.rs
-5. Add `use crate::models::*;` to main.rs
-6. Remove original definitions from main.rs
-7. Compile and fix any visibility issues
+### 2. `src/research/mod.rs`
+**Purpose:** Module organization and re-exports
 
-### Tests:
-- [ ] `cargo build --release` succeeds
-- [ ] Run full manual test checklist
-- [ ] No behavioral changes
-
-### Verification Command:
-```bash
-# Before
-wc -l src/main.rs  # 4042 lines
-
-# After
-wc -l src/main.rs src/models.rs  # ~3600 + ~450 lines
-cargo build --release && cargo test
-```
-
-**Commit**: "refactor: Extract data models to models.rs"
-
----
-
-## Phase 2: Extract UI Rendering (Minimal Split - Part 2)
-
-**Goal**: Move all render functions to `ui.rs`
-
-**Estimated Time**: 1.5 hours
-**Risk Level**: Low ⚠️
-
-### Files Changed:
-- `src/main.rs` → remove render functions, add `use crate::ui::*`
-- `src/ui.rs` → NEW (create this file)
-
-### What Moves:
+**Contents:**
 ```rust
-// To ui.rs:
-- fn ui(f: &mut Frame, app: &App)
-- fn render_header(...)
-- fn render_workflow_list(...)
-- fn render_workflow_detail(...)
-- fn render_workflow_edit(...)
-- fn render_workflow_running(...)
-- fn render_footer(...)
-- fn render_dropdown(...)
-- fn render_file_browser(...)
-- fn render_tab_bar(...)
-- fn render_empty_tabs(...)
-- fn render_close_confirmation(...)
-- fn render_tab_content(...)
-- fn render_chat(...)
-- fn centered_rect(...)
+pub mod types;
+pub mod cli;
+pub mod phase0_analyze;
+pub mod phase1_prompts;
+pub mod phase2_research;
+pub mod phase3_validate;
+pub mod phase4_synthesize;
+pub mod workflow;
+
+// Re-export commonly used types
+pub use types::{CodebaseAnalysis, PromptsData, ResearchResult, WorkflowConfig};
+pub use workflow::run_research_workflow;
 ```
 
-### Implementation Steps:
-1. Create `src/ui.rs`
-2. Add necessary imports (ratatui types, models, etc.)
-3. Copy all render functions to ui.rs
-4. Make functions `pub` where needed
-5. Add `mod ui;` to main.rs
-6. Add `use crate::ui;` to main.rs
-7. Update main.rs to call `ui::ui(...)` instead of `ui(...)`
-8. Remove original functions from main.rs
-9. Compile and fix any import issues
+### 3. `src/research/types.rs`
+**Purpose:** All data structures and type definitions
 
-### Tests:
-- [ ] `cargo build --release` succeeds
-- [ ] All UI renders correctly (check each view)
-- [ ] No visual regressions
-- [ ] Run full manual test checklist
+**Contents:**
+- `CodebaseAnalysis` struct
+- `PromptsData` struct
+- `ResearchPrompt` struct
+- `ResearchResult` struct
+- `WorkflowConfig` struct (new - consolidates CLI args)
+- Serde derive macros for all types
 
-### Verification Command:
-```bash
-# After
-wc -l src/main.rs src/ui.rs src/models.rs  # ~2000 + ~1500 + ~450 lines
-cargo build --release && cargo test
-```
+**Lines to extract:** 61-103 (current research_agent.rs)
 
-**Commit**: "refactor: Extract UI rendering to ui.rs"
+### 4. `src/research/cli.rs`
+**Purpose:** CLI argument parsing with clap
 
----
+**Contents:**
+- `Args` struct with clap derives
+- Helper methods for Args (e.g., `parse_phases()`)
+- Conversion: `impl From<Args> for WorkflowConfig`
 
-## Phase 3: Extract App Methods (Minimal Split - Part 3)
+**Lines to extract:** 105-201 (current research_agent.rs)
 
-**Goal**: Move App implementation to `app.rs`
+### 5. `src/research/phase0_analyze.rs`
+**Purpose:** Codebase analysis functionality
 
-**Estimated Time**: 1.5 hours
-**Risk Level**: Medium ⚠️⚠️
-
-### Files Changed:
-- `src/main.rs` → keep only App struct, remove impl block
-- `src/app.rs` → NEW (create this file)
-- `src/models.rs` → move App struct here
-
-### What Moves:
+**Public API:**
 ```rust
-// To app.rs:
-- impl App { ... }  (all 51 methods)
+pub async fn analyze_codebase(codebase_path: &Path) -> anyhow::Result<CodebaseAnalysis>
 ```
 
-### Implementation Steps:
-1. Move `struct App` from main.rs to models.rs
-2. Create `src/app.rs`
-3. Copy entire `impl App` block to app.rs
-4. Add necessary imports
-5. Add `mod app;` to main.rs
-6. Remove impl block from main.rs
-7. Compile and fix any issues
+**Contents:**
+- `analyze_codebase()` function
+- Helper functions for file analysis
+- Dependencies: `tokio::fs`, `serde_yaml`
 
-### Tests:
-- [ ] `cargo build --release` succeeds
-- [ ] All app functionality works (tabs, navigation, editing)
-- [ ] Run full manual test checklist
-- [ ] Session save/restore works
+**Lines to extract:** 203-297 (current research_agent.rs)
 
-### Verification Command:
-```bash
-# After
-wc -l src/main.rs src/app.rs src/ui.rs src/models.rs
-# Should be: ~500 + ~1500 + ~1500 + ~500 lines
-cargo build --release && cargo test
-```
+### 6. `src/research/phase1_prompts.rs`
+**Purpose:** Research prompt generation
 
-**Commit**: "refactor: Extract App implementation to app.rs"
-
----
-
-## Phase 4: Extract Utilities (Minimal Split - Part 4)
-
-**Goal**: Move standalone utility functions to appropriate modules
-
-**Estimated Time**: 30 minutes
-**Risk Level**: Low ⚠️
-
-### Files Changed:
-- `src/main.rs` → remove utility functions
-- `src/utils.rs` → NEW (create this file)
-
-### What Moves:
+**Public API:**
 ```rust
-// To utils.rs:
-- fn history_file_path() -> PathBuf
-- fn load_history() -> WorkflowHistory
-- fn save_history(history: &WorkflowHistory) -> Result<()>
-- fn load_workflows() -> Vec<Workflow>
-- fn load_builtin_workflows() -> Vec<Workflow>
-- fn load_discovered_workflows() -> Vec<Workflow>
+pub async fn generate_prompts(
+    analysis: &CodebaseAnalysis,
+    objective: &str,
+) -> anyhow::Result<PromptsData>
 ```
 
-### Implementation Steps:
-1. Create `src/utils.rs`
-2. Move utility functions to utils.rs
-3. Make functions `pub` where needed
-4. Add `mod utils;` to main.rs
-5. Update references in main.rs
-6. Compile and fix issues
+**Contents:**
+- `generate_prompts()` function
+- Claude agent setup for prompt generation
+- Dependencies: `claude_agent_sdk`, `workflow_manager_sdk`
 
-### Tests:
-- [ ] `cargo build --release` succeeds
-- [ ] Workflow discovery works
-- [ ] History persistence works
-- [ ] Run manual test checklist
+**Lines to extract:** 299-410 (current research_agent.rs)
 
-### Verification Command:
-```bash
-# After - main.rs should be ~300 lines
-wc -l src/main.rs
-cargo build --release && cargo test
+### 7. `src/research/phase2_research.rs`
+**Purpose:** Research execution with parallel agents
+
+**Public API:**
+```rust
+pub async fn execute_research(
+    prompts_data: &PromptsData,
+    batch_size: usize,
+) -> anyhow::Result<Vec<ResearchResult>>
+
+pub async fn execute_single_research(
+    prompt: &ResearchPrompt,
+    research_number: usize,
+    prefix: Option<&str>,
+) -> anyhow::Result<ResearchResult>
 ```
 
-**Commit**: "refactor: Extract utility functions to utils.rs"
+**Contents:**
+- `execute_research()` function (orchestrates parallel execution)
+- `execute_single_research()` function (single agent execution)
+- Agent configuration and streaming logic
+- Dependencies: `claude_agent_sdk`, `tokio`, `futures`
 
----
+**Lines to extract:** 412-619 (current research_agent.rs)
 
-## Phase 5: Split UI Module by View (Incremental - Part 1)
+### 8. `src/research/phase3_validate.rs`
+**Purpose:** YAML validation and fixing
 
-**Goal**: Break `ui.rs` into view-specific modules
+**Public API:**
+```rust
+pub async fn validate_yaml_file(file_path: &str) -> anyhow::Result<()>
 
-**Estimated Time**: 2 hours
-**Risk Level**: Low ⚠️
-
-### Structure:
-```
-src/ui/
-├── mod.rs              (~100 lines - main ui() function + re-exports)
-├── header_footer.rs    (~200 lines - header, footer)
-├── workflow_views.rs   (~600 lines - list, detail, edit, running)
-├── tab_views.rs        (~400 lines - tab bar, tab content, empty state)
-├── chat_view.rs        (~100 lines - chat rendering)
-└── components.rs       (~300 lines - dropdown, file browser, popups)
+pub fn extract_yaml(text: &str) -> String
 ```
 
-### Implementation Steps:
-1. Create `src/ui/` directory
-2. Create `mod.rs` with main `ui()` function
-3. Create individual view files
-4. Move render functions to appropriate files
-5. Update imports and re-exports
-6. Update `main.rs` to use `crate::ui::ui` instead of `crate::ui`
-7. Delete old `ui.rs`
-8. Compile and test
+**Contents:**
+- `validate_yaml_file()` function
+- `extract_yaml()` helper function
+- Claude agent for YAML fixing
+- Dependencies: `serde_yaml`, `claude_agent_sdk`
 
-### Tests:
-- [ ] `cargo build --release` succeeds
-- [ ] All views render correctly
-- [ ] Run full manual test checklist
+**Lines to extract:** 621-810, 916-955 (current research_agent.rs)
 
-**Commit**: "refactor: Split ui.rs into view-specific modules"
+### 9. `src/research/phase4_synthesize.rs`
+**Purpose:** Documentation synthesis with file-condenser subagent
 
----
-
-## Phase 6: Split App Module by Concern (Incremental - Part 2)
-
-**Goal**: Break `app.rs` into domain-specific modules
-
-**Estimated Time**: 3 hours
-**Risk Level**: Medium ⚠️⚠️
-
-### Structure:
-```
-src/app/
-├── mod.rs              (~100 lines - App struct + re-exports)
-├── tabs.rs             (~400 lines - tab management)
-├── navigation.rs       (~300 lines - navigation methods)
-├── file_browser.rs     (~300 lines - file browser logic)
-├── history.rs          (~200 lines - history/session)
-├── workflow_ops.rs     (~400 lines - workflow launch/edit)
-└── state.rs            (~200 lines - state management helpers)
+**Public API:**
+```rust
+pub async fn synthesize_documentation(
+    results_file: &Path,
+    output_path: &Path,
+) -> anyhow::Result<()>
 ```
 
-### Implementation Steps:
-1. Create `src/app/` directory
-2. Create `mod.rs` with App struct
-3. Split methods by domain into separate files
-4. Use traits or impl blocks for organization
-5. Update imports and visibility
-6. Delete old `app.rs`
-7. Compile and test
+**Contents:**
+- `synthesize_documentation()` function
+- File-condenser subagent definition
+- Agent-driven strategy for large files
+- Dependencies: `claude_agent_sdk`, `workflow_manager_sdk`
 
-### Tests:
-- [ ] `cargo build --release` succeeds
-- [ ] All app methods work correctly
-- [ ] Tab operations work (create, close, navigate)
-- [ ] File browser works
-- [ ] History persistence works
-- [ ] Run full manual test checklist
+**Lines to extract:** 813-914 (current research_agent.rs)
 
-**Commit**: "refactor: Split app.rs into domain modules"
+### 10. `src/research/workflow.rs`
+**Purpose:** High-level workflow orchestration
 
----
+**Public API:**
+```rust
+pub struct WorkflowConfig {
+    pub objective: String,
+    pub phases: Vec<u32>,
+    pub batch_size: usize,
+    pub dir: Option<String>,
+    pub analysis_file: Option<String>,
+    pub prompts_file: Option<String>,
+    pub results_file: Option<String>,
+    pub output: Option<String>,
+}
 
-## Phase 7: Organize Models (Incremental - Part 3)
-
-**Goal**: Split models by domain
-
-**Estimated Time**: 1 hour
-**Risk Level**: Low ⚠️
-
-### Structure:
-```
-src/models/
-├── mod.rs              (~50 lines - re-exports)
-├── workflow.rs         (~250 lines - Phase/Task/Agent/Status enums)
-├── tab.rs              (~150 lines - WorkflowTab)
-├── view.rs             (~50 lines - View enum)
-└── history.rs          (~100 lines - WorkflowHistory)
+pub async fn run_research_workflow(config: WorkflowConfig) -> anyhow::Result<()>
 ```
 
-### Implementation Steps:
-1. Create `src/models/` directory
-2. Split models.rs by domain
-3. Update imports and re-exports
-4. Delete old models.rs
-5. Compile and test
+**Contents:**
+- `WorkflowConfig` struct (consolidates all config)
+- `run_research_workflow()` function (main orchestration)
+- Phase execution logic with proper file path tracking
+- Directory creation and timestamp generation
+- Dependencies: All phase modules
 
-### Tests:
-- [ ] `cargo build --release` succeeds
-- [ ] All types accessible where needed
-- [ ] Run manual test checklist
+**Lines to extract:** 957-1352 (main function logic, current research_agent.rs)
 
-**Commit**: "refactor: Organize models into domain modules"
+### 11. `src/bin/research_agent.rs`
+**Purpose:** Thin CLI wrapper
 
----
+**Contents:**
+```rust
+use clap::Parser;
+use workflow_manager::research::{cli::Args, workflow::run_research_workflow};
 
-## Phase 8: Final Cleanup (Incremental - Part 4)
-
-**Goal**: Polish module structure and documentation
-
-**Estimated Time**: 1 hour
-**Risk Level**: Low ⚠️
-
-### Tasks:
-- [ ] Add module-level documentation
-- [ ] Ensure consistent visibility (pub vs pub(crate))
-- [ ] Remove unused imports
-- [ ] Run clippy and fix warnings
-- [ ] Update any outdated comments
-- [ ] Verify no dead code
-
-### Implementation Steps:
-1. Add doc comments to each module
-2. Run `cargo clippy --all-targets`
-3. Fix all warnings
-4. Run `cargo fmt`
-5. Review all pub visibility
-6. Test everything
-
-### Tests:
-- [ ] `cargo build --release` succeeds
-- [ ] `cargo clippy` has no warnings
-- [ ] `cargo test` passes
-- [ ] Run full manual test checklist
-
-**Commit**: "refactor: Final cleanup and documentation"
-
----
-
-## Final Structure
-
-```
-workflow-manager/src/
-├── main.rs                    (~200 lines - entry point + event loop)
-├── lib.rs                     (~50 lines - library exports)
-│
-├── app/
-│   ├── mod.rs                 (~100 lines)
-│   ├── tabs.rs                (~400 lines)
-│   ├── navigation.rs          (~300 lines)
-│   ├── file_browser.rs        (~300 lines)
-│   ├── history.rs             (~200 lines)
-│   ├── workflow_ops.rs        (~400 lines)
-│   └── state.rs               (~200 lines)
-│
-├── ui/
-│   ├── mod.rs                 (~100 lines)
-│   ├── header_footer.rs       (~200 lines)
-│   ├── workflow_views.rs      (~600 lines)
-│   ├── tab_views.rs           (~400 lines)
-│   ├── chat_view.rs           (~100 lines)
-│   └── components.rs          (~300 lines)
-│
-├── models/
-│   ├── mod.rs                 (~50 lines)
-│   ├── workflow.rs            (~250 lines)
-│   ├── tab.rs                 (~150 lines)
-│   ├── view.rs                (~50 lines)
-│   └── history.rs             (~100 lines)
-│
-├── utils.rs                   (~200 lines)
-├── chat.rs                    (~232 lines - existing)
-├── runtime.rs                 (~279 lines - existing)
-├── mcp_tools.rs               (~229 lines - existing)
-└── discovery.rs               (~212 lines - existing)
-
-Total files: ~22
-Largest file: ~600 lines
-Average file: ~250 lines
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+    let config = args.into();
+    run_research_workflow(config).await
+}
 ```
 
----
+**Size:** ~15 lines (down from 1300+)
+
+## Implementation Steps
+
+### Phase 1: Setup (Low Risk)
+1. Create `src/lib.rs` with `pub mod research;`
+2. Create `src/research/` directory
+3. Create empty module files with TODOs
+4. Create `src/research/mod.rs` with module declarations
+5. **Verify:** `cargo build` still works
+
+### Phase 2: Extract Types (Low Risk)
+1. Create `src/research/types.rs`
+2. Copy structs: `CodebaseAnalysis`, `PromptsData`, `ResearchPrompt`, `ResearchResult`
+3. Add `pub` visibility to all structs and fields
+4. In `research_agent.rs`, add: `use workflow_manager::research::types::*;`
+5. Remove struct definitions from `research_agent.rs`
+6. **Verify:** `cargo build --bin research_agent` works
+7. **Verify:** `cargo run --bin research_agent -- --help` works
+
+### Phase 3: Extract CLI (Low Risk)
+1. Create `src/research/cli.rs`
+2. Copy `Args` struct with clap derives
+3. In `research_agent.rs`, change to: `use workflow_manager::research::cli::Args;`
+4. Remove `Args` from `research_agent.rs`
+5. **Verify:** CLI parsing still works
+6. **Test:** `cargo run --bin research_agent -- --objective "test" --phases 0`
+
+### Phase 4: Extract Phase 0 (Medium Risk)
+1. Create `src/research/phase0_analyze.rs`
+2. Copy `analyze_codebase()` function
+3. Make it `pub async fn`
+4. Update imports in the module
+5. In `research_agent.rs`, import and use the function
+6. Remove original function from `research_agent.rs`
+7. **Verify:** Phase 0 still executes correctly
+8. **Test:** Run with `--phases 0 --dir .`
+
+### Phase 5: Extract Phase 1 (Medium Risk)
+1. Create `src/research/phase1_prompts.rs`
+2. Copy `generate_prompts()` function
+3. Make it `pub async fn`
+4. Update imports
+5. In `research_agent.rs`, import and use
+6. Remove from `research_agent.rs`
+7. **Verify:** Phase 1 executes
+8. **Test:** Run with `--phases 0,1 --objective "test"`
+
+### Phase 6: Extract Phase 2 (High Risk - Complex)
+1. Create `src/research/phase2_research.rs`
+2. Copy both `execute_research()` and `execute_single_research()`
+3. Make both `pub async fn`
+4. Ensure all dependencies are imported
+5. In `research_agent.rs`, import and use
+6. Remove from `research_agent.rs`
+7. **Verify:** Phase 2 executes with parallel agents
+8. **Test:** Run full workflow through Phase 2
+
+### Phase 7: Extract Phase 3 (Medium Risk)
+1. Create `src/research/phase3_validate.rs`
+2. Copy `validate_yaml_file()` and `extract_yaml()`
+3. Make them `pub async fn` and `pub fn`
+4. Update imports
+5. In `research_agent.rs`, import and use
+6. Remove from `research_agent.rs`
+7. **Verify:** Phase 3 validation works
+8. **Test:** Run with invalid YAML to test fixing
+
+### Phase 8: Extract Phase 4 (Medium Risk)
+1. Create `src/research/phase4_synthesize.rs`
+2. Copy `synthesize_documentation()` with subagent logic
+3. Make it `pub async fn`
+4. Update imports (especially `AgentDefinition`)
+5. In `research_agent.rs`, import and use
+6. Remove from `research_agent.rs`
+7. **Verify:** Phase 4 synthesis works
+8. **Test:** Run full workflow 0-4
+
+### Phase 9: Extract Workflow Orchestration (High Risk)
+1. Create `src/research/workflow.rs`
+2. Create `WorkflowConfig` struct with all configuration
+3. Copy main() orchestration logic to `run_research_workflow()`
+4. Make state tracking more explicit (file paths, etc.)
+5. Add proper error handling and logging
+6. **Verify:** Full workflow still executes
+7. **Test:** All phase combinations work
+
+### Phase 10: Simplify Binary (Low Risk)
+1. Rewrite `src/bin/research_agent.rs` as thin wrapper
+2. Import from library modules
+3. Convert `Args` to `WorkflowConfig`
+4. Call `run_research_workflow()`
+5. **Verify:** Binary still works identically
+6. **Test:** All CLI options and phase combinations
+
+### Phase 11: Update Module Exports (Low Risk)
+1. Add re-exports to `src/research/mod.rs`
+2. Simplify imports throughout
+3. Add module-level documentation
+4. **Verify:** Public API is clean and intuitive
+
+### Phase 12: Add Tests (Low Risk, High Value)
+1. Create `tests/research/` directory
+2. Add integration tests for each phase
+3. Add unit tests for helpers (e.g., `extract_yaml`)
+4. **Verify:** `cargo test` passes
 
 ## Testing Strategy
 
-### Automated Tests (Add During Refactoring):
+### During Refactoring
+After each phase extraction:
+1. `cargo build` - ensure compilation
+2. `cargo build --bin research_agent` - ensure binary builds
+3. `cargo run --bin research_agent -- --help` - verify CLI
+4. Run specific phases to verify functionality
+5. Check that logs/output match previous behavior
 
-```rust
-// In src/models/mod.rs or tests/models_test.rs
-#[cfg(test)]
-mod tests {
-    use super::*;
+### Final Testing
+1. Run full workflow: `--phases 0,1,2,3,4 --objective "..."`
+2. Run individual phases with file inputs
+3. Test error cases (missing files, invalid input)
+4. Verify output files are identical to pre-refactor
+5. Test from TUI if integrated
 
-    #[test]
-    fn test_workflow_tab_creation() {
-        // Test WorkflowTab initialization
-    }
+### Regression Prevention
+1. Keep a "known good" output from current implementation
+2. Compare outputs after refactoring
+3. Use `diff` on generated files to verify identical behavior
 
-    #[test]
-    fn test_phase_status_transitions() {
-        // Test status changes
-    }
-}
+## Dependencies to Watch
 
-// In src/app/tabs.rs
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_tab_navigation() {
-        // Test next_tab/previous_tab
-    }
+### Import Changes
+- All phase modules need `workflow_manager_sdk` macros
+- Agent modules need `claude_agent_sdk`
+- Async modules need `tokio`, `futures`
+- Validation needs `serde_yaml`
 
-    #[test]
-    fn test_tab_close() {
-        // Test close_current_tab
-    }
-}
-```
+### Visibility Changes
+- All structs need `pub` visibility
+- All functions need `pub` visibility
+- Struct fields may need `pub` (consider builder pattern)
 
-### Integration Tests:
+### Module Paths
+- Update all `use` statements in binary
+- May need `use super::*` in some modules
+- Watch for circular dependencies
 
-```rust
-// In tests/ui_smoke_test.rs
-#[test]
-fn test_app_initialization() {
-    let app = App::new();
-    assert!(app.workflows.len() > 0);
-    assert_eq!(app.current_view, View::WorkflowList);
-}
+## Potential Issues
 
-#[test]
-fn test_workflow_discovery() {
-    let workflows = load_workflows();
-    assert!(workflows.len() >= 5); // Should find built-in workflows
-}
-```
+### Issue 1: State Management
+**Problem:** Current `main()` uses mutable local variables to track state between phases
+**Solution:**
+- Make `WorkflowConfig` track intermediate file paths
+- Use `Option<PathBuf>` for file paths that may or may not exist
+- Pass explicit state between phase functions
 
----
+### Issue 2: Logging Macros
+**Problem:** `workflow_manager_sdk` macros may not work across module boundaries
+**Solution:**
+- Ensure macros are properly imported in each module
+- May need to re-export macros from `mod.rs`
+
+### Issue 3: Circular Dependencies
+**Problem:** Workflow depends on phases, phases may depend on types
+**Solution:**
+- Keep dependency flow: types ← phases ← workflow
+- No phase should import workflow
+- No phase should import other phases
+
+### Issue 4: Testing with Claude API
+**Problem:** Tests may trigger real API calls
+**Solution:**
+- Add feature flag for mock agents
+- Consider environment variable to skip API tests
+- Document that integration tests need API key
+
+## Post-Refactoring Benefits
+
+1. **TUI Integration:** Can directly call library functions
+   ```rust
+   use workflow_manager::research::run_research_workflow;
+   let config = WorkflowConfig { ... };
+   run_research_workflow(config).await?;
+   ```
+
+2. **Unit Testing:** Test individual phases in isolation
+   ```rust
+   #[tokio::test]
+   async fn test_phase0_analyze() {
+       let result = analyze_codebase(Path::new("./test_data")).await;
+       assert!(result.is_ok());
+   }
+   ```
+
+3. **Reusability:** Other binaries can use research functionality
+   ```rust
+   // New binary: src/bin/quick_research.rs
+   use workflow_manager::research::phase2_research::execute_single_research;
+   ```
+
+4. **Maintainability:** Each phase is isolated and self-contained
+
+5. **Documentation:** Can document public API with rustdoc
+
+## Success Criteria
+
+- [ ] All compilation succeeds without warnings
+- [ ] Binary CLI works identically to before
+- [ ] All phase combinations execute correctly
+- [ ] Output files are identical to pre-refactor
+- [ ] Code size in binary < 50 lines
+- [ ] Library modules are under 300 lines each
+- [ ] Public API is documented
+- [ ] Integration tests exist for each phase
+
+## Timeline Estimate
+
+- Setup + Types + CLI: 1 hour
+- Phase 0-1 extraction: 1 hour
+- Phase 2 extraction: 2 hours (complex parallelism)
+- Phase 3-4 extraction: 2 hours
+- Workflow extraction: 2 hours
+- Testing + Documentation: 2 hours
+- **Total: ~10 hours**
 
 ## Rollback Plan
 
-If any phase fails or introduces bugs:
-
-```bash
-# Check current branch
-git status
-
-# Rollback last commit
-git reset --hard HEAD~1
-
-# Or rollback to specific commit
-git log --oneline
-git reset --hard <commit-hash>
-
-# Test that it works
-cargo build --release
-cargo run --release
-```
-
----
-
-## Progress Tracking
-
-| Phase | Status | Tested | Committed | Notes |
-|-------|--------|--------|-----------|-------|
-| 0: Preparation | ✅ | - | ✅ | Plan created and committed |
-| 1: Extract Models | ✅ | ✅ | ✅ | 4bc33af - All tests passed |
-| 2: Extract UI | ✅ | ✅ | ✅ | 0b7d730 - UI extracted + 3 bug fixes |
-| 3: Extract App Methods | ⏸️ | ⬜ | ⬜ | |
-| 4: Extract Utilities | ⏸️ | ⬜ | ⬜ | |
-| 5: Split UI Module | ⏸️ | ⬜ | ⬜ | |
-| 6: Split App Module | ⏸️ | ⬜ | ⬜ | |
-| 7: Organize Models | ⏸️ | ⬜ | ⬜ | |
-| 8: Final Cleanup | ⏸️ | ⬜ | ⬜ | |
-
-Legend: ⏸️ Not started | ⏳ In progress | ✅ Complete | ❌ Failed | ⬜ Not done | ✅ Done
-
----
-
-## Risk Mitigation
-
-1. **Compile after every change** - Don't accumulate errors
-2. **Commit frequently** - Easy rollback points
-3. **Test between phases** - Catch issues early
-4. **Use feature branches** - Protect main branch
-5. **Keep backups** - Git tags before major changes
-
----
-
-## Notes
-
-- Each phase should take 30min - 3hrs
-- Total estimated time: 10-14 hours
-- Can be done over multiple sessions
-- Pause and commit at any phase boundary
-- No phase depends on completing all previous phases perfectly
+If issues arise:
+1. Git branch for refactoring
+2. Keep original `research_agent.rs` until verified
+3. Can revert entire refactoring with `git reset`
+4. Or cherry-pick successful extractions

@@ -810,491 +810,68 @@ Output the fixed YAML wrapped in ```yaml code blocks."#,
     Ok(())
 }
 
-/// Phase 4 Map: Summarize a single research result
-async fn summarize_research_result(
-    result: &ResearchResult,
-    result_number: usize,
-    prefix: Option<&str>,
-) -> anyhow::Result<String> {
+/// Phase 4: Synthesize documentation from research results
+async fn synthesize_documentation(results_file: &Path, output_path: &Path) -> anyhow::Result<()> {
+    use claude_agent_sdk::AgentDefinition;
     use workflow_manager_sdk::{
-        log_agent_complete, log_agent_failed, log_agent_message, log_agent_start,
+        log_agent_complete, log_agent_message, log_agent_start, log_task_complete, log_task_start,
     };
 
-    let prefix = prefix.unwrap_or("");
-    let task_id = format!("summarize_{}", result_number);
-    let agent_name = format!("Summarizer {}", result_number);
+    println!("\n{}", "=".repeat(80));
+    println!("PHASE 4: Documentation Synthesis");
+    println!("{}", "=".repeat(80));
+    println!("results file path: {}", results_file.display());
 
+    let task_id = "synthesize";
+    let agent_name = "Documentation Agent";
+
+    log_task_start!(4, task_id, "Synthesizing final documentation");
     log_agent_start!(
-        &task_id,
-        &agent_name,
-        format!("Summarizing: {}", result.title)
-    );
-
-    println!("\n{}", "-".repeat(80));
-    println!("{}SUMMARIZING: {}", prefix, result.title);
-    println!("{}", "-".repeat(80));
-
-    // Read the result file
-    let response_content = fs::read_to_string(&result.response_file)
-        .await
-        .map_err(|e| {
-            log_agent_failed!(&task_id, &agent_name, format!("Failed to read file: {}", e));
-            anyhow::anyhow!("Failed to read {}: {}", result.response_file, e)
-        })?;
-
-    log_agent_message!(
-        &task_id,
-        &agent_name,
-        format!("Read {} bytes from result file", response_content.len())
-    );
-
-    let summarize_prompt = format!(
-        r#"Summarize the following research finding concisely. Extract only the key insights, facts, and actionable information.
-
-# Finding: {}
-
-**Query:** {}
-
-**Research Data:**
-```yaml
-{}
-```
-
-# Instructions
-- Extract 3-5 key points maximum
-- Focus on actionable insights and important facts
-- Be concise but preserve technical details
-- Output as structured markdown"#,
-        result.title, result.query, response_content
-    );
-
-    let preset = SystemPromptPreset {
-        prompt_type: "preset".to_string(),
-        preset: "claude_code".to_string(),
-        append: Some(
-            "You are a technical summarizer. Extract only essential information.".to_string(),
-        ),
-    };
-
-    let options = ClaudeAgentOptions::builder()
-        .system_prompt(SystemPrompt::Preset(preset))
-        .permission_mode(claude_agent_sdk::PermissionMode::BypassPermissions)
-        .build();
-
-    let stream = query(&summarize_prompt, Some(options)).await?;
-    let mut stream = Box::pin(stream);
-
-    let mut response_text = String::new();
-
-    while let Some(message) = stream.next().await {
-        match message? {
-            Message::Assistant { message, .. } => {
-                for block in &message.content {
-                    match block {
-                        ContentBlock::Text { text } => {
-                            if !prefix.is_empty() {
-                                println!("{}{}", prefix, text);
-                            } else {
-                                println!("{}", text);
-                            }
-                            response_text.push_str(text);
-                            log_agent_message!(&task_id, &agent_name, text);
-                        }
-                        ContentBlock::ToolUse { name, .. } => {
-                            log_agent_message!(
-                                &task_id,
-                                &agent_name,
-                                format!("🔧 Using tool: {}", name)
-                            );
-                        }
-                        ContentBlock::ToolResult { tool_use_id, .. } => {
-                            log_agent_message!(
-                                &task_id,
-                                &agent_name,
-                                format!("✓ Tool result: {}", tool_use_id)
-                            );
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Message::Result { .. } => break,
-            _ => {}
-        }
-    }
-
-    println!("\n");
-    log_agent_complete!(
-        &task_id,
-        &agent_name,
-        format!("Summary complete ({} chars)", response_text.len())
-    );
-    Ok(response_text)
-}
-
-/// Document with tracked label for reduce phase
-#[derive(Debug, Clone)]
-struct LabeledDoc {
-    content: String,
-    label: String,
-}
-
-/// Phase 4 Map: Parallel summarization of all research results
-async fn map_phase_summarize(
-    research_results: &[ResearchResult],
-    batch_size: usize,
-) -> anyhow::Result<Vec<LabeledDoc>> {
-    println!("\n{}", "=".repeat(80));
-    println!(
-        "PHASE 4 MAP: Summarizing {} Research Results (concurrency: {})",
-        research_results.len(),
-        batch_size
-    );
-    println!("{}", "=".repeat(80));
-
-    let sem = Arc::new(Semaphore::new(batch_size));
-    let mut tasks = FuturesUnordered::new();
-
-    for (i, result) in research_results.iter().enumerate() {
-        let result = result.clone();
-        let sem = sem.clone();
-        let result_number = i + 1;
-        let prefix = format!("[Summarizer {}]: ", result_number);
-
-        tasks.push(async move {
-            let _permit = sem
-                .acquire()
-                .await
-                .map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
-
-            let task_id = format!("summarize_{}", result_number);
-            log_task_start!(4, &task_id, format!("Summarizing result {}", result_number));
-
-            let content = summarize_research_result(&result, result_number, Some(&prefix)).await?;
-
-            log_task_complete!(&task_id, format!("Summarized {}", result.title));
-
-            Ok::<LabeledDoc, anyhow::Error>(LabeledDoc {
-                content,
-                label: format!("doc{}", result_number),
-            })
-        });
-    }
-
-    let mut summaries = Vec::new();
-    while let Some(result) = tasks.next().await {
-        summaries.push(result?);
-    }
-
-    println!("\n[Phase 4 Map] Generated {} summaries", summaries.len());
-    Ok(summaries)
-}
-
-/// Combine two documents into one
-async fn combine_two_docs(
-    doc1: &LabeledDoc,
-    doc2: Option<&LabeledDoc>,
-    prefix: Option<&str>,
-    combiner_number: usize,
-) -> anyhow::Result<LabeledDoc> {
-    use workflow_manager_sdk::{log_agent_complete, log_agent_message, log_agent_start};
-
-    let prefix = prefix.unwrap_or("");
-    let task_id = format!("combine_{}", combiner_number);
-    let agent_name = format!("Combiner {}", combiner_number);
-
-    let (combine_prompt, new_label) = if let Some(doc2) = doc2 {
-        log_agent_start!(
-            &task_id,
-            &agent_name,
-            format!("Combining: {} + {}", doc1.label, doc2.label)
-        );
-        println!(
-            "{}Combining: {} + {} → {}{}",
-            prefix,
-            doc1.label,
-            doc2.label,
-            doc1.label,
-            &doc2.label[3..]
-        );
-        let new_label = format!("{}{}", doc1.label, &doc2.label[3..]);
-        let prompt = format!(
-            r#"Combine these two documentation sections into a single cohesive section.
-
-# Document 1
-{}
-
-# Document 2
-{}
-
-# Instructions
-- Merge overlapping information
-- Maintain all key points from both documents
-- Organize logically
-- Keep it concise
-- Output as structured markdown"#,
-            doc1.content, doc2.content
-        );
-        (prompt, new_label)
-    } else {
-        log_agent_start!(
-            &task_id,
-            &agent_name,
-            format!("Processing single: {}", doc1.label)
-        );
-        println!("{}Processing single: {} (no pair)", prefix, doc1.label);
-        let new_label = doc1.label.clone();
-        let prompt = format!(
-            r#"Refine and structure this documentation section for clarity.
-
-# Document
-{}
-
-# Instructions
-- Improve organization and flow
-- Keep all key information
-- Output as structured markdown"#,
-            doc1.content
-        );
-        (prompt, new_label)
-    };
-
-    log_agent_message!(
-        &task_id,
-        &agent_name,
-        format!(
-            "Input: {} chars",
-            doc1.content.len() + doc2.map_or(0, |d| d.content.len())
-        )
-    );
-
-    let preset = SystemPromptPreset {
-        prompt_type: "preset".to_string(),
-        preset: "claude_code".to_string(),
-        append: Some("You are a technical writer combining research findings.".to_string()),
-    };
-
-    let options = ClaudeAgentOptions::builder()
-        .system_prompt(SystemPrompt::Preset(preset))
-        .permission_mode(claude_agent_sdk::PermissionMode::BypassPermissions)
-        .build();
-
-    let stream = query(&combine_prompt, Some(options)).await?;
-    let mut stream = Box::pin(stream);
-
-    let mut response_text = String::new();
-
-    while let Some(message) = stream.next().await {
-        match message? {
-            Message::Assistant { message, .. } => {
-                for block in &message.content {
-                    match block {
-                        ContentBlock::Text { text } => {
-                            response_text.push_str(text);
-                            // Only log summary for combining to reduce noise
-                            if text.len() > 100 {
-                                log_agent_message!(
-                                    &task_id,
-                                    &agent_name,
-                                    format!("{}...", &text[..100])
-                                );
-                            } else {
-                                log_agent_message!(&task_id, &agent_name, text);
-                            }
-                        }
-                        ContentBlock::ToolUse { name, .. } => {
-                            log_agent_message!(
-                                &task_id,
-                                &agent_name,
-                                format!("🔧 Using tool: {}", name)
-                            );
-                        }
-                        ContentBlock::ToolResult { tool_use_id, .. } => {
-                            log_agent_message!(
-                                &task_id,
-                                &agent_name,
-                                format!("✓ Tool result: {}", tool_use_id)
-                            );
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Message::Result { .. } => break,
-            _ => {}
-        }
-    }
-
-    log_agent_complete!(
-        &task_id,
-        &agent_name,
-        format!(
-            "Combined into {} ({} chars)",
-            new_label,
-            response_text.len()
-        )
-    );
-
-    Ok(LabeledDoc {
-        content: response_text,
-        label: new_label,
-    })
-}
-
-/// Phase 4 Reduce: Combine documents in parallel rounds
-async fn parallel_reduce_round(
-    docs: Vec<LabeledDoc>,
-    batch_size: usize,
-    round_number: usize,
-) -> anyhow::Result<Vec<LabeledDoc>> {
-    let num_pairs = docs.len().div_ceil(2);
-    println!("\n{}", "-".repeat(80));
-    println!(
-        "REDUCE ROUND {}: {} docs → {} docs (concurrency: {})",
-        round_number,
-        docs.len(),
-        num_pairs,
-        batch_size
-    );
-    println!("{}", "-".repeat(80));
-
-    let sem = Arc::new(Semaphore::new(batch_size));
-    let mut tasks = FuturesUnordered::new();
-
-    for (pair_idx, pair) in docs.chunks(2).enumerate() {
-        let doc1 = pair[0].clone();
-        let doc2 = pair.get(1).cloned();
-        let sem = sem.clone();
-        let combiner_number = pair_idx + 1;
-        let prefix = format!("[Combiner {}]: ", combiner_number);
-
-        tasks.push(async move {
-            let _permit = sem
-                .acquire()
-                .await
-                .map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
-
-            let task_id = format!("combine_round{}_pair{}", round_number, combiner_number);
-            let desc = if let Some(ref d2) = doc2 {
-                format!("Combining {} + {}", doc1.label, d2.label)
-            } else {
-                format!("Processing single {}", doc1.label)
-            };
-            log_task_start!(4, &task_id, desc);
-
-            let result =
-                combine_two_docs(&doc1, doc2.as_ref(), Some(&prefix), combiner_number).await;
-
-            if let Ok(ref combined) = result {
-                log_task_complete!(&task_id, format!("Combined into {}", combined.label));
-            } else if let Err(ref e) = result {
-                log_task_failed!(&task_id, format!("Failed to combine: {}", e));
-            }
-
-            result
-        });
-    }
-
-    let mut combined_docs = Vec::new();
-    while let Some(result) = tasks.next().await {
-        combined_docs.push(result?);
-    }
-
-    Ok(combined_docs)
-}
-
-/// Phase 4: Map-Reduce synthesis
-async fn synthesize_documentation(
-    research_results: &[ResearchResult],
-    output_path: &Path,
-    batch_size: usize,
-) -> anyhow::Result<()> {
-    use workflow_manager_sdk::{log_task_complete, log_task_start};
-
-    println!("\n{}", "=".repeat(80));
-    println!("PHASE 4: Map-Reduce Documentation Synthesis");
-    println!("{}", "=".repeat(80));
-
-    // Map phase: Summarize each result
-    log_task_start!(
-        4,
-        "map_phase",
-        format!("Summarizing {} research results", research_results.len())
-    );
-    let mut current_docs = map_phase_summarize(research_results, batch_size).await?;
-    log_task_complete!(
-        "map_phase",
-        format!("Created {} summaries", current_docs.len())
-    );
-
-    // Reduce phase: Iteratively combine until one document
-    let mut round_number = 1;
-    while current_docs.len() > 1 {
-        let task_id = format!("reduce_round_{}", round_number);
-        log_task_start!(
-            4,
-            &task_id,
-            format!(
-                "Reduce round {}: {} → {} docs",
-                round_number,
-                current_docs.len(),
-                current_docs.len().div_ceil(2)
-            )
-        );
-        current_docs = parallel_reduce_round(current_docs, batch_size, round_number).await?;
-        log_task_complete!(&task_id, format!("Round {} complete", round_number));
-        round_number += 1;
-    }
-
-    let final_doc = current_docs
-        .into_iter()
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("No final document generated"))?;
-
-    let final_content = final_doc.content;
-
-    // Final polish
-    log_task_start!(
-        4,
-        "final_polish",
-        "Creating final comprehensive documentation"
-    );
-
-    use workflow_manager_sdk::{log_agent_complete, log_agent_message, log_agent_start};
-
-    let task_id = "final_synthesis";
-    let agent_name = "Final Synthesizer";
-
-    log_agent_start!(task_id, agent_name, "Creating comprehensive documentation");
-
-    println!("\n{}", "=".repeat(80));
-    println!("FINAL SYNTHESIS: Creating comprehensive documentation");
-    println!("{}", "=".repeat(80));
-
-    log_agent_message!(
         task_id,
         agent_name,
-        format!(
-            "Input: {} chars of synthesized research",
-            final_content.len()
-        )
+        "Preparing synthesis with file-condenser subagent"
     );
 
-    let final_prompt = format!(
-        r#"Create the final comprehensive documentation based on the synthesized research below.
+    // Create unified synthesis prompt - agent decides strategy
+    let synthesis_prompt = format!(
+        r#"Read the research results overview file at {} and create comprehensive documentation.
 
-# Synthesized Research
-{}
+The overview file contains a list of research findings with:
+- title: The topic researched
+- query: The research question
+- response_file: Path to the YAML file containing the detailed findings
+- focus: Key areas covered
 
-# Instructions
-- Add introduction and overview sections
-- Ensure logical flow and structure
-- Add table of contents if appropriate
-- Include actionable recommendations
-- Polish for clarity and completeness
+# Your Task:
 
-Save the final documentation to: {}"#,
-        final_content,
+1. **Analyze the overview**: Read the overview file to understand all research findings
+
+2. **Assess file sizes**: For each research finding, read the response_file and count the characters/lines
+
+3. **Decide processing strategy**:
+   - For files with **< 30,000 characters**: Read and process them directly
+   - For files with **≥ 30,000 characters**: Use the Task tool to invoke the 'file-condenser' agent
+     - Pass a message like "Condense this file: path/to/file.yaml"
+     - The file-condenser will read the file and return a condensed summary (~5-10k chars)
+     - Use the condensed version in your documentation
+
+4. **Synthesize documentation**:
+   - Combine all content (direct reads + condensed summaries) into cohesive, well-structured markdown
+   - Include code examples, technical details, and actionable insights
+   - Organize logically with proper headings and sections
+   - Maintain technical accuracy while ensuring readability
+
+5. **Write output**: Write the final documentation to {}
+
+# Available Subagent:
+- **file-condenser**: Condenses large research result files while preserving key technical details
+
+# Strategy Tips:
+- You can process multiple files with the file-condenser in parallel if needed
+- Small files can be read directly for maximum detail
+- Large files should be condensed to manage context efficiently
+- Your goal is comprehensive yet manageable documentation"#,
+        results_file.display(),
         output_path.display()
     );
 
@@ -1302,19 +879,35 @@ Save the final documentation to: {}"#,
         prompt_type: "preset".to_string(),
         preset: "claude_code".to_string(),
         append: Some(
-            "You are a technical writer creating final comprehensive documentation.".to_string(),
+            "You are a technical writer creating comprehensive documentation from research findings. You can intelligently decide when to condense large files versus read smaller files directly."
+                .to_string(),
         ),
     };
 
+    // Build options with file-condenser subagent
     let options = ClaudeAgentOptions::builder()
         .system_prompt(SystemPrompt::Preset(preset))
         .permission_mode(claude_agent_sdk::PermissionMode::BypassPermissions)
+        .allowed_tools(vec![
+            "Read".to_string(),
+            "Write".to_string(),
+            "Task".to_string(),
+        ])
+        .add_agent(
+            "file-condenser",
+            AgentDefinition {
+                description: "Condenses a single research result file while preserving key technical details, code examples, and actionable insights".to_string(),
+                prompt: "You are a technical documentation condenser. Read the provided research result YAML file and create a condensed summary that:\n\n1. Preserves all key technical details and insights\n2. Includes important code examples (condensed if very long)\n3. Maintains actionable recommendations\n4. Reduces verbosity and redundancy\n5. Target output: 5,000-10,000 characters\n\nReturn ONLY the condensed markdown content. Do not write to any files.".to_string(),
+                tools: Some(vec!["Read".to_string()]),
+                model: Some("sonnet".to_string()),
+            },
+        )
         .build();
 
-    let stream = query(&final_prompt, Some(options)).await?;
-    let mut stream = Box::pin(stream);
+    log_agent_message!(task_id, agent_name, "Querying Claude for synthesis");
 
-    let mut doc_length = 0;
+    let stream = query(&synthesis_prompt, Some(options)).await?;
+    let mut stream = Box::pin(stream);
 
     while let Some(message) = stream.next().await {
         match message? {
@@ -1322,16 +915,8 @@ Save the final documentation to: {}"#,
                 for block in &message.content {
                     match block {
                         ContentBlock::Text { text } => {
-                            print!("{}", text);
-                            doc_length += text.len();
-                            // Log periodic progress
-                            if doc_length % 1000 < text.len() {
-                                log_agent_message!(
-                                    task_id,
-                                    agent_name,
-                                    format!("Writing... ({} chars)", doc_length)
-                                );
-                            }
+                            println!("{}", text);
+                            log_agent_message!(task_id, agent_name, text);
                         }
                         ContentBlock::ToolUse { name, .. } => {
                             log_agent_message!(
@@ -1356,13 +941,16 @@ Save the final documentation to: {}"#,
         }
     }
 
-    log_agent_complete!(
+    println!("\n{}", "=".repeat(80));
+    println!("✓ Documentation synthesis complete");
+    println!("{}", "=".repeat(80));
+
+    log_agent_complete!(task_id, agent_name, "Documentation synthesis complete");
+    log_task_complete!(
         task_id,
-        agent_name,
-        format!("Final documentation complete ({} chars)", doc_length)
+        format!("Output written to {}", output_path.display())
     );
-    log_task_complete!("final_polish", "Documentation complete");
-    println!("\n");
+
     Ok(())
 }
 
@@ -1370,13 +958,15 @@ Save the final documentation to: {}"#,
 fn extract_yaml(text: &str) -> String {
     let yaml = if text.contains("```yaml") {
         let yaml_start = text.find("```yaml").unwrap() + 7;
-        let yaml_end = text[yaml_start..].rfind("```")
+        let yaml_end = text[yaml_start..]
+            .rfind("```")
             .map(|pos| pos + yaml_start)
             .unwrap_or(text.len());
         text[yaml_start..yaml_end].trim().to_string()
     } else if text.contains("```") {
         let yaml_start = text.find("```").unwrap() + 3;
-        let yaml_end = text[yaml_start..].rfind("```")
+        let yaml_end = text[yaml_start..]
+            .rfind("```")
             .map(|pos| pos + yaml_start)
             .unwrap_or(text.len());
         text[yaml_start..yaml_end].trim().to_string()
@@ -1453,11 +1043,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Change working directory to target directory if specified
     if let Some(dir) = &args.dir {
-        let target_dir = PathBuf::from(dir).canonicalize().map_err(|e| {
-            anyhow::anyhow!("Invalid directory path '{}': {}", dir, e)
-        })?;
+        let target_dir = PathBuf::from(dir)
+            .canonicalize()
+            .map_err(|e| anyhow::anyhow!("Invalid directory path '{}': {}", dir, e))?;
         std::env::set_current_dir(&target_dir).map_err(|e| {
-            anyhow::anyhow!("Failed to change directory to '{}': {}", target_dir.display(), e)
+            anyhow::anyhow!(
+                "Failed to change directory to '{}': {}",
+                target_dir.display(),
+                e
+            )
         })?;
         println!("📁 Working directory: {}", target_dir.display());
         println!();
@@ -1470,6 +1064,7 @@ async fn main() -> anyhow::Result<()> {
     let mut codebase_analysis: Option<CodebaseAnalysis> = None;
     let mut prompts_data: Option<PromptsData> = None;
     let mut research_results: Vec<ResearchResult> = Vec::new();
+    let mut results_file_path: Option<PathBuf> = None;
 
     // Phase 0: Analyze codebase
     if phases_to_run.contains(&0) {
@@ -1624,10 +1219,13 @@ async fn main() -> anyhow::Result<()> {
             "Research results for Phase 3 validation"
         );
         log_phase_complete!(2, "Execute Research");
+
+        results_file_path = Some(results_path);
     } else if let Some(results_file) = &args.results_file {
         let content = fs::read_to_string(results_file).await?;
         research_results = serde_yaml::from_str(&content)?;
         println!("[Phase 2] Loaded results from: {}", results_file);
+        results_file_path = Some(PathBuf::from(results_file));
     }
 
     // Phase 3: Validate and fix YAML files
@@ -1764,9 +1362,11 @@ async fn main() -> anyhow::Result<()> {
     if phases_to_run.contains(&4) {
         log_phase_start!(4, "Synthesize Docs", 5);
 
-        if research_results.is_empty() {
-            anyhow::bail!("No research results to synthesize");
-        }
+        let results_file = results_file_path.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "No research results file available. Run Phase 2 first or provide --results-file"
+            )
+        })?;
 
         let output_path = if let Some(output) = &args.output {
             PathBuf::from(output)
@@ -1775,7 +1375,7 @@ async fn main() -> anyhow::Result<()> {
             PathBuf::from(format!("./OUTPUT/research_output_{}.md", timestamp))
         };
 
-        synthesize_documentation(&research_results, &output_path, args.batch_size).await?;
+        synthesize_documentation(results_file, &output_path).await?;
 
         log_state_file!(
             4,
