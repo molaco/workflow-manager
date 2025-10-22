@@ -7,6 +7,13 @@ use workflow_manager_sdk::WorkflowStatus;
 
 use super::workflow::WorkflowPhase;
 
+/// Which pane is focused in the workflow view
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkflowPane {
+    StructuredLogs,
+    RawOutput,
+}
+
 /// Per-tab state container for tabbed interface
 #[derive(Debug)]
 pub struct WorkflowTab {
@@ -36,6 +43,10 @@ pub struct WorkflowTab {
     pub selected_task: Option<String>,
     pub selected_agent: Option<String>,
     pub agent_scroll_offsets: HashMap<String, usize>, // agent_id -> scroll offset
+
+    // Two-pane view state
+    pub focused_pane: WorkflowPane,
+    pub raw_output_scroll_offset: usize,
 
     // Session persistence
     pub saved_logs: Option<Vec<String>>,

@@ -93,6 +93,8 @@ impl App {
                             selected_task: None,
                             selected_agent: None,
                             agent_scroll_offsets: HashMap::new(),
+                            focused_pane: WorkflowPane::StructuredLogs,
+                            raw_output_scroll_offset: 0,
                             saved_logs: None,
                         };
 

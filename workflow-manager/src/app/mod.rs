@@ -65,6 +65,8 @@ impl App {
             selected_task: None,
             selected_agent: None,
             workflow_scroll_offset: 0,
+            workflow_focused_pane: WorkflowPane::StructuredLogs,
+            workflow_raw_output_scroll: 0,
             chat: None,
             runtime: None,
             tokio_runtime,

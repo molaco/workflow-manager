@@ -233,32 +233,83 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                             KeyCode::Char('q') | KeyCode::Char('Q') => {
                                 app.should_quit = true;
                             }
+                            KeyCode::Char('1') => {
+                                // 1: Switch to left pane (Structured Logs)
+                                if matches!(app.current_view, View::Tabs | View::WorkflowRunning(_)) {
+                                    app.switch_pane_left();
+                                }
+                            }
+                            KeyCode::Char('2') => {
+                                // 2: Switch to right pane (Raw Output)
+                                if matches!(app.current_view, View::Tabs | View::WorkflowRunning(_)) {
+                                    app.switch_pane_right();
+                                }
+                            }
                             KeyCode::Down | KeyCode::Char('j') => {
                                 if matches!(app.current_view, View::WorkflowRunning(_)) {
-                                    app.navigate_workflow_down();
-                                    app.update_workflow_scroll(30); // Estimate viewport height
+                                    // Check if raw output pane is focused
+                                    use crate::app::WorkflowPane;
+                                    if app.workflow_focused_pane == WorkflowPane::RawOutput {
+                                        app.scroll_raw_output_down();
+                                    } else {
+                                        app.navigate_workflow_down();
+                                        app.update_workflow_scroll(30); // Estimate viewport height
+                                    }
                                 } else if matches!(app.current_view, View::Tabs) {
-                                    app.navigate_tab_down();
+                                    // Check if raw output pane is focused in current tab
+                                    use crate::app::WorkflowPane;
+                                    if !app.open_tabs.is_empty()
+                                        && app.open_tabs[app.active_tab_idx].focused_pane == WorkflowPane::RawOutput {
+                                        app.scroll_raw_output_down();
+                                    } else {
+                                        app.navigate_tab_down();
+                                    }
                                 } else {
                                     app.next();
                                 }
                             }
                             KeyCode::Up => {
                                 if matches!(app.current_view, View::WorkflowRunning(_)) {
-                                    app.navigate_workflow_up();
-                                    app.update_workflow_scroll(30); // Estimate viewport height
+                                    // Check if raw output pane is focused
+                                    use crate::app::WorkflowPane;
+                                    if app.workflow_focused_pane == WorkflowPane::RawOutput {
+                                        app.scroll_raw_output_up();
+                                    } else {
+                                        app.navigate_workflow_up();
+                                        app.update_workflow_scroll(30); // Estimate viewport height
+                                    }
                                 } else if matches!(app.current_view, View::Tabs) {
-                                    app.navigate_tab_up();
+                                    // Check if raw output pane is focused in current tab
+                                    use crate::app::WorkflowPane;
+                                    if !app.open_tabs.is_empty()
+                                        && app.open_tabs[app.active_tab_idx].focused_pane == WorkflowPane::RawOutput {
+                                        app.scroll_raw_output_up();
+                                    } else {
+                                        app.navigate_tab_up();
+                                    }
                                 } else {
                                     app.previous();
                                 }
                             }
                             KeyCode::Char('k') => {
                                 if matches!(app.current_view, View::WorkflowRunning(_)) {
-                                    app.navigate_workflow_up();
-                                    app.update_workflow_scroll(30); // Estimate viewport height
+                                    // Check if raw output pane is focused
+                                    use crate::app::WorkflowPane;
+                                    if app.workflow_focused_pane == WorkflowPane::RawOutput {
+                                        app.scroll_raw_output_up();
+                                    } else {
+                                        app.navigate_workflow_up();
+                                        app.update_workflow_scroll(30); // Estimate viewport height
+                                    }
                                 } else if matches!(app.current_view, View::Tabs) {
-                                    app.navigate_tab_up();
+                                    // Check if raw output pane is focused in current tab
+                                    use crate::app::WorkflowPane;
+                                    if !app.open_tabs.is_empty()
+                                        && app.open_tabs[app.active_tab_idx].focused_pane == WorkflowPane::RawOutput {
+                                        app.scroll_raw_output_up();
+                                    } else {
+                                        app.navigate_tab_up();
+                                    }
                                 } else {
                                     app.previous();
                                 }
@@ -320,16 +371,6 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                                 }
                                 _ => {}
                             },
-                            KeyCode::Char('1') => {
-                                if matches!(app.current_view, View::WorkflowRunning(_)) {
-                                    app.toggle_expand_phases();
-                                }
-                            }
-                            KeyCode::Char('2') => {
-                                if matches!(app.current_view, View::WorkflowRunning(_)) {
-                                    app.toggle_expand_tasks();
-                                }
-                            }
                             KeyCode::Char('3') => {
                                 if matches!(app.current_view, View::WorkflowRunning(_)) {
                                     app.toggle_expand_agents();

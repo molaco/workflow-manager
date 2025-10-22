@@ -61,6 +61,10 @@ pub struct App {
     pub selected_agent: Option<String>,
     pub workflow_scroll_offset: usize,
 
+    // Two-pane view state (for non-tab workflow view)
+    pub workflow_focused_pane: super::tab::WorkflowPane,
+    pub workflow_raw_output_scroll: usize,
+
     // Chat interface
     pub chat: Option<ChatInterface>,
     pub runtime: Option<Arc<dyn workflow_manager_sdk::WorkflowRuntime>>,
