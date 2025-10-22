@@ -1,3 +1,16 @@
+//! Phase 3: YAML validation and repair
+//!
+//! Validates and automatically fixes YAML syntax errors in research results.
+//!
+//! This phase:
+//! - Validates all YAML files from Phase 2 using an external Python validator
+//! - Identifies files with syntax errors
+//! - Uses Claude agents to fix broken YAML files in parallel
+//! - Re-validates after each fix iteration
+//! - Loops until all files are valid
+//!
+//! Can run standalone on a directory of YAML files or as part of the full workflow.
+
 use anyhow::Result;
 use claude_agent_sdk::{query, ClaudeAgentOptions, ContentBlock, Message, SystemPrompt, SystemPromptPreset};
 use futures::StreamExt;

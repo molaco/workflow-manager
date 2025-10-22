@@ -129,7 +129,7 @@ pub struct Args {
 }
 
 impl Args {
-    /// Parse the comma-separated phases string into a Vec<u32>
+    /// Parse the comma-separated phases string into a `Vec<u32>`
     pub fn parse_phases(&self) -> Vec<u32> {
         self.phases
             .split(',')

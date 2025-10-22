@@ -1,4 +1,15 @@
 //! Phase 2: Research execution with parallel agents
+//!
+//! Executes research prompts concurrently using multiple Claude agents.
+//!
+//! This phase:
+//! - Takes research prompts from Phase 1
+//! - Spawns concurrent agents (configurable batch size)
+//! - Each agent executes one research prompt with full tool access
+//! - Results are saved as individual YAML files in `RESULTS/`
+//! - A summary file `research_results_<timestamp>.yaml` tracks all results
+//!
+//! Supports configurable concurrency for efficient parallel execution.
 
 use crate::research::types::{PromptsData, ResearchPrompt, ResearchResult};
 use claude_agent_sdk::{query, ClaudeAgentOptions, ContentBlock, Message, SystemPrompt, SystemPromptPreset};

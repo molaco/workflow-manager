@@ -1,7 +1,10 @@
 //! Workflow orchestration for the research agent
 //!
-//! This module contains the main workflow orchestration logic that was previously in the binary.
-//! It manages the execution flow across all phases, state tracking, and error handling.
+//! This module contains the main workflow orchestration logic that manages the execution
+//! flow across all phases, state tracking, and error handling.
+//!
+//! The primary entry point is [`run_research_workflow`], which executes the complete
+//! multi-phase workflow based on the provided [`WorkflowConfig`].
 
 use anyhow::Result;
 use chrono::Local;
@@ -27,19 +30,68 @@ use crate::research::{
 };
 
 /// Configuration for the research workflow
+///
+/// This struct contains all configuration options for running the research workflow.
+/// Most fields are optional to support resuming from intermediate phases.
+///
+/// # Examples
+///
+/// ```no_run
+/// use workflow_manager::research::WorkflowConfig;
+///
+/// // Full workflow with all phases
+/// let config = WorkflowConfig {
+///     objective: Some("Analyze the API layer".to_string()),
+///     phases: vec![0, 1, 2, 3, 4],
+///     batch_size: 2,
+///     dir: Some(".".to_string()),
+///     system_prompt: Some("prompts/writer.md".to_string()),
+///     append: Some("prompts/style.md".to_string()),
+///     ..Default::default()
+/// };
+/// ```
 #[derive(Debug, Clone)]
 pub struct WorkflowConfig {
+    /// Research objective/question (required for Phase 1)
     pub objective: Option<String>,
+    /// Which phases to execute (0-4)
     pub phases: Vec<u32>,
+    /// Number of concurrent agents for Phase 2 and Phase 3
     pub batch_size: usize,
+    /// Directory to analyze (for Phase 0)
     pub dir: Option<String>,
+    /// Path to saved codebase analysis (for resuming from Phase 1)
     pub analysis_file: Option<String>,
+    /// Path to saved prompts (for resuming from Phase 2)
     pub prompts_file: Option<String>,
+    /// Path to saved results (for resuming from Phase 3 or 4)
     pub results_file: Option<String>,
+    /// Directory containing YAML files to validate (for Phase 3)
     pub results_dir: Option<String>,
+    /// Output path for final documentation (Phase 4)
     pub output: Option<String>,
+    /// System prompt for prompt generation (required for Phase 1)
     pub system_prompt: Option<String>,
+    /// Output style template (required for Phase 1)
     pub append: Option<String>,
+}
+
+impl Default for WorkflowConfig {
+    fn default() -> Self {
+        Self {
+            objective: None,
+            phases: vec![0, 1, 2, 3, 4],
+            batch_size: 1,
+            dir: None,
+            analysis_file: None,
+            prompts_file: None,
+            results_file: None,
+            results_dir: None,
+            output: None,
+            system_prompt: None,
+            append: None,
+        }
+    }
 }
 
 /// Load file content or return literal string
@@ -53,6 +105,59 @@ async fn load_prompt_file(file_path: &str) -> Result<String> {
 }
 
 /// Run the complete research workflow with the given configuration
+///
+/// This is the main entry point for executing the research workflow. It orchestrates
+/// all phases according to the provided configuration, handles state persistence,
+/// and manages error recovery.
+///
+/// # Arguments
+///
+/// * `config` - Configuration specifying which phases to run and their parameters
+///
+/// # Phases Executed
+///
+/// Based on `config.phases`, the following phases may be executed:
+///
+/// - **Phase 0**: Analyze codebase structure and save to `OUTPUT/codebase_analysis_*.yaml`
+/// - **Phase 1**: Generate research prompts and save to `OUTPUT/research_prompts_*.yaml`
+/// - **Phase 2**: Execute research in parallel and save to `RESULTS/research_result_*.yaml`
+/// - **Phase 3**: Validate and fix YAML files iteratively until all are valid
+/// - **Phase 4**: Synthesize documentation and save to output path
+///
+/// # Resumability
+///
+/// The workflow can be resumed from any phase by providing saved state files:
+/// - Use `analysis_file` to skip Phase 0
+/// - Use `prompts_file` to skip Phases 0-1
+/// - Use `results_file` to skip Phases 0-2
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Required parameters for a phase are missing
+/// - A phase execution fails
+/// - File I/O operations fail
+///
+/// # Examples
+///
+/// ```no_run
+/// use workflow_manager::research::{run_research_workflow, WorkflowConfig};
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let config = WorkflowConfig {
+///     objective: Some("How does authentication work?".to_string()),
+///     phases: vec![0, 1, 2, 3, 4],
+///     batch_size: 2,
+///     dir: Some(".".to_string()),
+///     system_prompt: Some("prompts/writer.md".to_string()),
+///     append: Some("prompts/style.md".to_string()),
+///     ..Default::default()
+/// };
+///
+/// run_research_workflow(config).await?;
+/// # Ok(())
+/// # }
+/// ```
 pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
     // Validate required arguments based on phases
     if config.phases.contains(&1) {

@@ -1,4 +1,15 @@
 //! Phase 0: Codebase analysis
+//!
+//! Analyzes codebase structure and generates a structured analysis using Claude agents.
+//!
+//! This phase uses Claude with tool access (Read, Glob, Grep, Bash) to:
+//! - Count files by extension with exact metrics
+//! - Map directory structure
+//! - Identify entry points and configuration files
+//! - Extract dependencies and frameworks
+//! - Detect architecture patterns
+//!
+//! The result is a comprehensive YAML analysis saved to `OUTPUT/codebase_analysis_<timestamp>.yaml`.
 
 use crate::research::types::CodebaseAnalysis;
 use claude_agent_sdk::{query, ClaudeAgentOptions, ContentBlock, Message};

@@ -1,3 +1,16 @@
+//! Phase 4: Documentation synthesis
+//!
+//! Synthesizes all research findings into comprehensive, well-structured documentation.
+//!
+//! This phase:
+//! - Reads the research results summary from Phase 2/3
+//! - For each result, reads the detailed YAML file
+//! - Uses a file-condenser subagent for large files (>30k chars)
+//! - Combines all findings into cohesive markdown documentation
+//! - Writes the final output to the specified path
+//!
+//! The synthesized documentation includes code examples, technical details, and actionable insights.
+
 use anyhow::Result;
 use std::path::Path;
 

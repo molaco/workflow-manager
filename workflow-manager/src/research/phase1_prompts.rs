@@ -1,4 +1,14 @@
 //! Phase 1: Research prompt generation
+//!
+//! Generates targeted research prompts based on a research objective and codebase analysis.
+//!
+//! This phase:
+//! - Takes a research objective (user's question)
+//! - Combines it with the codebase analysis from Phase 0
+//! - Uses custom system prompts and output style templates
+//! - Generates a set of focused research prompts as YAML
+//!
+//! The result is saved to `OUTPUT/research_prompts_<timestamp>.yaml` for use in Phase 2.
 
 use crate::research::types::{CodebaseAnalysis, PromptsData, ResearchPrompt};
 use claude_agent_sdk::{query, ClaudeAgentOptions, ContentBlock, Message};
