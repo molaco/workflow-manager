@@ -15,5 +15,4 @@ pub mod workflow;
 
 // Re-export commonly used types
 pub use types::{CodebaseAnalysis, PromptsData, ResearchPrompt, ResearchResult};
-// TODO: Uncomment workflow re-exports once workflow.rs is implemented
-// pub use workflow::{run_research_workflow, WorkflowConfig};
+pub use workflow::{run_research_workflow, WorkflowConfig};

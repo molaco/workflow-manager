@@ -127,3 +127,32 @@ pub struct Args {
     #[arg(long, hide = true)]
     pub workflow_metadata: bool,
 }
+
+impl Args {
+    /// Parse the comma-separated phases string into a Vec<u32>
+    pub fn parse_phases(&self) -> Vec<u32> {
+        self.phases
+            .split(',')
+            .filter_map(|p| p.trim().parse().ok())
+            .collect()
+    }
+}
+
+impl From<Args> for crate::research::workflow::WorkflowConfig {
+    fn from(args: Args) -> Self {
+        let phases = args.parse_phases();
+        crate::research::workflow::WorkflowConfig {
+            objective: args.input,
+            phases,
+            batch_size: args.batch_size,
+            dir: args.dir,
+            analysis_file: args.analysis_file,
+            prompts_file: args.prompts_file,
+            results_file: args.results_file,
+            results_dir: args.results_dir,
+            output: args.output,
+            system_prompt: args.system_prompt,
+            append: args.append,
+        }
+    }
+}
