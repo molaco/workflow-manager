@@ -1,0 +1,338 @@
+project_metadata:
+  name: Flowsurface
+  version: 0.8.0
+  license: GPL-3.0-or-later
+  repository: https://github.com/akenshaw/flowsurface
+  description: Experimental open-source desktop charting application for cryptocurrency trading
+  categories:
+  - finance
+  - visualization
+  - gui
+file_statistics:
+  by_extension:
+    rust:
+      total_files: 132
+      total_lines: 85502
+      source_files: 107
+      test_files: 17
+      bench_files: 1
+      module_files: 8
+    python:
+      total_files: 6
+      total_lines: 4693
+    markdown:
+      total_files: 35
+      total_lines: 26758
+    toml:
+      total_files: 6
+      total_lines: 132
+    yaml:
+      total_files: 11
+      total_lines: 19635
+    shell_scripts:
+      total_files: 5
+      total_lines: 221
+    json:
+      total_files: 1202
+      total_lines: 2532
+    sql:
+      total_files: 2
+      total_lines: 251
+    text:
+      total_files: 2
+    csv:
+      total_files: 1
+    log:
+      total_files: 1
+    zip_archives:
+      total_files: 21
+    audio_wav:
+      total_files: 4
+    fonts:
+      total_files: 2
+  total_project_size: 28GB
+  total_files_excluding_target: 225
+main_entry_points:
+  application:
+    path: ./src/main.rs
+    lines: 1128
+    type: GUI application using iced framework
+  libraries:
+  - name: data
+    path: ./data/src/lib.rs
+    lines: 245
+  - name: exchange
+    path: ./exchange/src/lib.rs
+    lines: 734
+project_structure:
+  type: Rust workspace
+  workspace_members:
+  - flowsurface (main application)
+  - data (data management library)
+  - exchange (exchange connectivity library)
+directory_structure:
+  root:
+  - name: src
+    purpose: Main application source code
+    subdirs:
+    - chart (charting logic with indicator/scale modules)
+    - modal (UI modal dialogs)
+    - screen (dashboard and UI screens)
+    - widget (custom UI widgets)
+  - name: data
+    purpose: Data management workspace crate
+    subdirs:
+    - aggr (time/tick aggregation)
+    - chart (chart data models)
+    - config (configuration)
+    - db (database operations with crud/migration)
+    - layout (layout persistence)
+    - panel (panel definitions)
+    - tests (test utilities)
+  - name: exchange
+    purpose: Exchange connectivity workspace crate
+    subdirs:
+    - adapter (per-exchange implementations for binance/bybit/hyperliquid/okex/aster)
+    - examples (example usage code)
+  - name: tests
+    purpose: Integration and property-based tests
+    test_files: 7
+    test_lines: 720
+    subdirs:
+    - common
+    - integration
+    - property
+  - name: benches
+    purpose: Performance benchmarks
+    files:
+    - db_benchmarks.rs
+  - name: scripts
+    purpose: Build and packaging scripts
+    files:
+    - build-macos.sh
+    - build-windows.sh
+    - package-linux.sh
+  - name: SCRIPTS
+    purpose: Python utility scripts
+    files:
+    - research.py
+    - check_yaml.py
+    - test_duckdb.sh
+    - tasks.py
+  - name: assets
+    purpose: Application resources
+    subdirs:
+    - fonts (TrueType fonts and config)
+    - sounds (WAV audio files)
+  - name: market_data
+    purpose: Market data storage
+    contains: Binance futures klines data (ZIP archives)
+  - name: DOCS
+    purpose: Documentation files
+  - name: TEMPLATES
+    purpose: Template files
+  - name: TRASH
+    purpose: Archived/deleted files
+  - name: RESULTS
+    purpose: Test/benchmark results
+  - name: my-book
+    purpose: mdBook documentation source
+configuration_files:
+  build_configs:
+  - Cargo.toml (workspace root)
+  - data/Cargo.toml
+  - exchange/Cargo.toml
+  - Cargo.lock
+  rust_tooling:
+  - clippy.toml
+  - rustfmt.toml
+  ci_cd:
+  - .github/workflows/release.yaml (release automation)
+  - .github/workflows/lint.yml
+  - .github/workflows/format.yml
+  other:
+  - .gitignore
+  - LICENSE
+  - README.md
+key_dependencies:
+  gui_framework:
+  - iced (0.14.0-dev with wgpu, tokio, canvas)
+  - iced_core
+  - iced_futures
+  async_runtime:
+  - tokio (1.42+)
+  http_websocket:
+  - reqwest (with rustls-tls)
+  - fastwebsockets
+  - hyper
+  - tokio-rustls
+  database:
+  - duckdb (1.1.4 with bundled feature)
+  serialization:
+  - serde
+  - serde_json
+  - sonic-rs (fast JSON parsing)
+  datetime:
+  - chrono (0.4.40)
+  data_processing:
+  - csv
+  - zip
+  audio:
+  - rodio (0.20.1 for WAV playback)
+  utilities:
+  - uuid
+  - thiserror
+  - log
+  - fern (logging)
+  - palette (color manipulation)
+  - regex
+  testing:
+  - proptest (property-based testing)
+  - criterion (benchmarking)
+  - tempfile
+  - tokio-test
+supported_exchanges:
+- name: Binance
+  features:
+  - spot
+  - linear_perpetuals
+  - inverse_perpetuals
+  - open_interest
+  - historical_trade_fetching
+- name: Bybit
+  features:
+  - spot
+  - linear_perpetuals
+  - inverse_perpetuals
+  - open_interest
+  - server_side_depth_aggregation
+- name: Hyperliquid
+  features:
+  - spot
+  - linear_perpetuals
+  - server_side_depth_aggregation
+- name: OKX
+  features:
+  - spot
+  - linear_perpetuals
+  - inverse_perpetuals
+  - open_interest
+- name: Aster DEX
+  features:
+  - linear_perpetuals
+  - open_interest
+architecture_patterns:
+  pattern: Modular GUI application with workspace architecture
+  paradigm: Event-driven reactive UI (Elm Architecture via iced)
+  structure:
+  - Main application handles UI and orchestration
+  - Data crate manages persistence and models
+  - Exchange crate handles market connectivity
+  key_features:
+  - Real-time WebSocket streaming
+  - DuckDB integration for historical data persistence
+  - Multiple chart types (heatmap, candlestick, footprint, time & sales)
+  - Customizable layouts and themes
+  - Audio feedback system
+  - Multi-window support with popouts
+core_components:
+  main_application:
+  - Flowsurface struct (main state)
+  - Dashboard management (layouts/panes)
+  - Theme system (customizable themes)
+  - Modal system (settings, layout manager, database manager)
+  - Window management (main + popout windows)
+  - Notification/toast system
+  data_management:
+  - DatabaseManager (DuckDB operations)
+  - CRUD operations (klines, trades, footprint, depth, order_runs)
+  - Migration system (backup, archive, verification)
+  - Health/retry/timeout/fallback mechanisms
+  - Aggregation (time-based, tick-based)
+  exchange_connectivity:
+  - Adapter pattern for multiple exchanges
+  - WebSocket connection management
+  - REST API integration
+  - Rate limiting
+  - Historical data download
+  - Depth/orderbook processing
+key_source_files:
+  largest_modules:
+  - src/screen/dashboard/pane.rs (1681 lines)
+  - src/main.rs (1128 lines)
+  - src/screen/dashboard/tickers_table.rs (956 lines)
+  - exchange/src/lib.rs (734 lines)
+  critical_systems:
+  - src/screen/dashboard/ (dashboard UI)
+  - data/src/db/ (database layer)
+  - exchange/src/adapter/ (exchange integrations)
+  - src/chart/ (charting engine)
+  - src/modal/ (modal dialogs)
+  - data/src/aggr/ (data aggregation)
+development_features:
+  testing:
+  - Integration tests (tests/integration/)
+  - Property-based tests (tests/property/ using proptest)
+  - Unit tests (embedded in modules)
+  - Database benchmarks (benches/db_benchmarks.rs)
+  ci_cd:
+  - Multi-platform builds (macOS, Windows, Linux)
+  - Automated releases with GitHub Actions
+  - Code formatting checks
+  - Linting with clippy
+  debugging:
+  - Optional hot-reload (debug feature)
+  - Logging infrastructure (fern + log)
+  - Database manager UI
+  - Environment variable configuration
+special_features:
+  database_persistence:
+    backend: DuckDB
+    enabled_via: FLOWSURFACE_USE_DUCKDB environment variable
+    capabilities:
+    - Dual-write klines persistence
+    - Historical data queries
+    - Gap detection and backfill
+    - Data migration and archiving
+  market_data_handling:
+  - Real-time WebSocket feeds
+  - REST API historical fetching
+  - Binance bulk data download (data.binance.vision)
+  - Local caching (market_data/ directory)
+  ui_features:
+  - Multiple chart types with customization
+  - Pane linking and grouping
+  - Persistent layouts
+  - Theme customization with editor
+  - Audio feedback for trades
+  - Multi-window popout support
+  - Real-time depth of market (DOM) ladder
+documentation:
+  user_docs:
+  - README.md (installation, features, usage)
+  - Multiple planning documents (PLAN.md, PROMPT.md, IMPL.md)
+  - Implementation reports (IMPLEMENTATION_REVIEW.md, DIAGNOSTIC_REPORT.md)
+  - Testing reports (TASK6_TESTING_REPORT.md, TEST_RESULTS.md)
+  technical_docs:
+  - Klines download implementation (KLINES_DOWNLOAD_DUCKDB_FINAL.md)
+  - Live database chart updates (LIVE_DB_CHART_UPDATES.md)
+  - Research documentation (RESEARCH.md)
+  - Task tracking (tasks.yaml, tasks_overview.yaml)
+build_targets:
+  platforms:
+  - macOS (Universal binary)
+  - Windows (x86_64)
+  - Linux (x86_64 package)
+  release_profile:
+    lto: fat
+    codegen_units: 1
+    opt_level: 3
+notable_characteristics:
+- Complex real-time financial data visualization
+- Multi-exchange support with unified adapter interface
+- Robust error handling and reconnection logic
+- Extensive configuration and persistence
+- Modern Rust async architecture
+- GPU-accelerated rendering (wgpu via iced)
+- Property-based testing for critical paths
+- Comprehensive database migration system
