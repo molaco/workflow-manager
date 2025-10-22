@@ -9,3 +9,6 @@ pub mod mcp_tools;
 
 // Chat interface module
 pub mod chat;
+
+// Research workflow module
+pub mod research;
