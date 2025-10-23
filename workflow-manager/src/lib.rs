@@ -12,3 +12,6 @@ pub mod chat;
 
 // Research workflow module
 pub mod research;
+
+// Task planner module
+pub mod task_planner;
