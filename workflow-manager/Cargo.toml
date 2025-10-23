@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 default-run = "workflow-manager"
 
+[[bin]]
+name = "task-planner"
+path = "src/bin/task_planner.rs"
+
 [dependencies]
 claude-agent-sdk = { path = "../claude-agent-sdk-rust", features = ["tracing-support"] }
 workflow-manager-sdk = { path = "../workflow-manager-sdk" }
