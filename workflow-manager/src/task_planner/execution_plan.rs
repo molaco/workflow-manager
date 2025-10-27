@@ -11,12 +11,11 @@ use std::collections::{HashMap, HashSet};
 
 use crate::task_planner::types::{Batch, BatchTask, DependenciesSummary, ExecutionPlan, TaskOverview};
 use crate::task_planner::utils::clean_yaml_response;
-use workflow_manager_sdk::{log_debug, log_info, log_phase_start_console, log_warning};
 
 /// Generate simple execution plan by chunking tasks into fixed-size batches
 pub fn generate_execution_plan_simple(tasks: &[TaskOverview], batch_size: usize) -> String {
-    log_phase_start_console!(0, "Batch Planning", "Simple batching");
-    log_info!("Using fixed batch size: {}", batch_size);
+    println!("\nBatch Planning: Simple batching");
+    println!("Using fixed batch size: {}", batch_size);
 
     let mut batches = Vec::new();
 
@@ -66,14 +65,14 @@ pub fn generate_execution_plan_simple(tasks: &[TaskOverview], batch_size: usize)
     };
 
     serde_yaml::to_string(&plan).unwrap_or_else(|e| {
-        log_warning!("Failed to serialize execution plan: {}", e);
+        println!("⚠ Warning: Failed to serialize execution plan: {}", e);
         String::new()
     })
 }
 
 /// Generate execution plan using AI agent for dependency analysis
 pub async fn generate_execution_plan_ai(tasks_overview_yaml: &str) -> Result<String> {
-    log_phase_start_console!(0, "Batch Planning", "Analyzing dependencies with AI agent");
+    println!("\nBatch Planning: Analyzing dependencies with AI agent");
 
     let system_prompt = r#"You are an execution planning specialist focused on dependency analysis and batch optimization.
 
@@ -192,7 +191,7 @@ pub fn parse_execution_plan(
     if let Some(batches_array) = plan_obj.get("batches") {
         if let Some(batches_seq) = batches_array.as_sequence() {
             if debug {
-                log_debug!(
+                println!(
                     "Parsing {} batches from execution plan",
                     batches_seq.len()
                 );
@@ -207,7 +206,7 @@ pub fn parse_execution_plan(
                 if let Some(tasks_array) = batch_value.get("tasks") {
                     if let Some(tasks_seq) = tasks_array.as_sequence() {
                         if debug {
-                            log_debug!("  Batch {}: {} tasks", batch_id, tasks_seq.len());
+                            println!("  Batch {}: {} tasks", batch_id, tasks_seq.len());
                         }
 
                         let mut batch_tasks = Vec::new();
@@ -222,7 +221,7 @@ pub fn parse_execution_plan(
                                 if let Some(task) = task_by_id.get(&tid) {
                                     batch_tasks.push(task.clone());
                                 } else {
-                                    log_warning!("Task {} not found in tasks_overview", tid);
+                                    println!("⚠ Warning: Task {} not found in tasks_overview", tid);
                                 }
                             }
                         }
@@ -237,7 +236,7 @@ pub fn parse_execution_plan(
     }
 
     if batches.is_empty() {
-        log_warning!("No batches found in execution plan, using fallback");
+        println!("⚠ Warning: No batches found in execution plan, using fallback");
         return Ok(build_execution_batches_fallback(tasks));
     }
 
@@ -246,7 +245,7 @@ pub fn parse_execution_plan(
 
 /// Fallback: Build execution batches based on simple dependency analysis
 pub fn build_execution_batches_fallback(tasks: &[TaskOverview]) -> Vec<Vec<TaskOverview>> {
-    log_info!("Using fallback dependency analysis");
+    println!("Using fallback dependency analysis");
 
     // Build task lookup by ID
     let mut task_by_id: HashMap<u32, TaskOverview> = HashMap::new();
@@ -288,7 +287,7 @@ pub fn build_execution_batches_fallback(tasks: &[TaskOverview]) -> Vec<Vec<TaskO
 
         if current_batch.is_empty() {
             // Circular dependency detected
-            log_warning!("Circular dependency detected or unresolved dependencies");
+            println!("⚠ Warning: Circular dependency detected or unresolved dependencies");
 
             // Add remaining tasks to avoid infinite loop
             let remaining: Vec<TaskOverview> = tasks
@@ -306,7 +305,7 @@ pub fn build_execution_batches_fallback(tasks: &[TaskOverview]) -> Vec<Vec<TaskO
         batches.push(current_batch);
     }
 
-    log_info!("Fallback analysis created {} batches", batches.len());
+    println!("Fallback analysis created {} batches", batches.len());
     batches
 }
 

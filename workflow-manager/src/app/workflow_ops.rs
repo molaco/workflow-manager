@@ -118,8 +118,8 @@ impl App {
             for field in &workflow.info.fields {
                 if let Some(value) = self.field_values.get(&field.name) {
                     if !value.is_empty() {
-                        // Convert field name to CLI arg format (e.g., "message" -> "--message")
-                        let arg_name = format!("--{}", field.name.replace('_', "-"));
+                        // Use the actual CLI argument from metadata, not the field name
+                        let arg_name = &field.cli_arg;
 
                         // For boolean flags, check if this looks like a bool field
                         // (description contains "[BOOL]" or value is "true"/"false")
@@ -129,11 +129,11 @@ impl App {
                         {
                             // Only add flag if value is "true" or non-empty
                             if value.eq_ignore_ascii_case("true") {
-                                args.push(arg_name);
+                                args.push(arg_name.clone());
                             }
                         } else {
                             // Regular argument with value
-                            args.push(arg_name);
+                            args.push(arg_name.clone());
                             args.push(value.clone());
                         }
                     }
@@ -188,10 +188,16 @@ impl App {
                                     // Check for structured log events
                                     if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
                                         // Parse WorkflowLog event
-                                        if let Ok(event) =
-                                            serde_json::from_str::<WorkflowLog>(json_str)
-                                        {
-                                            Self::handle_workflow_event(event, &phases);
+                                        match serde_json::from_str::<WorkflowLog>(json_str) {
+                                            Ok(event) => {
+                                                Self::handle_workflow_event(event, &phases);
+                                            }
+                                            Err(e) => {
+                                                if let Ok(mut output) = output.lock() {
+                                                    output.push(format!("ERROR: Failed to parse event: {}", e));
+                                                    output.push(format!("  JSON: {}", &json_str[..json_str.len().min(100)]));
+                                                }
+                                            }
                                         }
                                     } else {
                                         // Regular stderr output
@@ -367,17 +373,18 @@ impl App {
             for field in &workflow.info.fields {
                 if let Some(value) = self.field_values.get(&field.name) {
                     if !value.is_empty() {
-                        let arg_name = format!("--{}", field.name.replace('_', "-"));
+                        // Use the actual CLI argument from metadata, not the field name
+                        let arg_name = &field.cli_arg;
 
                         if field.description.contains("[BOOL]")
                             || value.eq_ignore_ascii_case("true")
                             || value.eq_ignore_ascii_case("false")
                         {
                             if value.eq_ignore_ascii_case("true") {
-                                args.push(arg_name);
+                                args.push(arg_name.clone());
                             }
                         } else {
-                            args.push(arg_name);
+                            args.push(arg_name.clone());
                             args.push(value.clone());
                         }
                     }
@@ -453,10 +460,16 @@ impl App {
                                 if let Ok(line) = line {
                                     // Check for structured log events
                                     if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
-                                        if let Ok(event) =
-                                            serde_json::from_str::<WorkflowLog>(json_str)
-                                        {
-                                            Self::handle_workflow_event(event, &phases);
+                                        match serde_json::from_str::<WorkflowLog>(json_str) {
+                                            Ok(event) => {
+                                                Self::handle_workflow_event(event, &phases);
+                                            }
+                                            Err(e) => {
+                                                if let Ok(mut output) = output.lock() {
+                                                    output.push(format!("ERROR: Failed to parse event: {}", e));
+                                                    output.push(format!("  JSON: {}", &json_str[..json_str.len().min(100)]));
+                                                }
+                                            }
                                         }
                                     } else {
                                         // Regular stderr output
@@ -632,8 +645,8 @@ impl App {
                         if let Some(task) = phase.tasks.iter_mut().find(|t| t.id == task_id) {
                             if let Some(agent) = task.agents.iter_mut().find(|a| a.id == agent_id) {
                                 agent.messages.push(message.clone());
-                                break;
                             }
+                            break;
                         }
                     }
                 }

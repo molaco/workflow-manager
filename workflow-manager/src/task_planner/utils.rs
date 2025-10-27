@@ -76,8 +76,7 @@ pub fn save_yaml(data: &str, output_path: &Path) -> Result<()> {
     std::fs::write(output_path, data)
         .with_context(|| format!("Failed to write to {}", output_path.display()))?;
 
-    // Use the new logging macro from workflow-manager-sdk
-    workflow_manager_sdk::log_file_saved!(output_path.display());
+    println!("✓ Saved: {}", output_path.display());
     Ok(())
 }
 

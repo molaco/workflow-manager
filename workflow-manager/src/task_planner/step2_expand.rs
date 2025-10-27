@@ -21,9 +21,8 @@ use crate::task_planner::execution_plan::{
 use crate::task_planner::types::{TaskOverview, UsageStats};
 use crate::task_planner::utils::{clean_yaml_response, parse_tasks_overview};
 use workflow_manager_sdk::{
-    log_aggregate_stats, log_batch_complete, log_batch_start, log_debug, log_delegate_to,
-    log_file_saved, log_found, log_info, log_parallel_complete, log_parallel_start,
-    log_phase_start_console, log_stats, log_streaming_complete, log_streaming_start,
+    log_agent_complete, log_agent_message, log_agent_start, log_phase_complete, log_phase_start,
+    log_state_file, log_task_complete, log_task_start,
 };
 
 /// Create sub-agent definitions for task expansion
@@ -186,7 +185,7 @@ pub async fn suborchestrator_expand_task(
     let task_name = &task_overview.task.name;
 
     if debug {
-        log_debug!("Starting expansion for Task {}: {}", task_id, task_name);
+        println!("  Debug: Starting expansion for Task {}: {}", task_id, task_name);
     }
 
     // Serialize task overview for the prompt
@@ -276,14 +275,15 @@ IMPORTANT: Run all agents in parallel for maximum efficiency:
         system_prompt: Some(claude_agent_sdk::SystemPrompt::String(system_prompt)),
         agents: Some(agents),
         permission_mode: Some(claude_agent_sdk::PermissionMode::BypassPermissions),
-        include_partial_messages: true,
         ..Default::default()
     };
 
     // Track which agents have been invoked
     let mut agents_invoked = std::collections::HashSet::new();
 
-    log_info!("  Task {}: Expanding with sub-agents...", task_id);
+    let agent_name = "suborchestrator";
+    let task_agent_id = format!("task_{}_suborchestrator", task_id);
+    log_agent_start!(&task_agent_id, agent_name, format!("Expanding task {} with sub-agents", task_id));
 
     let stream = claude_agent_sdk::query(&query_prompt, Some(options))
         .await
@@ -303,19 +303,27 @@ IMPORTANT: Run all agents in parallel for maximum efficiency:
                     if let claude_agent_sdk::ContentBlock::Text { text } = block {
                         response_parts.push(text.clone());
 
+                        // Print streaming text to console
+                        print!("{}", text);
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+
+                        // Emit streaming text for live TUI updates
+                        log_agent_message!(&task_agent_id, agent_name, &text);
+
                         // Detect agent invocations for logging
-                        for agent_name in &["files", "functions", "formal", "tests"] {
-                            if text.contains(&format!("@{}", agent_name))
-                                && !agents_invoked.contains(*agent_name)
+                        for sub_agent in &["files", "functions", "formal", "tests"] {
+                            if text.contains(&format!("@{}", sub_agent))
+                                && !agents_invoked.contains(*sub_agent)
                             {
-                                agents_invoked.insert(agent_name.to_string());
-                                log_delegate_to!("suborchestrator", agent_name);
+                                agents_invoked.insert(sub_agent.to_string());
+                                // Sub-agent delegation is already visible in the streaming text
                             }
                         }
 
                         if debug && !text.is_empty() {
                             let preview_len = text.len().min(100);
-                            log_debug!("  Response: {}...", &text[..preview_len]);
+                            println!("    Debug: Response: {}...", &text[..preview_len]);
                         }
                     }
                 }
@@ -370,10 +378,13 @@ IMPORTANT: Run all agents in parallel for maximum efficiency:
     let cleaned = clean_yaml_response(&combined_output);
     let stats = usage_stats.ok_or_else(|| anyhow::anyhow!("No usage stats received"))?;
 
+    log_agent_complete!(&task_agent_id, agent_name, format!("Task {} expanded", task_id));
+
     if debug {
-        log_debug!("  Task {}: Expansion complete", task_id);
-        log_stats!(
-            stats.duration_ms,
+        println!(
+            "  Debug: Task {}: {:.2}s, {} turns, ${:.4}, {} in, {} out",
+            task_id,
+            stats.duration_ms as f64 / 1000.0,
             stats.num_turns,
             stats.total_cost_usd.unwrap_or(0.0),
             stats.usage.input_tokens,
@@ -397,13 +408,18 @@ pub async fn step2_expand_all_tasks(
     use_ai_planning: bool,
     batch_size: usize,
 ) -> Result<String> {
-    log_phase_start_console!(2, "Suborchestrators", "Expand Tasks");
+    println!("\n{}", "=".repeat(80));
+    println!("STEP 2: Suborchestrators");
+    println!("{}", "=".repeat(80));
+    println!("Expand Tasks\n");
+
+    log_phase_start!(2, "Task Expansion", 3);
 
     // Parse tasks from overview
     let tasks = parse_tasks_overview(tasks_overview_yaml)
         .context("Failed to parse tasks_overview.yaml")?;
 
-    log_found!(tasks.len(), "tasks");
+    println!("Found {} tasks", tasks.len());
 
     if tasks.is_empty() {
         anyhow::bail!("No valid tasks found in tasks_overview.yaml");
@@ -414,7 +430,7 @@ pub async fn step2_expand_all_tasks(
         generate_execution_plan_ai(tasks_overview_yaml)
             .await
             .unwrap_or_else(|e| {
-                log_info!("AI planning failed ({}), using simple batching", e);
+                println!("AI planning failed ({}), using simple batching", e);
                 generate_execution_plan_simple(&tasks, batch_size)
             })
     } else {
@@ -422,16 +438,16 @@ pub async fn step2_expand_all_tasks(
     };
 
     if debug {
-        log_debug!("Execution Plan:\n{}", execution_plan_yaml);
+        println!("Execution Plan:\n{}", execution_plan_yaml);
     }
 
     // Parse execution plan into batches
     let batches = parse_execution_plan(&execution_plan_yaml, &tasks, debug).unwrap_or_else(|e| {
-        log_info!("Plan parsing failed ({}), using fallback", e);
+        println!("Plan parsing failed ({}), using fallback", e);
         build_execution_batches_fallback(&tasks)
     });
 
-    log_info!("Execution plan: {} batch(es)", batches.len());
+    println!("Execution plan: {} batch(es)", batches.len());
 
     // Execute batches
     let mut all_expanded = Vec::new();
@@ -439,7 +455,7 @@ pub async fn step2_expand_all_tasks(
     let tasks_path = project_root.join("tasks.yaml");
 
     let mut file_handle = if stream_to_file {
-        log_streaming_start!(tasks_path.display());
+        println!("Streaming to: {}", tasks_path.display());
         Some(std::fs::File::create(&tasks_path).context("Failed to create tasks.yaml")?)
     } else {
         None
@@ -447,8 +463,15 @@ pub async fn step2_expand_all_tasks(
 
     for (batch_num, batch) in batches.iter().enumerate() {
         let batch_id = batch_num + 1;
-        log_batch_start!(batch_id, batches.len(), batch.len());
-        log_parallel_start!(batch.len(), "tasks");
+        let batch_task_id = format!("batch_{}", batch_id);
+
+        log_task_start!(
+            2,
+            &batch_task_id,
+            format!("Batch {}/{} ({} tasks)", batch_id, batches.len(), batch.len())
+        );
+
+        println!("→ Executing Batch {}/{} ({} tasks)", batch_id, batches.len(), batch.len());
 
         // Execute tasks in parallel
         let tasks_futures: Vec<_> = batch
@@ -457,8 +480,6 @@ pub async fn step2_expand_all_tasks(
             .collect();
 
         let expanded_batch = join_all(tasks_futures).await;
-
-        log_parallel_complete!(batch.len(), "tasks");
 
         // Handle results
         for result in expanded_batch {
@@ -479,7 +500,7 @@ pub async fn step2_expand_all_tasks(
             all_usage_stats.push(usage_stats);
         }
 
-        log_batch_complete!(batch_id);
+        log_task_complete!(&batch_task_id, format!("Batch {} complete", batch_id));
     }
 
     // Aggregate stats
@@ -490,19 +511,24 @@ pub async fn step2_expand_all_tasks(
         .filter_map(|s| s.total_cost_usd)
         .sum();
 
-    log_aggregate_stats!(
+    println!(
+        "\nAggregate: {} tasks, {:.2}s, {} turns, ${:.4}",
         all_usage_stats.len(),
-        total_duration,
+        total_duration as f64 / 1000.0,
         total_turns,
         total_cost
     );
 
+    log_phase_complete!(2, "Task Expansion");
+
     if file_handle.is_some() {
-        log_streaming_complete!(tasks_path.display());
+        println!("✓ Streamed to: {}", tasks_path.display());
+        log_state_file!(2, tasks_path.display().to_string(), "Expanded tasks");
         Ok(String::new())
     } else {
         let result = all_expanded.join("\n---\n");
-        log_file_saved!(tasks_path.display());
+        println!("✓ Saved: {}", tasks_path.display());
+        log_state_file!(2, tasks_path.display().to_string(), "Expanded tasks");
         Ok(result)
     }
 }

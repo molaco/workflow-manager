@@ -11,8 +11,8 @@ use std::path::Path;
 use crate::task_planner::types::{DetailedTask, ReviewResult, TaskOverview};
 use crate::task_planner::utils::{parse_detailed_tasks, parse_tasks_overview};
 use workflow_manager_sdk::{
-    log_batch_complete, log_batch_start, log_debug, log_delegate_to, log_file_saved, log_info,
-    log_phase_start_console, log_review_issue, log_review_summary, log_stats, log_warning,
+    log_agent_message, log_phase_complete, log_phase_start,
+    log_state_file, log_task_complete, log_task_start,
 };
 
 /// Review suborchestrator coordinates @reviewer agents for a batch
@@ -25,7 +25,12 @@ async fn review_suborchestrator(
     total_batches: usize,
     debug: bool,
 ) -> Result<Vec<ReviewResult>> {
-    log_batch_start!(batch_num, total_batches, batch.len());
+    let batch_task_id = format!("review_batch_{}", batch_num);
+    log_task_start!(
+        3,
+        &batch_task_id,
+        format!("Review batch {}/{} ({} tasks)", batch_num, total_batches, batch.len())
+    );
 
     // Define the reviewer agent
     let reviewer_agent = claude_agent_sdk::AgentDefinition {
@@ -174,7 +179,6 @@ IMPORTANT: Each @reviewer needs the specific task's overview and detailed YAML -
         system_prompt: Some(claude_agent_sdk::SystemPrompt::String(system_prompt)),
         agents: Some(agents),
         permission_mode: Some(claude_agent_sdk::PermissionMode::BypassPermissions),
-        include_partial_messages: true,
         ..Default::default()
     };
 
@@ -197,12 +201,17 @@ IMPORTANT: Each @reviewer needs the specific task's overview and detailed YAML -
                     if let claude_agent_sdk::ContentBlock::Text { text } = block {
                         response_parts.push(text.clone());
 
-                        if text.contains("@reviewer") {
-                            log_delegate_to!("review_suborchestrator", "reviewer");
-                        }
+                        // Print streaming text to console
+                        print!("{}", text);
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+
+                        // Emit streaming text for live TUI updates
+                        let agent_id = format!("review_batch_{}", batch_num);
+                        log_agent_message!(&agent_id, "review_suborchestrator", &text);
 
                         if debug && !text.is_empty() {
-                            log_debug!("  Response: {}", &text[..text.len().min(100)]);
+                            println!("  [DEBUG] Response: {}", &text[..text.len().min(100)]);
                         }
                     }
                 }
@@ -222,7 +231,7 @@ IMPORTANT: Each @reviewer needs the specific task's overview and detailed YAML -
     let combined_output = response_parts.join("\n");
 
     if debug {
-        log_debug!("[Batch {}] Raw output: {}", batch_num, &combined_output[..combined_output.len().min(200)]);
+        println!("[Batch {}] Raw output: {}", batch_num, &combined_output[..combined_output.len().min(200)]);
     }
 
     // Parse JSON response
@@ -248,16 +257,16 @@ IMPORTANT: Each @reviewer needs the specific task's overview and detailed YAML -
         serde_json::from_str(json_str).context("Failed to parse review results JSON")?;
 
     if let Some((duration_ms, num_turns, total_cost_usd)) = usage_stats {
-        log_stats!(
-            duration_ms,
+        println!(
+            "Batch {}: {:.2}s, {} turns, ${:.4}",
+            batch_num,
+            duration_ms as f64 / 1000.0,
             num_turns,
-            total_cost_usd.unwrap_or(0.0),
-            0,
-            0
+            total_cost_usd.unwrap_or(0.0)
         );
     }
 
-    log_batch_complete!(batch_num);
+    log_task_complete!(&batch_task_id, format!("Batch {} complete", batch_num));
 
     Ok(results)
 }
@@ -271,7 +280,12 @@ pub async fn step3_review_tasks(
     batch_size: usize,
     debug: bool,
 ) -> Result<Vec<ReviewResult>> {
-    log_phase_start_console!(3, "Batched Review", "Validate expanded tasks with @reviewer agents");
+    println!("\n{}", "=".repeat(80));
+    println!("STEP 3: Review & Validation");
+    println!("{}", "=".repeat(80));
+    println!("Validate expanded tasks with @reviewer agents\n");
+
+    log_phase_start!(3, "Review & Validation", 3);
 
     // Parse both YAML files
     let overview_tasks = parse_tasks_overview(tasks_overview_yaml)
@@ -279,7 +293,7 @@ pub async fn step3_review_tasks(
     let detailed_tasks =
         parse_detailed_tasks(tasks_yaml).context("Failed to parse tasks.yaml")?;
 
-    log_info!(
+    println!(
         "Matching {} overview tasks with {} detailed tasks",
         overview_tasks.len(),
         detailed_tasks.len()
@@ -296,8 +310,8 @@ pub async fn step3_review_tasks(
         if let Some(detailed) = detailed_map.remove(&overview.task.id) {
             task_pairs.push((overview, detailed));
         } else {
-            log_warning!(
-                "No detailed task found for overview task {}",
+            println!(
+                "⚠ Warning: No detailed task found for overview task {}",
                 overview.task.id
             );
         }
@@ -305,7 +319,7 @@ pub async fn step3_review_tasks(
 
     // Create batches
     let batches: Vec<&[(TaskOverview, DetailedTask)]> = task_pairs.chunks(batch_size).collect();
-    log_info!(
+    println!(
         "Created {} batch(es) with batch_size={}",
         batches.len(),
         batch_size
@@ -328,6 +342,8 @@ pub async fn step3_review_tasks(
         all_results.extend(batch_results);
     }
 
+    log_phase_complete!(3, "Review & Validation");
+
     Ok(all_results)
 }
 
@@ -336,25 +352,31 @@ pub async fn step3_main_orchestrator_report(
     review_results: &[ReviewResult],
     report_path: &Path,
 ) -> Result<()> {
-    log_phase_start_console!(0, "Final Report", "Main Orchestrator Summary");
+    println!("\n{}", "=".repeat(80));
+    println!("FINAL REPORT: Main Orchestrator Summary");
+    println!("{}", "=".repeat(80));
 
     let approved = review_results.iter().filter(|r| r.success).count();
     let needs_revision = review_results.len() - approved;
 
-    log_review_summary!(approved, needs_revision, review_results.len());
+    println!(
+        "\n✓ Approved: {}/{} | ⚠ Needs revision: {}/{}",
+        approved, review_results.len(),
+        needs_revision, review_results.len()
+    );
 
     if needs_revision > 0 {
-        log_warning!("Tasks requiring revision:");
+        println!("\n⚠ Tasks requiring revision:");
         for result in review_results {
             if !result.success {
-                log_review_issue!(result.task_id, &result.summary);
+                println!("  Task {}: {}", result.task_id, result.summary);
                 for issue in &result.issues {
-                    log_info!("  - {}", issue);
+                    println!("    - {}", issue);
                 }
             }
         }
     } else {
-        log_info!("All tasks approved! Ready for implementation.");
+        println!("\n✓ All tasks approved! Ready for implementation.");
     }
 
     // Save report to file
@@ -387,7 +409,9 @@ pub async fn step3_main_orchestrator_report(
     }
 
     std::fs::write(report_path, report).context("Failed to write review report")?;
-    log_file_saved!(report_path.display());
+
+    println!("\n✓ Saved: {}", report_path.display());
+    log_state_file!(3, report_path.display().to_string(), "Review report");
 
     Ok(())
 }

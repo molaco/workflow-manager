@@ -7,8 +7,11 @@
 use anyhow::{Context, Result};
 
 use crate::task_planner::types::UsageStats;
-use crate::task_planner::utils::{clean_yaml_response, extract_text_and_stats};
-use workflow_manager_sdk::{log_info, log_phase_start_console, log_stats};
+use crate::task_planner::utils::clean_yaml_response;
+use workflow_manager_sdk::{
+    log_agent_complete, log_agent_message, log_agent_start, log_phase_complete, log_phase_start,
+    log_task_complete, log_task_start,
+};
 
 /// Main orchestrator generates tasks_overview.yaml from IMPL.md
 ///
@@ -30,7 +33,17 @@ pub async fn step1_generate_overview(
     impl_md: &str,
     overview_template: &str,
 ) -> Result<(String, UsageStats)> {
-    log_phase_start_console!(1, "Main Orchestrator", "Generate tasks_overview.yaml from IMPL.md");
+    println!("\n{}", "=".repeat(80));
+    println!("STEP 1: Main Orchestrator");
+    println!("{}", "=".repeat(80));
+    println!("Generate tasks_overview.yaml from IMPL.md\n");
+
+    let task_id = "step1_overview";
+    let agent_name = "Main Orchestrator";
+
+    log_phase_start!(1, "Overview Generation", 3);
+    log_task_start!(1, task_id, "Generate tasks_overview.yaml from IMPL.md");
+    log_agent_start!(task_id, agent_name, "Analyzing implementation and generating task overview");
 
     let system_prompt = r#"You are a task planning specialist focused on generating high-level task overviews.
 
@@ -66,7 +79,7 @@ Make sure to just give your response. You must not create or write any files jus
         impl_md, overview_template
     );
 
-    log_info!("Querying Claude agent to generate task overview...");
+    println!("Querying Claude agent to generate task overview...");
 
     let options = claude_agent_sdk::ClaudeAgentOptions {
         system_prompt: Some(claude_agent_sdk::SystemPrompt::String(system_prompt.to_string())),
@@ -79,22 +92,91 @@ Make sure to just give your response. You must not create or write any files jus
         .await
         .context("Failed to query Claude agent for task overview")?;
 
-    // Convert stream to handle anyhow::Error using map
+    // Process stream with live event emission
     use futures::StreamExt;
-    let stream = stream.map(|result| result.map_err(|e| anyhow::anyhow!("Claude error: {}", e)));
+    let mut response_parts = Vec::new();
+    let mut usage_stats_opt = None;
 
-    let (response, usage_stats) = extract_text_and_stats(stream)
-        .await
-        .context("Failed to extract response from agent")?;
+    futures::pin_mut!(stream);
 
-    // Log statistics
-    log_stats!(
-        usage_stats.duration_ms,
+    while let Some(result) = stream.next().await {
+        let message = result.map_err(|e| anyhow::anyhow!("Claude error: {}", e))?;
+
+        match message {
+            claude_agent_sdk::Message::Assistant { message, .. } => {
+                for block in message.content {
+                    if let claude_agent_sdk::ContentBlock::Text { text } = block {
+                        response_parts.push(text.clone());
+
+                        // Print streaming text to console
+                        print!("{}", text);
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+
+                        // Emit streaming text for live TUI updates
+                        log_agent_message!(task_id, agent_name, &text);
+                    }
+                }
+            }
+            claude_agent_sdk::Message::Result {
+                duration_ms,
+                duration_api_ms,
+                num_turns,
+                total_cost_usd,
+                usage,
+                session_id,
+                ..
+            } => {
+                let token_usage = if let Some(usage_value) = usage {
+                    let input_tokens = usage_value
+                        .get("input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32;
+                    let output_tokens = usage_value
+                        .get("output_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32;
+
+                    crate::task_planner::types::TokenUsage {
+                        input_tokens,
+                        output_tokens,
+                    }
+                } else {
+                    crate::task_planner::types::TokenUsage {
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    }
+                };
+
+                usage_stats_opt = Some(UsageStats {
+                    duration_ms,
+                    duration_api_ms: Some(duration_api_ms),
+                    num_turns,
+                    total_cost_usd,
+                    usage: token_usage,
+                    session_id: Some(session_id.as_str().to_string()),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    let response = response_parts.join("");
+    let usage_stats = usage_stats_opt.context("No usage stats received")?;
+
+    // Print statistics to console
+    println!(
+        "\nStats: {:.2}s, {} turns, ${:.4}, {} in tokens, {} out tokens",
+        usage_stats.duration_ms as f64 / 1000.0,
         usage_stats.num_turns,
         usage_stats.total_cost_usd.unwrap_or(0.0),
         usage_stats.usage.input_tokens,
         usage_stats.usage.output_tokens
     );
+
+    log_agent_complete!(task_id, agent_name, "Task overview generated successfully");
+    log_task_complete!(task_id, "tasks_overview.yaml ready");
+    log_phase_complete!(1, "Overview Generation");
 
     Ok((clean_yaml_response(&response), usage_stats))
 }

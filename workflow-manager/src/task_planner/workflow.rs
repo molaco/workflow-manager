@@ -15,7 +15,7 @@ use crate::task_planner::{
     step3_review::{step3_main_orchestrator_report, step3_review_tasks},
     utils::{load_impl_files, load_impl_md, load_template, save_yaml},
 };
-use workflow_manager_sdk::{log_file_saved, log_info, log_phase_complete_console};
+use workflow_manager_sdk::{log_phase_complete, log_state_file};
 
 /// Workflow configuration derived from CLI arguments
 #[derive(Debug, Clone)]
@@ -59,7 +59,12 @@ pub struct WorkflowConfig {
 
 impl From<Args> for WorkflowConfig {
     fn from(args: Args) -> Self {
-        let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        // Use specified directory or current directory
+        let project_root = args
+            .dir
+            .as_ref()
+            .map(|d| PathBuf::from(d))
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
         // Determine paths based on arguments or defaults
         let tasks_overview_path = args
@@ -123,7 +128,9 @@ pub async fn run_task_planning_workflow(config: WorkflowConfig) -> Result<()> {
     if config.step == "1" || config.step == "all" {
         execute_step1(&config, impl_md.as_ref().unwrap(), overview_template.as_ref().unwrap())
             .await?;
-        log_phase_complete_console!(1);
+
+        println!("\n✓ Phase 1 complete");
+        log_phase_complete!(1, "Overview Generation");
 
         if config.step == "1" {
             return Ok(());
@@ -145,7 +152,7 @@ pub async fn run_task_planning_workflow(config: WorkflowConfig) -> Result<()> {
                 config.tasks_overview_path.display()
             );
         }
-        log_info!(
+        println!(
             "Loading tasks_overview.yaml from {}",
             config.tasks_overview_path.display()
         );
@@ -160,7 +167,9 @@ pub async fn run_task_planning_workflow(config: WorkflowConfig) -> Result<()> {
             task_template.as_ref().unwrap(),
         )
         .await?;
-        log_phase_complete_console!(2);
+
+        println!("\n✓ Phase 2 complete");
+        log_phase_complete!(2, "Task Expansion");
 
         if config.step == "2" {
             return Ok(());
@@ -181,7 +190,7 @@ pub async fn run_task_planning_workflow(config: WorkflowConfig) -> Result<()> {
                 config.tasks_path.display()
             );
         }
-        log_info!("Loading tasks.yaml from {}", config.tasks_path.display());
+        println!("Loading tasks.yaml from {}", config.tasks_path.display());
         std::fs::read_to_string(&config.tasks_path).context("Failed to read tasks.yaml")?
     };
 
@@ -194,7 +203,9 @@ pub async fn run_task_planning_workflow(config: WorkflowConfig) -> Result<()> {
             task_template.as_ref().unwrap(),
         )
         .await?;
-        log_phase_complete_console!(3);
+
+        println!("\n✓ Phase 3 complete");
+        log_phase_complete!(3, "Review & Validation");
     }
 
     Ok(())
@@ -203,10 +214,10 @@ pub async fn run_task_planning_workflow(config: WorkflowConfig) -> Result<()> {
 /// Load implementation files
 fn load_implementation_files(config: &WorkflowConfig) -> Result<String> {
     if let Some(ref impl_files) = config.impl_files {
-        log_info!("Loading {} implementation file(s)...", impl_files.len());
+        println!("Loading {} implementation file(s)...", impl_files.len());
         load_impl_files(impl_files)
     } else {
-        log_info!("Auto-detecting IMPL.md...");
+        println!("Auto-detecting IMPL.md...");
         load_impl_md(&config.project_root)
     }
 }
@@ -218,7 +229,7 @@ fn load_overview_template(config: &WorkflowConfig) -> Result<String> {
         .as_ref()
         .context("tasks_overview_template is required")?;
 
-    log_info!("Loading tasks_overview_template from {}", template_path);
+    println!("Loading tasks_overview_template from {}", template_path);
     load_template(Path::new(template_path))
 }
 
@@ -229,7 +240,7 @@ fn load_task_template(config: &WorkflowConfig) -> Result<String> {
         .as_ref()
         .context("task_template is required")?;
 
-    log_info!("Loading task_template from {}", template_path);
+    println!("Loading task_template from {}", template_path);
     load_template(Path::new(template_path))
 }
 
@@ -269,7 +280,8 @@ async fn execute_step2(
         save_yaml(&tasks_yaml, &config.tasks_path)?;
     } else if config.stream {
         // Streaming mode already saved the file
-        log_file_saved!(config.tasks_path.display());
+        println!("✓ Saved: {}", config.tasks_path.display());
+        log_state_file!(2, config.tasks_path.display().to_string(), "Expanded tasks (streamed)");
     } else {
         anyhow::bail!("No tasks generated");
     }
@@ -308,6 +320,7 @@ mod tests {
     fn test_workflow_config_from_args() {
         let args = Args {
             step: "all".to_string(),
+            dir: None,
             impl_files: Some(vec!["IMPL.md".to_string()]),
             tasks_overview: None,
             tasks: None,
@@ -331,6 +344,7 @@ mod tests {
     fn test_workflow_config_default_paths() {
         let args = Args {
             step: "2".to_string(),
+            dir: None,
             impl_files: None,
             tasks_overview: None,
             tasks: None,

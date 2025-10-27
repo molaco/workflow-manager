@@ -8,6 +8,37 @@ use workflow_manager_sdk::{WorkflowLog, WorkflowStatus};
 use super::*;
 
 impl App {
+    // Helper to strip ANSI color codes from strings
+    fn strip_ansi_codes(s: &str) -> String {
+        // Regex to match ANSI escape sequences
+        // Pattern: ESC [ ... m (where ... is parameters like 1;36)
+        let mut result = String::with_capacity(s.len());
+        let mut chars = s.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            if ch == '\x1b' {
+                // Check if this is an ANSI escape sequence
+                if chars.peek() == Some(&'[') {
+                    chars.next(); // consume '['
+                    // Skip until we find 'm' or reach end
+                    while let Some(&next_ch) = chars.peek() {
+                        chars.next();
+                        if next_ch == 'm' {
+                            break;
+                        }
+                    }
+                } else {
+                    // Not an escape sequence, keep the character
+                    result.push(ch);
+                }
+            } else {
+                result.push(ch);
+            }
+        }
+
+        result
+    }
+
     // Tab navigation
     pub fn next_tab(&mut self) {
         if !self.open_tabs.is_empty() {
@@ -114,17 +145,18 @@ impl App {
         for field in &workflow.info.fields {
             if let Some(value) = field_values.get(&field.name) {
                 if !value.is_empty() {
-                    let arg_name = format!("--{}", field.name.replace('_', "-"));
+                    // Use the actual CLI argument from metadata, not the field name
+                    let arg_name = &field.cli_arg;
 
                     if field.description.contains("[BOOL]")
                         || value.eq_ignore_ascii_case("true")
                         || value.eq_ignore_ascii_case("false")
                     {
                         if value.eq_ignore_ascii_case("true") {
-                            args.push(arg_name);
+                            args.push(arg_name.clone());
                         }
                     } else {
-                        args.push(arg_name);
+                        args.push(arg_name.clone());
                         args.push(value.clone());
                     }
                 }
@@ -182,8 +214,14 @@ impl App {
                                 if let Ok(event) = serde_json::from_str::<WorkflowLog>(json_str) {
                                     Self::handle_workflow_event(event, &phases);
                                 }
-                            } else if let Ok(mut output) = output.lock() {
-                                output.push(format!("ERROR: {}", line));
+                            } else {
+                                // Strip ANSI color codes before displaying
+                                let cleaned = Self::strip_ansi_codes(&line);
+                                if !cleaned.trim().is_empty() {
+                                    if let Ok(mut output) = output.lock() {
+                                        output.push(cleaned);
+                                    }
+                                }
                             }
                         }
                     });

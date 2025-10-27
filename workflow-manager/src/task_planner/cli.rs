@@ -27,13 +27,35 @@ use workflow_manager_sdk::WorkflowDefinition;
 pub struct Args {
     /// Which step to run (1=overview, 2=expand, 3=review, all=complete workflow)
     #[arg(long, value_name = "STEP", default_value = "all")]
+    #[field(
+        label = "Workflow Step",
+        description = "Which step to run: 1 (overview), 2 (expand), 3 (review), or 'all'",
+        type = "text"
+    )]
     pub step: String,
+
+    /// Working directory for task planning operations
+    ///
+    /// Specifies the directory where the task planner will look for files
+    /// and store outputs. Defaults to the current directory.
+    #[arg(long, value_name = "DIR")]
+    #[field(
+        label = "Working Directory",
+        description = "Directory for task planning operations (default: current directory)",
+        type = "file_path"
+    )]
+    pub dir: Option<String>,
 
     /// Path(s) to implementation file(s) - can specify multiple files
     ///
     /// If multiple files are provided, they will be combined with separators.
     /// If not specified, attempts to auto-detect IMPL.md in project root or DOCS/.
     #[arg(long = "impl", value_name = "PATH")]
+    #[field(
+        label = "Implementation Files",
+        description = "Path(s) to IMPL.md or implementation specification files",
+        type = "file_path"
+    )]
     pub impl_files: Option<Vec<String>>,
 
     /// Path to tasks_overview.yaml
@@ -41,6 +63,11 @@ pub struct Args {
     /// Used as input for steps 2 and 3, or as output for step 1.
     /// Defaults to ./tasks_overview.yaml
     #[arg(long, value_name = "PATH")]
+    #[field(
+        label = "Tasks Overview File",
+        description = "Path to tasks_overview.yaml (input for steps 2-3, output for step 1)",
+        type = "file_path"
+    )]
     pub tasks_overview: Option<String>,
 
     /// Path to tasks.yaml
@@ -48,6 +75,11 @@ pub struct Args {
     /// Used as input for step 3, or as output for step 2.
     /// Defaults to ./tasks.yaml
     #[arg(long, value_name = "PATH")]
+    #[field(
+        label = "Tasks File",
+        description = "Path to tasks.yaml (input for step 3, output for step 2)",
+        type = "file_path"
+    )]
     pub tasks: Option<String>,
 
     /// Stream tasks to file immediately (reduces memory usage)
@@ -55,6 +87,11 @@ pub struct Args {
     /// When enabled, task specifications are written to the output file
     /// as they are generated, rather than accumulating in memory.
     #[arg(long)]
+    #[field(
+        label = "Stream Mode",
+        description = "Write tasks to file immediately (reduces memory usage)",
+        type = "boolean"
+    )]
     pub stream: bool,
 
     /// Enable debug output
@@ -62,6 +99,11 @@ pub struct Args {
     /// Prints detailed debug information including batch plans, YAML content,
     /// and intermediate agent outputs.
     #[arg(long)]
+    #[field(
+        label = "Debug Mode",
+        description = "Enable detailed debug output (batch plans, YAML content, etc.)",
+        type = "boolean"
+    )]
     pub debug: bool,
 
     /// Use simple fixed-size batching with specified size
@@ -69,18 +111,35 @@ pub struct Args {
     /// If specified, uses fixed batch sizes instead of AI-based dependency analysis.
     /// For example, --batch-size 5 will group tasks into batches of 5.
     #[arg(long, value_name = "SIZE")]
+    #[field(
+        label = "Batch Size",
+        description = "Fixed batch size (disables AI dependency analysis)",
+        type = "number",
+        min = "1",
+        max = "20"
+    )]
     pub batch_size: Option<usize>,
 
     /// Path to tasks_overview_template.yaml
     ///
     /// Required for step 1. Defines the structure for task overview YAML.
     #[arg(long, value_name = "PATH")]
+    #[field(
+        label = "Overview Template",
+        description = "Path to tasks_overview_template.yaml (required for step 1)",
+        type = "file_path"
+    )]
     pub tasks_overview_template: Option<String>,
 
     /// Path to task_template.yaml
     ///
     /// Required for steps 2 and 3. Defines the structure for detailed task YAML.
     #[arg(long, value_name = "PATH")]
+    #[field(
+        label = "Task Template",
+        description = "Path to task_template.yaml (required for steps 2-3)",
+        type = "file_path"
+    )]
     pub task_template: Option<String>,
 
     /// Print workflow metadata and exit
@@ -145,6 +204,7 @@ mod tests {
     fn test_validate_step1() {
         let mut args = Args {
             step: "1".to_string(),
+            dir: None,
             impl_files: None,
             tasks_overview: None,
             tasks: None,
@@ -168,6 +228,7 @@ mod tests {
     fn test_validate_step2() {
         let mut args = Args {
             step: "2".to_string(),
+            dir: None,
             impl_files: None,
             tasks_overview: None,
             tasks: None,
@@ -191,6 +252,7 @@ mod tests {
     fn test_use_ai_execution_planning() {
         let args = Args {
             step: "all".to_string(),
+            dir: None,
             impl_files: None,
             tasks_overview: None,
             tasks: None,
