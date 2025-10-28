@@ -100,7 +100,9 @@ Make sure to just give your response. You must not create or write any files jus
     futures::pin_mut!(stream);
 
     while let Some(result) = stream.next().await {
-        let message = result.map_err(|e| anyhow::anyhow!("Claude error: {}", e))?;
+        let message = result.with_context(|| {
+            "Failed to receive message from stream - request may have been aborted"
+        })?;
 
         match message {
             claude_agent_sdk::Message::Assistant { message, .. } => {
@@ -159,6 +161,11 @@ Make sure to just give your response. You must not create or write any files jus
             }
             _ => {}
         }
+    }
+
+    // Verify we received at least one assistant message
+    if response_parts.is_empty() {
+        anyhow::bail!("No assistant message found - stream may have been interrupted or aborted");
     }
 
     let response = response_parts.join("");

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -318,6 +318,48 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                                 // K: Kill workflow (in Tabs view)
                                 if matches!(app.current_view, View::Tabs) {
                                     app.kill_current_tab();
+                                }
+                            }
+                            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                // Ctrl+D: Scroll down in raw output (half page)
+                                if matches!(app.current_view, View::WorkflowRunning(_)) {
+                                    use crate::app::WorkflowPane;
+                                    if app.workflow_focused_pane == WorkflowPane::RawOutput {
+                                        // Scroll down by half page (assuming ~15 lines)
+                                        for _ in 0..15 {
+                                            app.scroll_raw_output_down();
+                                        }
+                                    }
+                                } else if matches!(app.current_view, View::Tabs) {
+                                    use crate::app::WorkflowPane;
+                                    if !app.open_tabs.is_empty()
+                                        && app.open_tabs[app.active_tab_idx].focused_pane == WorkflowPane::RawOutput {
+                                        // Scroll down by half page (assuming ~15 lines)
+                                        for _ in 0..15 {
+                                            app.scroll_raw_output_down();
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                // Ctrl+U: Scroll up in raw output (half page)
+                                if matches!(app.current_view, View::WorkflowRunning(_)) {
+                                    use crate::app::WorkflowPane;
+                                    if app.workflow_focused_pane == WorkflowPane::RawOutput {
+                                        // Scroll up by half page (assuming ~15 lines)
+                                        for _ in 0..15 {
+                                            app.scroll_raw_output_up();
+                                        }
+                                    }
+                                } else if matches!(app.current_view, View::Tabs) {
+                                    use crate::app::WorkflowPane;
+                                    if !app.open_tabs.is_empty()
+                                        && app.open_tabs[app.active_tab_idx].focused_pane == WorkflowPane::RawOutput {
+                                        // Scroll up by half page (assuming ~15 lines)
+                                        for _ in 0..15 {
+                                            app.scroll_raw_output_up();
+                                        }
+                                    }
                                 }
                             }
                             KeyCode::Enter => {

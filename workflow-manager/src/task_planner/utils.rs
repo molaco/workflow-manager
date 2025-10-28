@@ -247,6 +247,11 @@ pub async fn extract_text_and_stats(
         }
     }
 
+    // Verify we received at least one assistant message
+    if response_parts.is_empty() {
+        anyhow::bail!("No assistant message found - stream may have been interrupted or aborted");
+    }
+
     let text = response_parts.join("\n");
     let stats = usage_stats.ok_or_else(|| anyhow::anyhow!("No usage stats received"))?;
 

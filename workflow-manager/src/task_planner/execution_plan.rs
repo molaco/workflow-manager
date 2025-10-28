@@ -155,11 +155,13 @@ Output only the YAML, no markdown formatting."#,
         .context("Failed to query Claude agent for execution plan")?;
 
     // Convert stream to handle anyhow::Error using map
-    let stream = stream.map(|result| result.map_err(|e| anyhow::anyhow!("Claude error: {}", e)));
+    let stream = stream.map(|result| {
+        result.with_context(|| "Stream error while generating execution plan - request may have been aborted")
+    });
 
     let (response, _) = crate::task_planner::utils::extract_text_and_stats(stream)
         .await
-        .context("Failed to extract response from agent")?;
+        .context("Failed to extract response from execution plan agent")?;
 
     Ok(clean_yaml_response(&response))
 }

@@ -193,7 +193,9 @@ IMPORTANT: Each @reviewer needs the specific task's overview and detailed YAML -
     futures::pin_mut!(stream);
 
     while let Some(result) = stream.next().await {
-        let message = result.context("Failed to receive message from stream")?;
+        let message = result.with_context(|| {
+            format!("Failed to receive message from stream for batch {} - request may have been aborted", batch_num)
+        })?;
 
         match message {
             claude_agent_sdk::Message::Assistant { message, .. } => {
@@ -226,6 +228,11 @@ IMPORTANT: Each @reviewer needs the specific task's overview and detailed YAML -
             }
             _ => {}
         }
+    }
+
+    // Verify we received at least one assistant message
+    if response_parts.is_empty() {
+        anyhow::bail!("No assistant message found for batch {} - stream may have been interrupted or aborted", batch_num);
     }
 
     let combined_output = response_parts.join("\n");

@@ -295,36 +295,55 @@ IMPORTANT: Run all agents in parallel for maximum efficiency:
     futures::pin_mut!(stream);
 
     while let Some(result) = stream.next().await {
-        let message = result.context("Failed to receive message from stream")?;
+        let message = result.with_context(|| {
+            format!("Failed to receive message from stream for task {}", task_id)
+        })?;
 
         match message {
             claude_agent_sdk::Message::Assistant { message, .. } => {
                 for block in message.content {
-                    if let claude_agent_sdk::ContentBlock::Text { text } = block {
-                        response_parts.push(text.clone());
+                    match block {
+                        claude_agent_sdk::ContentBlock::Text { text } => {
+                            response_parts.push(text.clone());
 
-                        // Print streaming text to console
-                        print!("{}", text);
-                        use std::io::Write;
-                        let _ = std::io::stdout().flush();
+                            // Print streaming text to console
+                            print!("{}", text);
+                            use std::io::Write;
+                            let _ = std::io::stdout().flush();
 
-                        // Emit streaming text for live TUI updates
-                        log_agent_message!(&task_agent_id, agent_name, &text);
+                            // Emit streaming text for live TUI updates
+                            log_agent_message!(&task_agent_id, agent_name, &text);
 
-                        // Detect agent invocations for logging
-                        for sub_agent in &["files", "functions", "formal", "tests"] {
-                            if text.contains(&format!("@{}", sub_agent))
-                                && !agents_invoked.contains(*sub_agent)
-                            {
-                                agents_invoked.insert(sub_agent.to_string());
-                                // Sub-agent delegation is already visible in the streaming text
+                            // Detect agent invocations for logging
+                            for sub_agent in &["files", "functions", "formal", "tests"] {
+                                if text.contains(&format!("@{}", sub_agent))
+                                    && !agents_invoked.contains(*sub_agent)
+                                {
+                                    agents_invoked.insert(sub_agent.to_string());
+                                    // Sub-agent delegation is already visible in the streaming text
+                                }
+                            }
+
+                            if debug && !text.is_empty() {
+                                let preview_len = text.len().min(100);
+                                println!("    Debug: Response: {}...", &text[..preview_len]);
                             }
                         }
-
-                        if debug && !text.is_empty() {
-                            let preview_len = text.len().min(100);
-                            println!("    Debug: Response: {}...", &text[..preview_len]);
+                        claude_agent_sdk::ContentBlock::ToolUse { name, .. } => {
+                            log_agent_message!(
+                                &task_agent_id,
+                                agent_name,
+                                format!("🔧 Using tool: {}", name)
+                            );
                         }
+                        claude_agent_sdk::ContentBlock::ToolResult { tool_use_id, .. } => {
+                            log_agent_message!(
+                                &task_agent_id,
+                                agent_name,
+                                format!("✓ Tool result: {}", tool_use_id)
+                            );
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -374,9 +393,16 @@ IMPORTANT: Run all agents in parallel for maximum efficiency:
         }
     }
 
+    // Verify we received at least one assistant message
+    if response_parts.is_empty() {
+        anyhow::bail!("No assistant message found");
+    }
+
     let combined_output = response_parts.join("\n");
     let cleaned = clean_yaml_response(&combined_output);
-    let stats = usage_stats.ok_or_else(|| anyhow::anyhow!("No usage stats received"))?;
+    let stats = usage_stats.ok_or_else(|| {
+        anyhow::anyhow!("No usage stats received for task {} - stream may have ended prematurely", task_id)
+    })?;
 
     log_agent_complete!(&task_agent_id, agent_name, format!("Task {} expanded", task_id));
 
@@ -473,17 +499,47 @@ pub async fn step2_expand_all_tasks(
 
         println!("→ Executing Batch {}/{} ({} tasks)", batch_id, batches.len(), batch.len());
 
-        // Execute tasks in parallel
+        // Execute tasks in parallel with task-level logging
         let tasks_futures: Vec<_> = batch
             .iter()
-            .map(|task| suborchestrator_expand_task(task, task_template, debug))
+            .enumerate()
+            .map(|(idx, task)| {
+                let task_id = task.task.id;
+                let task_name = task.task.name.clone();
+                let total_tasks = batch.len();
+                async move {
+                    let individual_task_id = format!("task_{}", task_id);
+                    log_task_start!(
+                        2,
+                        &individual_task_id,
+                        format!("Task {} - {}", task_id, task_name)
+                    );
+
+                    let result = suborchestrator_expand_task(task, task_template, debug).await;
+
+                    match &result {
+                        Ok(_) => {
+                            log_task_complete!(&individual_task_id, format!("Task {} complete", task_id));
+                        }
+                        Err(e) => {
+                            log_task_complete!(&individual_task_id, format!("Task {} failed: {}", task_id, e));
+                        }
+                    }
+
+                    result
+                }
+            })
             .collect();
 
         let expanded_batch = join_all(tasks_futures).await;
 
         // Handle results
-        for result in expanded_batch {
-            let (expanded, usage_stats) = result.context("Task expansion failed")?;
+        for (idx, result) in expanded_batch.into_iter().enumerate() {
+            let (expanded, usage_stats) = result.with_context(|| {
+                format!("Task expansion failed for task {} in batch {}",
+                    batch.get(idx).map(|t| t.task.id).unwrap_or(0),
+                    batch_id)
+            })?;
 
             if let Some(ref mut file) = file_handle {
                 if !all_expanded.is_empty() {

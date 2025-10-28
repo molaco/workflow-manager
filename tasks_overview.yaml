@@ -1,0 +1,989 @@
+task:
+  id: 1
+  name: "Project Structure and Data Types Foundation"
+
+  overview:
+    purpose: |
+      Establish the foundational module structure and core data types for the documentation generator workflow.
+      This task creates the architectural skeleton that all subsequent phases will build upon, defining how
+      repository information, documentation plans, and configuration data flow through the system.
+
+    motivation: |
+      Before implementing any workflow logic, we need well-defined data structures that can be serialized,
+      deserialized, and passed between phases. This foundational layer ensures type safety, enables state
+      persistence for resumability, and provides a clear contract between workflow phases.
+
+    outcome: |
+      A complete module structure exists under workflow-manager/src/doc_generator/ with all core data types
+      (RepositoryStructure, DocPlan, WorkflowConfig) properly defined and serializable. The module is integrated
+      into the main library and ready for phase implementations to be added.
+
+  scope_summary:
+    description: "Creates module structure with 6 source files and defines 7 data structures"
+    files_affected: 9
+    functions_added: 5
+    tests_required: 8
+    complexity: "moderate"
+    estimated_effort: "half day"
+
+  key_components:
+    - component: "RepositoryStructure"
+      type: "struct"
+      purpose: "Represents the parsed structure of a Rust codebase with modules and items"
+
+    - component: "DocPlan"
+      type: "struct"
+      purpose: "Defines the documentation generation strategy with sections and priorities"
+
+    - component: "WorkflowConfig"
+      type: "struct"
+      purpose: "Holds runtime configuration for workflow execution and phase control"
+
+    - component: "Module hierarchy"
+      type: "module"
+      purpose: "Organizes code into logical units (types, utils, cli, workflow, phases)"
+
+  implementation_hints:
+    approach: |
+      Follow standard Rust module organization patterns with clear separation of concerns. Use serde for
+      serialization support on all data structures. Create a mod.rs that documents the module's purpose
+      and re-exports public types for clean external API.
+
+    key_considerations:
+      - "All data types must derive Serialize and Deserialize for YAML persistence"
+      - "Use Option types for fields that may not be present in all workflow scenarios"
+      - "Design structures to be Clone-able for passing between concurrent tasks"
+      - "Keep types in separate file from business logic for better organization"
+
+    integration_points:
+      - "Module must be exported from main lib.rs"
+      - "CLI types should support clap or structopt for argument parsing"
+      - "Utility functions should handle file I/O errors consistently"
+
+  testing_overview:
+    strategy: "unit"
+
+    rationale: |
+      Data types and utility functions are best verified through unit tests that check serialization
+      roundtrips, validation logic, and edge cases. Integration testing will come later with workflow phases.
+
+    critical_properties:
+      - "YAML serialization roundtrip preserves all data accurately"
+      - "Optional configuration fields have sensible defaults"
+      - "File path handling works across platforms"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: true
+      concurrency_testing: false
+      integration_testing: false
+
+    estimated_test_count: 8
+
+  dependencies:
+    requires_completion_of: []
+
+    enables_start_of:
+      - task_id: 2
+        reason: "Phase 0 needs RepositoryStructure type to store scan results"
+      - task_id: 6
+        reason: "CLI implementation needs WorkflowConfig and argument structures"
+      - task_id: 7
+        reason: "Orchestration needs all data types and module structure"
+
+    parallel_with: []
+
+  acceptance_criteria:
+    - "Module structure exists with mod.rs, types.rs, utils.rs, cli.rs, workflow.rs"
+    - "All data structures compile with Serialize and Deserialize traits"
+    - "Unit tests verify YAML serialization roundtrips correctly"
+    - "Module is exported from main lib.rs and compiles without warnings"
+    - "Utility functions handle file I/O with proper error types"
+
+  risk_assessment:
+    complexity_risk: "low"
+    integration_risk: "low"
+    testing_risk: "low"
+
+    concerns:
+      - "Data structure design must be flexible enough for future enhancements"
+
+  notes:
+    - "This is the foundation task - complete this before any phase implementation"
+    - "Keep data types simple and focused - resist adding logic here"
+
+---
+
+task:
+  id: 2
+  name: "Phase 0: Repository Scanning Implementation"
+
+  overview:
+    purpose: |
+      Implement the repository scanning phase that traverses a Rust project, parses source files, and extracts
+      structural information about modules, structs, traits, and functions. This creates a machine-readable
+      representation of the codebase that downstream phases use for documentation generation.
+
+    motivation: |
+      Documentation generation requires understanding the codebase structure. Rather than parsing files
+      repeatedly in later phases, Phase 0 creates a single source of truth about the repository's
+      architecture that can be cached and reused across workflow runs.
+
+    outcome: |
+      Given a Rust project directory, the system can scan all source files, parse them using the syn crate,
+      extract public API information with doc comments, and save a complete RepositoryStructure to
+      OUTPUT/repository_structure_{timestamp}.yaml.
+
+  scope_summary:
+    description: "Adds repository scanning logic with directory traversal and AST parsing"
+    files_affected: 2
+    functions_added: 6
+    tests_required: 5
+    complexity: "moderate"
+    estimated_effort: "1 day"
+
+  key_components:
+    - component: "scan_repository"
+      type: "function"
+      purpose: "Orchestrates the scanning process from directory traversal to YAML output"
+
+    - component: "parse_rust_file"
+      type: "function"
+      purpose: "Uses syn to parse a single .rs file and extract items"
+
+    - component: "extract_items"
+      type: "function"
+      purpose: "Converts syn AST nodes into Item structures with metadata"
+
+    - component: "Error handling"
+      type: "module"
+      purpose: "Gracefully handles unparseable files and logs issues without crashing"
+
+  implementation_hints:
+    approach: |
+      Use walkdir crate to recursively traverse the project directory, filtering for .rs files. For each file,
+      read content and parse with syn::parse_file. Walk the AST to extract relevant items, preserving doc
+      comments and visibility information. Handle parse errors per-file rather than failing the entire scan.
+
+    key_considerations:
+      - "Parse errors in one file should not prevent scanning other files"
+      - "Preserve line numbers for later source code linking"
+      - "Extract doc comments from attributes before items"
+      - "Filter by visibility to focus on public APIs"
+      - "Handle both module-level and inline modules correctly"
+
+    integration_points:
+      - "Outputs RepositoryStructure type defined in Task 1"
+      - "Uses utility functions from utils.rs for file I/O"
+      - "Called from workflow orchestration with project_dir parameter"
+
+  testing_overview:
+    strategy: "integration"
+
+    rationale: |
+      While unit tests can verify parsing logic for specific constructs, the most valuable tests are
+      integration tests that run the scanner on real Rust code fixtures and verify the output structure.
+
+    critical_properties:
+      - "Scanner finds all .rs files in nested directory structures"
+      - "Public structs, traits, and functions are extracted correctly"
+      - "Doc comments are preserved and associated with correct items"
+      - "Parse errors do not crash the scanner"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: false
+      integration_testing: true
+
+    estimated_test_count: 5
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 1
+        reason: "Needs RepositoryStructure type and utility functions"
+
+    enables_start_of:
+      - task_id: 3
+        reason: "Phase 1 requires repository_structure.yaml as input"
+
+    parallel_with: [6]
+
+  acceptance_criteria:
+    - "Scanner successfully processes a sample Rust project with multiple modules"
+    - "Output YAML contains accurate module and item information"
+    - "Parse errors in individual files are logged but don't stop scanning"
+    - "Doc comments are extracted and associated with items"
+    - "Integration tests verify scanning on test fixtures"
+    - "Performance is acceptable for projects with 100+ files"
+
+  risk_assessment:
+    complexity_risk: "medium"
+    integration_risk: "low"
+    testing_risk: "low"
+
+    concerns:
+      - "syn API complexity may require careful documentation reading"
+      - "Handling all Rust syntax edge cases could be time-consuming"
+
+  notes:
+    - "Consider adding progress indicators for large projects"
+    - "Future enhancement: support for other file types (TOML, MD)"
+
+---
+
+task:
+  id: 3
+  name: "Phase 1: Documentation Plan Generation with Claude Agent"
+
+  overview:
+    purpose: |
+      Implement Phase 1 that uses a Claude agent to analyze the repository structure and generate an intelligent
+      documentation plan. The agent determines what sections to document, how to organize them, and which modules
+      to focus on based on the user's documentation objective.
+
+    motivation: |
+      Not all documentation is created equal. Rather than blindly documenting everything, Phase 1 applies
+      intelligence to create a strategic plan that focuses on what matters most for the given objective
+      (API reference, tutorial, architecture guide, etc.).
+
+    outcome: |
+      Given a repository structure and documentation objective, the system generates a DocPlan with
+      logically organized sections, priorities, and module assignments. This plan guides parallel
+      documentation generation in Phase 2.
+
+  scope_summary:
+    description: "Implements AI-powered documentation planning with Claude agent"
+    files_affected: 2
+    functions_added: 4
+    tests_required: 4
+    complexity: "moderate"
+    estimated_effort: "1 day"
+
+  key_components:
+    - component: "generate_doc_plan"
+      type: "function"
+      purpose: "Orchestrates agent interaction to create documentation plan"
+
+    - component: "Agent prompt construction"
+      type: "function"
+      purpose: "Builds effective prompts with repository structure and objective"
+
+    - component: "Plan validation"
+      type: "function"
+      purpose: "Ensures generated plan has valid structure and at least one section"
+
+    - component: "Plan persistence"
+      type: "function"
+      purpose: "Saves plan to OUTPUT/doc_plan_{timestamp}.yaml"
+
+  implementation_hints:
+    approach: |
+      Use claude-agent-sdk-rust to create an agent with access to the repository structure. Construct a
+      prompt that includes the documentation objective and repository overview. Parse the agent's response
+      to extract section definitions. Validate the plan structure before saving.
+
+    key_considerations:
+      - "Agent prompt should provide clear structure for expected output format"
+      - "Handle cases where agent response doesn't match expected format"
+      - "Provide repository context without overwhelming the prompt"
+      - "Allow agent to suggest section ordering and priorities"
+      - "Validate that all referenced modules exist in repository structure"
+
+    integration_points:
+      - "Reads RepositoryStructure from Phase 0 output"
+      - "Outputs DocPlan for Phase 2 consumption"
+      - "Uses claude-agent-sdk-rust client configuration"
+
+  testing_overview:
+    strategy: "integration"
+
+    rationale: |
+      Testing agent-based code requires real agent interactions or mocks. Integration tests with
+      recorded agent responses provide the best verification of prompt construction and response parsing.
+
+    critical_properties:
+      - "Generated plans always have at least one section"
+      - "All module references in plan exist in repository structure"
+      - "Plan can be serialized and deserialized correctly"
+      - "Agent errors are handled gracefully with clear messages"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: false
+      integration_testing: true
+
+    estimated_test_count: 4
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 1
+        reason: "Needs DocPlan type definition"
+      - task_id: 2
+        reason: "Requires repository_structure.yaml as input"
+
+    enables_start_of:
+      - task_id: 4
+        reason: "Phase 2 uses doc_plan.yaml to generate sections"
+
+    parallel_with: []
+
+  acceptance_criteria:
+    - "Agent successfully generates plan from repository structure"
+    - "Generated plan follows DocPlan schema correctly"
+    - "Plan validation catches invalid module references"
+    - "Plan is saved to timestamped YAML file"
+    - "Integration tests verify plan generation with sample data"
+    - "Error messages are clear when agent interaction fails"
+
+  risk_assessment:
+    complexity_risk: "medium"
+    integration_risk: "medium"
+    testing_risk: "medium"
+
+    concerns:
+      - "Agent response format may vary, requiring robust parsing"
+      - "API rate limits could affect testing and development"
+
+  notes:
+    - "Consider caching plans for the same repository/objective combination"
+    - "Future enhancement: allow manual plan editing before Phase 2"
+
+---
+
+task:
+  id: 4
+  name: "Phase 2: Parallel Documentation Generation"
+
+  overview:
+    purpose: |
+      Implement Phase 2 that generates documentation content for each section defined in the documentation plan.
+      Uses concurrent Claude agents to process multiple sections in parallel, with semaphore-based concurrency
+      control to respect rate limits and system resources.
+
+    motivation: |
+      Documentation generation is the most time-intensive phase. By processing sections concurrently while
+      maintaining control over parallelism, we can significantly reduce total execution time while staying
+      within API rate limits.
+
+    outcome: |
+      Given a documentation plan and repository structure, the system spawns multiple agents to generate
+      markdown documentation for each section in parallel. Each section is saved as an individual file
+      in RESULTS/doc_section_{id}.md, with retry logic for failed sections.
+
+  scope_summary:
+    description: "Implements concurrent documentation generation with agent pool and retry logic"
+    files_affected: 2
+    functions_added: 7
+    tests_required: 6
+    complexity: "complex"
+    estimated_effort: "2-3 days"
+
+  key_components:
+    - component: "generate_documentation_parallel"
+      type: "function"
+      purpose: "Orchestrates parallel section generation with concurrency control"
+
+    - component: "generate_section"
+      type: "function"
+      purpose: "Generates documentation for a single section using Claude agent"
+
+    - component: "Semaphore/concurrency limiter"
+      type: "struct"
+      purpose: "Controls number of concurrent agent executions"
+
+    - component: "Retry mechanism"
+      type: "function"
+      purpose: "Retries failed sections up to 3 times with exponential backoff"
+
+    - component: "Progress tracking"
+      type: "struct"
+      purpose: "Tracks completion status of all sections"
+
+  implementation_hints:
+    approach: |
+      Use tokio or async-std for async execution. Create a semaphore with batch_size permits. For each
+      section in the plan, spawn an async task that acquires a permit, generates documentation, and releases
+      the permit. Use join_all to wait for completion. Implement retry with exponential backoff for failures.
+
+    key_considerations:
+      - "Respect batch_size parameter for concurrency control"
+      - "Each agent needs access to relevant source files and context"
+      - "Handle partial failures gracefully - don't fail entire phase"
+      - "Provide clear progress indicators for long-running generation"
+      - "Consider token limits when providing source code to agents"
+      - "Save sections immediately after generation for fault tolerance"
+
+    integration_points:
+      - "Reads DocPlan from Phase 1 output"
+      - "Reads RepositoryStructure for source code access"
+      - "Outputs individual markdown files to RESULTS directory"
+      - "Uses claude-agent-sdk-rust for agent execution"
+
+  testing_overview:
+    strategy: "mixed"
+
+    rationale: |
+      This phase requires both unit tests for retry logic and concurrency control, plus integration tests
+      for actual documentation generation with real agents. Mock agents can be used for unit tests.
+
+    critical_properties:
+      - "Concurrency never exceeds batch_size limit"
+      - "All sections complete eventually (success or exhausted retries)"
+      - "Failures in one section don't prevent others from completing"
+      - "Generated files are valid markdown"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: true
+      integration_testing: true
+
+    estimated_test_count: 6
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 1
+        reason: "Needs data types and configuration structures"
+      - task_id: 3
+        reason: "Requires doc_plan.yaml from Phase 1"
+
+    enables_start_of:
+      - task_id: 5
+        reason: "Phase 3 validates generated doc_section files"
+
+    parallel_with: []
+
+  acceptance_criteria:
+    - "Multiple sections generate concurrently up to batch_size limit"
+    - "Failed sections retry up to 3 times before giving up"
+    - "All successful sections saved as individual markdown files"
+    - "Progress is visible during long-running generation"
+    - "Concurrency tests verify batch_size is respected"
+    - "Integration tests verify documentation quality on sample data"
+
+  risk_assessment:
+    complexity_risk: "high"
+    integration_risk: "medium"
+    testing_risk: "medium"
+
+    concerns:
+      - "Concurrency bugs can be subtle and hard to reproduce"
+      - "Agent response quality may vary, requiring validation phase"
+      - "Rate limiting failures need careful handling"
+
+  notes:
+    - "Most complex phase - allow extra time for debugging"
+    - "Consider adding dry-run mode for testing without API calls"
+
+---
+
+task:
+  id: 5
+  name: "Phase 3: Documentation Validation and Correction"
+
+  overview:
+    purpose: |
+      Implement Phase 3 that validates generated documentation sections for completeness, accuracy, and
+      correctness. Checks for broken code examples, missing API coverage, and compilation errors. Uses
+      iterative agent-based repair to fix identified issues automatically.
+
+    motivation: |
+      Agent-generated documentation may contain errors, inconsistencies, or incomplete coverage. Rather
+      than requiring manual review, Phase 3 applies automated validation checks and uses agents to fix
+      issues, ensuring high-quality output.
+
+    outcome: |
+      All documentation sections are validated against the repository structure and code examples.
+      Issues are identified, logged, and automatically corrected through iterative agent repair. A
+      validation_report.txt summarizes all issues found and fixed.
+
+  scope_summary:
+    description: "Implements multi-stage validation with automated correction"
+    files_affected: 2
+    functions_added: 8
+    tests_required: 7
+    complexity: "complex"
+    estimated_effort: "2-3 days"
+
+  key_components:
+    - component: "validate_all_sections"
+      type: "function"
+      purpose: "Orchestrates validation across all generated sections"
+
+    - component: "check_code_examples"
+      type: "function"
+      purpose: "Extracts and validates code examples for syntax and compilation"
+
+    - component: "verify_api_coverage"
+      type: "function"
+      purpose: "Ensures all public APIs from repository are documented"
+
+    - component: "repair_section"
+      type: "function"
+      purpose: "Uses agent to fix identified issues in a section"
+
+    - component: "Validation loop"
+      type: "function"
+      purpose: "Iteratively validates and repairs until all checks pass"
+
+    - component: "ValidationReport"
+      type: "struct"
+      purpose: "Tracks all issues found and corrections applied"
+
+  implementation_hints:
+    approach: |
+      For each section, extract code blocks and parse them with syn. Verify code compiles or at least
+      parses correctly. Cross-reference documented items against RepositoryStructure to find missing
+      coverage. When issues are found, construct a repair prompt with specific problems and use agent
+      to fix. Repeat validation until all checks pass or iteration limit reached.
+
+    key_considerations:
+      - "Code examples may be snippets, not complete programs - handle gracefully"
+      - "Some intentional errors in examples (showing what not to do) are valid"
+      - "API coverage check should focus on public items only"
+      - "Iteration limit prevents infinite repair loops"
+      - "Preserve original files and save corrected versions separately"
+      - "Validation report should be human-readable and actionable"
+
+    integration_points:
+      - "Reads doc_section files from Phase 2 output"
+      - "Reads RepositoryStructure for API coverage verification"
+      - "Overwrites sections with corrected versions"
+      - "Outputs validation_report.txt"
+
+  testing_overview:
+    strategy: "mixed"
+
+    rationale: |
+      Unit tests can verify validation logic for specific error types. Integration tests ensure the
+      iterative repair process works end-to-end with real agents and documentation.
+
+    critical_properties:
+      - "Broken code examples are identified correctly"
+      - "Missing API coverage is detected"
+      - "Repair process improves validation scores"
+      - "Iteration limit prevents infinite loops"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: false
+      integration_testing: true
+
+    estimated_test_count: 7
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 1
+        reason: "Needs RepositoryStructure type"
+      - task_id: 4
+        reason: "Validates doc_section files from Phase 2"
+
+    enables_start_of:
+      - task_id: 6
+        reason: "Phase 4 assembles validated sections"
+
+    parallel_with: []
+
+  acceptance_criteria:
+    - "Validation detects broken code examples in test cases"
+    - "API coverage check identifies missing documentation"
+    - "Repair process fixes common issues automatically"
+    - "Validation report lists all issues and fixes"
+    - "Integration tests verify validation on sample documentation"
+    - "Iterative repair improves documentation quality measurably"
+
+  risk_assessment:
+    complexity_risk: "high"
+    integration_risk: "medium"
+    testing_risk: "medium"
+
+    concerns:
+      - "Defining 'correct' documentation is subjective"
+      - "Agent repairs may introduce new issues"
+      - "Code compilation check may be too strict for example snippets"
+
+  notes:
+    - "Consider making validation rules configurable"
+    - "Future enhancement: custom validation plugins"
+
+---
+
+task:
+  id: 6
+  name: "Phase 4: Documentation Assembly and Finalization"
+
+  overview:
+    purpose: |
+      Implement Phase 4 that combines all validated documentation sections into a single, well-formatted
+      markdown file with navigation aids. Generates table of contents, adds section links, and applies
+      consistent formatting to create a professional final document.
+
+    motivation: |
+      Individual section files are useful for incremental generation, but users need a complete, cohesive
+      document. Phase 4 transforms scattered sections into a polished deliverable with navigation features
+      that improve usability.
+
+    outcome: |
+      All validated documentation sections are concatenated in the correct order as defined by the
+      documentation plan. A table of contents is generated with links to each section. The final document
+      is saved as OUTPUT/documentation_{timestamp}.md, ready for distribution or publication.
+
+  scope_summary:
+    description: "Combines validated sections into final document with navigation"
+    files_affected: 1
+    functions_added: 5
+    tests_required: 4
+    complexity: "simple"
+    estimated_effort: "half day"
+
+  key_components:
+    - component: "assemble_documentation"
+      type: "function"
+      purpose: "Orchestrates final assembly process"
+
+    - component: "generate_table_of_contents"
+      type: "function"
+      purpose: "Creates TOC with links to all sections"
+
+    - component: "order_sections"
+      type: "function"
+      purpose: "Orders sections according to plan priorities"
+
+    - component: "format_final_output"
+      type: "function"
+      purpose: "Applies consistent formatting and styling"
+
+    - component: "verify_completeness"
+      type: "function"
+      purpose: "Ensures all expected sections exist before assembly"
+
+  implementation_hints:
+    approach: |
+      Read the DocPlan to determine section order. For each section ID, read the corresponding
+      doc_section_{id}.md file. Parse section headings to build table of contents. Concatenate
+      sections with appropriate separators. Prepend TOC to document. Apply final formatting passes.
+
+    key_considerations:
+      - "Verify all expected sections exist before assembly starts"
+      - "Handle markdown heading levels consistently"
+      - "Generate anchor links compatible with common markdown renderers"
+      - "Add metadata header with generation timestamp and configuration"
+      - "Preserve code block formatting during concatenation"
+
+    integration_points:
+      - "Reads DocPlan for section ordering"
+      - "Reads validated doc_section files from Phase 3"
+      - "Outputs final documentation to OUTPUT directory"
+
+  testing_overview:
+    strategy: "integration"
+
+    rationale: |
+      Assembly is primarily string manipulation and file I/O. Integration tests that verify complete
+      workflows produce correctly formatted output are most valuable.
+
+    critical_properties:
+      - "All sections appear in final document in correct order"
+      - "Table of contents links work correctly"
+      - "Code blocks and formatting are preserved"
+      - "Missing sections are detected before assembly"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: false
+      integration_testing: true
+
+    estimated_test_count: 4
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 1
+        reason: "Needs DocPlan type"
+      - task_id: 5
+        reason: "Assembles validated sections from Phase 3"
+
+    enables_start_of: []
+
+    parallel_with: []
+
+  acceptance_criteria:
+    - "Final document contains all sections in correct order"
+    - "Table of contents generated with working links"
+    - "Missing sections trigger clear error messages"
+    - "Final markdown is well-formatted and readable"
+    - "Integration tests verify assembly with sample sections"
+
+  risk_assessment:
+    complexity_risk: "low"
+    integration_risk: "low"
+    testing_risk: "low"
+
+    concerns: []
+
+  notes:
+    - "Simplest phase - can be completed quickly"
+    - "Future enhancement: support HTML and PDF output formats"
+
+---
+
+task:
+  id: 7
+  name: "CLI Implementation and Workflow Orchestration"
+
+  overview:
+    purpose: |
+      Implement the command-line interface and main workflow orchestration logic that ties all phases
+      together. Provides argument parsing, phase selection, resumability from saved state, and end-to-end
+      workflow execution with progress reporting.
+
+    motivation: |
+      Users need a simple interface to run the documentation generator without understanding internal
+      implementation. The orchestrator coordinates phase execution, handles state persistence, and
+      provides a seamless experience whether running the complete workflow or resuming from checkpoints.
+
+    outcome: |
+      A doc_generator binary that accepts command-line arguments for project directory, documentation
+      objective, phase selection, and batch size. The orchestrator executes selected phases in order,
+      persists state between phases, supports resuming from any phase, and provides clear progress
+      feedback throughout execution.
+
+  scope_summary:
+    description: "Implements CLI argument parsing and main workflow orchestration"
+    files_affected: 3
+    functions_added: 8
+    tests_required: 6
+    complexity: "moderate"
+    estimated_effort: "1 day"
+
+  key_components:
+    - component: "CLI argument parser"
+      type: "struct"
+      purpose: "Parses and validates command-line arguments"
+
+    - component: "Workflow orchestrator"
+      type: "function"
+      purpose: "Executes phases in sequence with proper data flow"
+
+    - component: "State manager"
+      type: "module"
+      purpose: "Loads and saves workflow state for resumability"
+
+    - component: "Progress reporter"
+      type: "struct"
+      purpose: "Provides user feedback during execution"
+
+    - component: "Binary entry point"
+      type: "function"
+      purpose: "Main function in src/bin/doc_generator.rs"
+
+  implementation_hints:
+    approach: |
+      Use clap or structopt for argument parsing with proper validation. In workflow.rs, implement
+      phase dispatch logic that calls each phase function in order. After each phase, save outputs
+      to enable resumption. Allow users to specify which phases to run and provide saved state files
+      for resuming. Add progress bars or status updates using indicatif or similar.
+
+    key_considerations:
+      - "Validate argument combinations (e.g., project_dir required for Phase 0)"
+      - "Support both complete workflow and individual phase execution"
+      - "Handle missing input files gracefully with clear error messages"
+      - "Persist intermediate state after each phase for fault tolerance"
+      - "Provide clear progress indicators for long-running operations"
+      - "Return meaningful exit codes for scripting integration"
+
+    integration_points:
+      - "Calls all phase implementations (Tasks 2-6)"
+      - "Uses WorkflowConfig from Task 1"
+      - "Main entry point for end users"
+
+  testing_overview:
+    strategy: "integration"
+
+    rationale: |
+      CLI and orchestration are best tested end-to-end with integration tests that verify complete
+      workflows, resumability, and error handling. Unit tests can verify argument parsing logic.
+
+    critical_properties:
+      - "Complete workflow executes all phases in order"
+      - "Resumability works from any phase checkpoint"
+      - "Invalid arguments are rejected with helpful messages"
+      - "Progress reporting provides useful feedback"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: false
+      integration_testing: true
+
+    estimated_test_count: 6
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 1
+        reason: "Needs WorkflowConfig and all data types"
+      - task_id: 2
+        reason: "Orchestrates Phase 0"
+      - task_id: 3
+        reason: "Orchestrates Phase 1"
+      - task_id: 4
+        reason: "Orchestrates Phase 2"
+      - task_id: 5
+        reason: "Orchestrates Phase 3"
+      - task_id: 6
+        reason: "Orchestrates Phase 4"
+
+    enables_start_of:
+      - task_id: 8
+        reason: "Integration tests need working CLI"
+
+    parallel_with: []
+
+  acceptance_criteria:
+    - "CLI accepts all required arguments with proper validation"
+    - "Complete workflow runs all phases end-to-end successfully"
+    - "Resumability works from saved state files"
+    - "Progress reporting provides clear feedback"
+    - "Error messages are actionable and user-friendly"
+    - "Integration tests verify complete workflows on sample projects"
+
+  risk_assessment:
+    complexity_risk: "medium"
+    integration_risk: "high"
+    testing_risk: "medium"
+
+    concerns:
+      - "Orchestration bugs may only appear in specific phase combinations"
+      - "State persistence edge cases may be subtle"
+
+  notes:
+    - "This task integrates all previous work - test thoroughly"
+    - "Consider adding --dry-run mode for testing"
+
+---
+
+task:
+  id: 8
+  name: "Comprehensive Testing and Documentation"
+
+  overview:
+    purpose: |
+      Develop a complete test suite covering unit tests, integration tests, and end-to-end workflow tests.
+      Create module documentation, usage examples, and update the main library documentation to include
+      the new documentation generator workflow.
+
+    motivation: |
+      A well-tested and documented system is essential for maintainability, reliability, and adoption.
+      Comprehensive tests catch regressions early, while clear documentation enables users and future
+      developers to understand and extend the system effectively.
+
+    outcome: |
+      Complete test coverage for all modules with unit tests for individual functions and integration
+      tests for complete workflows. A test fixture containing a sample Rust project for realistic testing.
+      All public APIs documented with rustdoc. README and usage examples demonstrate common workflows.
+
+  scope_summary:
+    description: "Creates comprehensive test suite and documentation"
+    files_affected: 8
+    functions_added: 15
+    tests_required: 25
+    complexity: "moderate"
+    estimated_effort: "1-2 days"
+
+  key_components:
+    - component: "Unit test suite"
+      type: "module"
+      purpose: "Tests individual functions and data structures"
+
+    - component: "Integration test suite"
+      type: "module"
+      purpose: "Tests complete workflows and phase interactions"
+
+    - component: "Test fixtures"
+      type: "module"
+      purpose: "Sample Rust project for realistic testing"
+
+    - component: "Module documentation"
+      type: "documentation"
+      purpose: "Rustdoc comments for all public APIs"
+
+    - component: "Usage examples"
+      type: "documentation"
+      purpose: "Example code and CLI usage patterns"
+
+  implementation_hints:
+    approach: |
+      Create tests/doc_generator_tests.rs with submodules for different test categories. Build a
+      realistic test fixture in tests/doc_generator/fixtures/ with a small Rust project. Write unit
+      tests for data structure serialization, utility functions, and validation logic. Write integration
+      tests that run complete workflows on fixtures. Add rustdoc comments to all public types and
+      functions explaining purpose and usage.
+
+    key_considerations:
+      - "Test fixtures should represent realistic Rust project structures"
+      - "Integration tests should verify resumability from each phase"
+      - "Test different batch_size values for concurrency verification"
+      - "Mock agent responses for deterministic testing where possible"
+      - "Document error cases and edge cases in rustdoc"
+      - "Include CLI usage examples in doc comments"
+
+    integration_points:
+      - "Tests all tasks (1-7)"
+      - "Verifies complete system integration"
+      - "Provides examples for users"
+
+  testing_overview:
+    strategy: "mixed"
+
+    rationale: |
+      This task creates the tests themselves, so the strategy is about ensuring comprehensive coverage
+      across unit, integration, and end-to-end scenarios with both real and mocked agent interactions.
+
+    critical_properties:
+      - "All public functions have unit tests"
+      - "Complete workflows tested end-to-end"
+      - "Resumability verified from all phases"
+      - "Concurrency behavior verified with different batch sizes"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: true
+      concurrency_testing: true
+      integration_testing: true
+
+    estimated_test_count: 25
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 7
+        reason: "Tests require complete implementation to exist"
+
+    enables_start_of: []
+
+    parallel_with: []
+
+  acceptance_criteria:
+    - "Unit tests cover all data structures and utility functions"
+    - "Integration tests verify complete workflows on test fixtures"
+    - "Tests verify resumability from each phase checkpoint"
+    - "Concurrency tests verify batch_size parameter behavior"
+    - "All public APIs have rustdoc documentation"
+    - "README includes usage examples and CLI reference"
+    - "Test suite runs cleanly with cargo test"
+    - "Documentation builds cleanly with cargo doc"
+
+  risk_assessment:
+    complexity_risk: "low"
+    integration_risk: "low"
+    testing_risk: "low"
+
+    concerns:
+      - "Agent-based tests may be flaky without proper mocking"
+
+  notes:
+    - "Allocate time for thorough testing - quality matters here"
+    - "Consider adding benchmarks for performance validation"
+    - "Documentation is as important as the code itself"
