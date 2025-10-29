@@ -28,6 +28,7 @@ use crate::research::{
     phase4_synthesize::synthesize_documentation,
     types::{CodebaseAnalysis, PromptsData, ResearchResult},
 };
+use crate::workflow_utils::{execute_task, TaskContext};
 
 /// Configuration for the research workflow
 ///
@@ -482,7 +483,20 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
             PathBuf::from(format!("./OUTPUT/research_output_{}.md", timestamp))
         };
 
-        synthesize_documentation(results_file, &output_path).await?;
+        execute_task(
+            "synthesize",
+            "Synthesizing documentation from research results",
+            TaskContext {
+                phase: 4,
+                task_number: 1,
+                total_tasks: 1,
+            },
+            || async {
+                synthesize_documentation(results_file, &output_path).await?;
+                Ok(((), "Documentation synthesized".to_string()))
+            },
+        )
+        .await?;
 
         log_state_file!(
             4,
