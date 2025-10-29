@@ -46,6 +46,7 @@ pub async fn run_workflow(args: Args) -> Result<()> {
     // Track file paths
     let mut tasks_overview_yaml = String::new();
     let mut tasks_yaml = String::new();
+    let mut task_files: Vec<PathBuf> = Vec::new();
 
     // Phase 0: Generate overview
     if phases.contains(&0) {
@@ -105,30 +106,61 @@ pub async fn run_workflow(args: Args) -> Result<()> {
                 format!("Failed to read task template: {}", task_template_path)
             })?;
 
-        tasks_yaml = phase1_expand::expand_tasks(
+        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+
+        task_files = phase1_expand::expand_tasks(
             &tasks_overview_yaml,
             &task_template,
             args.simple_batching,
             args.batch_size,
+            &output_dir,
+            &timestamp,
         )
         .await?;
 
-        // Save to file
-        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-        let tasks_path = output_dir.join(format!("tasks_{}.yaml", timestamp));
-        fs::write(&tasks_path, &tasks_yaml)
-            .await
-            .with_context(|| format!("Failed to write tasks file: {}", tasks_path.display()))?;
+        println!("\n✓ Saved {} task files:", task_files.len());
+        for path in &task_files {
+            println!("  - {}", path.display());
+        }
 
-        println!("\n✓ Saved: {}", tasks_path.display());
-
-        log_phase_complete!(1, "Tasks expanded");
-    } else if let Some(tasks_file) = &args.tasks_file {
-        // Load existing tasks
-        tasks_yaml = fs::read_to_string(tasks_file)
+        log_phase_complete!(1, format!("Expanded {} tasks", task_files.len()));
+    } else if let Some(tasks_path) = &args.tasks_file {
+        // Load existing tasks - check if it's a directory or file
+        let metadata = fs::metadata(tasks_path)
             .await
-            .with_context(|| format!("Failed to read tasks file: {}", tasks_file))?;
-        println!("Loaded tasks from: {}", tasks_file);
+            .with_context(|| format!("Failed to read path: {}", tasks_path))?;
+
+        if metadata.is_dir() {
+            // Load all task_*.yaml files from directory
+            let mut entries = fs::read_dir(tasks_path)
+                .await
+                .with_context(|| format!("Failed to read directory: {}", tasks_path))?;
+
+            let mut task_yamls = Vec::new();
+
+            while let Some(entry) = entries.next_entry().await? {
+                let path = entry.path();
+                if let Some(name) = path.file_name() {
+                    let name_str = name.to_string_lossy();
+                    if name_str.starts_with("task_") && name_str.ends_with(".yaml") {
+                        let content = fs::read_to_string(&path)
+                            .await
+                            .with_context(|| format!("Failed to read task file: {}", path.display()))?;
+                        task_yamls.push(content);
+                        task_files.push(path);
+                    }
+                }
+            }
+
+            tasks_yaml = task_yamls.join("\n---\n");
+            println!("Loaded {} task files from directory: {}", task_files.len(), tasks_path);
+        } else {
+            // Load single file (backwards compatibility)
+            tasks_yaml = fs::read_to_string(tasks_path)
+                .await
+                .with_context(|| format!("Failed to read tasks file: {}", tasks_path))?;
+            println!("Loaded tasks from file: {}", tasks_path);
+        }
     }
 
     // Phase 2: Review tasks

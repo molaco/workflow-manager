@@ -67,11 +67,12 @@ pub struct Args {
     )]
     pub overview_file: Option<String>,
 
-    /// Path to tasks.yaml (required for Phase 2 if Phase 1 didn't run)
+    /// Path to tasks file or directory (required for Phase 2 if Phase 1 didn't run)
+    /// Can be either a single task_*.yaml file or a directory containing multiple task files
     #[arg(long)]
     #[field(
-        label = "Tasks File",
-        description = "[STATE FILE] Resume with existing detailed tasks",
+        label = "Tasks File/Directory",
+        description = "[STATE FILE/DIR] Resume with existing detailed tasks (file or directory)",
         type = "state_file",
         pattern = "tasks_*.yaml",
         required_for_phases = "2"

@@ -18,6 +18,18 @@ use crate::workflow_utils::{execute_agent, execute_batch, execute_task, extract_
 use anyhow::{Context, Result};
 use claude_agent_sdk::{AgentDefinition, ClaudeAgentOptions};
 use serde_yaml::Value;
+use std::path::{Path, PathBuf};
+use tokio::fs;
+use workflow_manager_sdk::log_state_file;
+
+/// Sanitize task name for use in filename
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string()
+}
 
 /// Execute a single suborchestrator to expand a task
 async fn expand_single_task(
@@ -272,7 +284,9 @@ pub async fn expand_tasks(
     task_template: &str,
     simple_batching: bool,
     batch_size: usize,
-) -> Result<String> {
+    output_dir: &Path,
+    timestamp: &str,
+) -> Result<Vec<PathBuf>> {
     println!("\n{}", "=".repeat(80));
     println!("PHASE 1: Suborchestrators - Expand Tasks");
     println!("{}", "=".repeat(80));
@@ -309,8 +323,8 @@ pub async fn expand_tasks(
     }
     println!();
 
-    // Execute batches
-    let mut all_expanded = Vec::new();
+    // Execute batches and save files immediately
+    let mut saved_files = Vec::new();
 
     for (batch_num, batch) in batches.iter().enumerate() {
         println!("\n→ Executing Batch {}/{}", batch_num + 1, batches.len());
@@ -318,43 +332,66 @@ pub async fn expand_tasks(
 
         // Execute batch in parallel using execute_batch
         let task_template_clone = task_template.to_string();
+        let output_dir_clone = output_dir.to_path_buf();
+
         let expanded_batch = execute_batch(
             1, // phase number
             batch.clone(),
             batch.len(), // concurrency = batch size (all parallel)
             move |task, ctx| {
                 let task_template = task_template_clone.clone();
+                let output_dir = output_dir_clone.clone();
+
                 async move {
                     let task_id = get_task_id(&task).unwrap_or(0);
-                    let task_name = get_task_name(&task).unwrap_or("Unknown");
+                    let task_name = get_task_name(&task).unwrap_or("Unknown").to_string();
+                    let task_clone = task.clone();
 
-                    let yaml = execute_task(
+                    let file_path = execute_task(
                         format!("expand_{}", task_id),
                         format!("Expanding: {}", task_name),
                         ctx,
                         || async move {
-                            let result = expand_single_task(&task, &task_template).await?;
-                            Ok((result, format!("Expanded task {}", task_id)))
+                            // Expand the task
+                            let yaml = expand_single_task(&task_clone, &task_template).await?;
+
+                            // Save immediately to individual file
+                            let sanitized_name = sanitize_filename(&task_name);
+                            let filename = format!("task_{}_{}.yaml", task_id, sanitized_name);
+                            let file_path = output_dir.join(&filename);
+
+                            fs::write(&file_path, &yaml)
+                                .await
+                                .with_context(|| format!("Failed to write task file: {}", file_path.display()))?;
+
+                            // Log the saved file
+                            log_state_file!(
+                                1,
+                                file_path.display().to_string(),
+                                format!("Task {} specification", task_id)
+                            );
+
+                            println!("  ✓ Saved: {}", file_path.display());
+
+                            Ok((file_path.clone(), format!("Saved to {}", file_path.display())))
                         }
                     ).await?;
 
                     // Return tuple for execute_batch
-                    Ok((yaml, format!("Task {} complete", task_id)))
+                    Ok((file_path, format!("Task {} saved", task_id)))
                 }
             },
         )
         .await?;
 
-        all_expanded.extend(expanded_batch);
+        // Collect saved file paths
+        let batch_files: Vec<PathBuf> = expanded_batch.into_iter().map(|(path, _)| path).collect();
+        saved_files.extend(batch_files);
     }
 
-    // Combine all expanded tasks (extract just the YAML, not the summary message)
-    let yaml_parts: Vec<String> = all_expanded.into_iter().map(|(yaml, _)| yaml).collect();
-    let combined_yaml = yaml_parts.join("\n---\n");
-
     println!("\n{}", "=".repeat(80));
-    println!("✓ All tasks expanded successfully");
+    println!("✓ All {} tasks expanded and saved", saved_files.len());
     println!("{}", "=".repeat(80));
 
-    Ok(combined_yaml)
+    Ok(saved_files)
 }
