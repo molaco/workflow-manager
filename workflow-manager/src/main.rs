@@ -404,6 +404,12 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                                     app.edit_current_tab();
                                 }
                             }
+                            KeyCode::Char('d') => {
+                                // d: Delete/clear current field value in WorkflowEdit view
+                                if matches!(app.current_view, View::WorkflowEdit(_)) {
+                                    app.delete_current_field();
+                                }
+                            }
                             KeyCode::Char('l') | KeyCode::Char('L') => match app.current_view {
                                 View::WorkflowDetail(_) | View::WorkflowEdit(_) => {
                                     app.launch_workflow_in_tab();

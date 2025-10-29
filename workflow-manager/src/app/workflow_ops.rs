@@ -99,6 +99,17 @@ impl App {
         self.edit_buffer.clear();
     }
 
+    pub fn delete_current_field(&mut self) {
+        if let View::WorkflowEdit(idx) = self.current_view {
+            if let Some(workflow) = self.workflows.get(idx) {
+                if let Some(field) = workflow.info.fields.get(self.edit_field_index) {
+                    // Clear the field value (set to empty string)
+                    self.field_values.insert(field.name.clone(), String::new());
+                }
+            }
+        }
+    }
+
     pub fn launch_workflow(&mut self) {
         // Save field values to history
         self.save_to_history();
