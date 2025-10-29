@@ -11,11 +11,9 @@
 //! The result is saved to `OUTPUT/research_prompts_<timestamp>.yaml` for use in Phase 2.
 
 use crate::research::types::{CodebaseAnalysis, PromptsData, ResearchPrompt};
-use claude_agent_sdk::{query, ClaudeAgentOptions, ContentBlock, Message};
-use futures::StreamExt;
-use workflow_manager_sdk::{
-    log_agent_complete, log_agent_failed, log_agent_message, log_agent_start,
-};
+use crate::workflow_utils::{execute_agent, extract_yaml, AgentConfig};
+use anyhow::Context;
+use claude_agent_sdk::ClaudeAgentOptions;
 
 /// Generate research prompts based on objective and codebase analysis
 pub async fn generate_prompts(
@@ -25,9 +23,7 @@ pub async fn generate_prompts(
     output_style: &str,
 ) -> anyhow::Result<PromptsData> {
     let task_id = "generate";
-    let agent_name = "Suborchestrator Agent";
-
-    log_agent_start!(task_id, agent_name, "Generating research prompts");
+    let agent_name = "Prompt Generator";
 
     // Build system prompt with codebase analysis
     let analysis_yaml = serde_yaml::to_string(codebase_analysis)?;
@@ -46,46 +42,33 @@ pub async fn generate_prompts(
         .permission_mode(claude_agent_sdk::PermissionMode::BypassPermissions)
         .build();
 
-    let query_text = format!("Generate research prompts for: {}", objective);
-    let stream = query(&query_text, Some(options)).await?;
-    let mut stream = Box::pin(stream);
+    // Execute agent (handles all stream processing, logging, etc.)
+    let config = AgentConfig::new(
+        task_id,
+        agent_name,
+        "Generating research prompts",
+        format!("Generate research prompts for: {}", objective),
+        options,
+    );
 
-    let mut response_text = String::new();
-
-    while let Some(message) = stream.next().await {
-        match message? {
-            Message::Assistant { message, .. } => {
-                for block in &message.content {
-                    if let ContentBlock::Text { text } = block {
-                        // Collect raw text without printing
-                        response_text.push_str(text);
-                        // Emit structured agent message for TUI
-                        log_agent_message!(task_id, agent_name, text);
-                    }
-                }
-            }
-            Message::Result { .. } => break,
-            _ => {}
-        }
-    }
-
+    let response_text = execute_agent(config).await?;
     let yaml_content = extract_yaml(&response_text);
 
     // Parse YAML flexibly first (like Python's yaml.safe_load)
-    let prompts_yaml: serde_yaml::Value = serde_yaml::from_str(&yaml_content).map_err(|e| {
-        let error_msg = format!("Failed to parse prompts YAML: {}", e);
-        log_agent_failed!(task_id, agent_name, &error_msg);
+    let prompts_yaml: serde_yaml::Value =
+        serde_yaml::from_str(&yaml_content).with_context(|| {
+            let error_msg = format!("Failed to parse prompts YAML");
 
-        // If duplicate key error, provide helpful context
-        if error_msg.contains("duplicate") {
-            eprintln!("\n❌ YAML PARSING ERROR: Duplicate keys detected in prompts");
-            eprintln!("The prompts YAML contains duplicate keys which is invalid.");
-            eprintln!("\nGenerated YAML preview (first 500 chars):");
-            eprintln!("{}", &yaml_content.chars().take(500).collect::<String>());
-        }
+            // If duplicate key error, provide helpful context
+            if yaml_content.contains("duplicate") {
+                eprintln!("\n❌ YAML PARSING ERROR: Duplicate keys detected in prompts");
+                eprintln!("The prompts YAML contains duplicate keys which is invalid.");
+                eprintln!("\nGenerated YAML preview (first 500 chars):");
+                eprintln!("{}", &yaml_content.chars().take(500).collect::<String>());
+            }
 
-        anyhow::anyhow!("{}", error_msg)
-    })?;
+            error_msg
+        })?;
 
     // Extract fields with safe defaults
     let objective = prompts_yaml["objective"]
@@ -118,35 +101,7 @@ pub async fn generate_prompts(
 
     let prompts_data = PromptsData { objective, prompts };
 
-    log_agent_complete!(
-        task_id,
-        agent_name,
-        format!("Generated {} prompts", prompts_data.prompts.len())
-    );
+    println!("Generated {} research prompts", prompts_data.prompts.len());
+
     Ok(prompts_data)
-}
-
-/// Extract YAML content from markdown code blocks
-fn extract_yaml(text: &str) -> String {
-    let yaml = if text.contains("```yaml") {
-        let yaml_start = text.find("```yaml").unwrap() + 7;
-        let yaml_end = text[yaml_start..]
-            .rfind("```")
-            .map(|pos| pos + yaml_start)
-            .unwrap_or(text.len());
-        text[yaml_start..yaml_end].trim().to_string()
-    } else if text.contains("```") {
-        let yaml_start = text.find("```").unwrap() + 3;
-        let yaml_end = text[yaml_start..]
-            .rfind("```")
-            .map(|pos| pos + yaml_start)
-            .unwrap_or(text.len());
-        text[yaml_start..yaml_end].trim().to_string()
-    } else {
-        text.trim().to_string()
-    };
-
-    // Remove leading document separator (---) if present
-    // serde_yaml::from_str doesn't support multi-document YAML
-    yaml.trim_start_matches("---").trim().to_string()
 }

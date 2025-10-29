@@ -14,12 +14,8 @@
 use anyhow::Result;
 use std::path::Path;
 
-use claude_agent_sdk::{
-    query, AgentDefinition, ClaudeAgentOptions, ContentBlock, Message, SystemPrompt,
-    SystemPromptPreset,
-};
-use futures::StreamExt;
-use workflow_manager_sdk::{log_agent_complete, log_agent_message, log_agent_start, log_task_complete, log_task_start};
+use crate::workflow_utils::{execute_agent, AgentConfig};
+use claude_agent_sdk::{AgentDefinition, ClaudeAgentOptions, SystemPrompt, SystemPromptPreset};
 
 /// Phase 4: Synthesize documentation from research results
 pub async fn synthesize_documentation(
@@ -33,13 +29,6 @@ pub async fn synthesize_documentation(
 
     let task_id = "synthesize";
     let agent_name = "Documentation Agent";
-
-    log_task_start!(4, task_id, "Synthesizing final documentation");
-    log_agent_start!(
-        task_id,
-        agent_name,
-        "Preparing synthesis with file-condenser subagent"
-    );
 
     // Create unified synthesis prompt - agent decides strategy
     let synthesis_prompt = format!(
@@ -113,52 +102,20 @@ The overview file contains a list of research findings with:
         )
         .build();
 
-    log_agent_message!(task_id, agent_name, "Querying Claude for synthesis");
+    // Execute agent (handles all stream processing, logging, sub-agent detection, etc.)
+    let config = AgentConfig::new(
+        task_id,
+        agent_name,
+        "Synthesizing documentation with file-condenser subagent",
+        synthesis_prompt,
+        options,
+    );
 
-    let stream = query(&synthesis_prompt, Some(options)).await?;
-    let mut stream = Box::pin(stream);
-
-    while let Some(message) = stream.next().await {
-        match message? {
-            Message::Assistant { message, .. } => {
-                for block in &message.content {
-                    match block {
-                        ContentBlock::Text { text } => {
-                            println!("{}", text);
-                            log_agent_message!(task_id, agent_name, text);
-                        }
-                        ContentBlock::ToolUse { name, .. } => {
-                            log_agent_message!(
-                                task_id,
-                                agent_name,
-                                format!("🔧 Using tool: {}", name)
-                            );
-                        }
-                        ContentBlock::ToolResult { tool_use_id, .. } => {
-                            log_agent_message!(
-                                task_id,
-                                agent_name,
-                                format!("✓ Tool result: {}", tool_use_id)
-                            );
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Message::Result { .. } => break,
-            _ => {}
-        }
-    }
+    execute_agent(config).await?;
 
     println!("\n{}", "=".repeat(80));
     println!("✓ Documentation synthesis complete");
     println!("{}", "=".repeat(80));
-
-    log_agent_complete!(task_id, agent_name, "Documentation synthesis complete");
-    log_task_complete!(
-        task_id,
-        format!("Output written to {}", output_path.display())
-    );
 
     Ok(())
 }

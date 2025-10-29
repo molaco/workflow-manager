@@ -66,29 +66,21 @@ impl AgentConfig {
 pub async fn execute_agent(config: AgentConfig) -> Result<String> {
     log_agent_start!(&config.task_id, &config.agent_name, &config.description);
 
-    eprintln!("[DEBUG] execute_agent called: task_id={}, agent_name={}", config.task_id, config.agent_name);
-
     // Query Claude
-    eprintln!("[DEBUG] Calling query() with prompt length: {}", config.prompt.len());
     let stream = query(&config.prompt, Some(config.options))
         .await
         .map_err(|e| {
-            eprintln!("[DEBUG] query() failed: {}", e);
             log_agent_failed!(&config.task_id, &config.agent_name, e.to_string());
             e
         })?;
 
-    eprintln!("[DEBUG] query() succeeded, starting stream handling");
-
     // Handle stream
     match handle_stream(stream, &config.task_id, &config.agent_name).await {
         Ok(response) => {
-            eprintln!("[DEBUG] Stream handling complete, response length: {}", response.len());
             log_agent_complete!(&config.task_id, &config.agent_name, "Completed");
             Ok(response)
         }
         Err(e) => {
-            eprintln!("[DEBUG] Stream handling failed: {}", e);
             log_agent_failed!(&config.task_id, &config.agent_name, e.to_string());
             Err(e)
         }
@@ -287,21 +279,13 @@ async fn handle_stream(
     let mut response_text = String::new();
     let mut stream = Box::pin(stream);
     let mut delegations = DelegationTracker::new();
-    let mut message_count = 0;
-
-    eprintln!("[DEBUG] handle_stream starting for task_id={}, agent_name={}", task_id, agent_name);
 
     while let Some(message) = stream.next().await {
-        message_count += 1;
-        eprintln!("[DEBUG] Received message #{}", message_count);
-
         match message? {
             Message::Assistant { message, .. } => {
-                eprintln!("[DEBUG] Assistant message with {} content blocks", message.content.len());
-                for (i, block) in message.content.iter().enumerate() {
+                for block in &message.content {
                     match block {
                         ContentBlock::Text { text } => {
-                            eprintln!("[DEBUG] Block {}: Text ({} chars)", i, text.len());
                             // Print to stdout
                             println!("{}", text);
                             // Log to TUI
@@ -311,7 +295,6 @@ async fn handle_stream(
                         }
 
                         ContentBlock::ToolUse { id, name, input } => {
-                            eprintln!("[DEBUG] Block {}: ToolUse - name={}, id={}", i, name, id);
                             // Extract detailed tool information
                             let tool_details = extract_tool_details(name, input);
                             log_agent_message!(task_id, agent_name, &tool_details);
@@ -319,18 +302,15 @@ async fn handle_stream(
                             // Track sub-agent delegations
                             if name == "Task" {
                                 if let Some(subagent_name) = extract_subagent_name(input) {
-                                    eprintln!("[DEBUG] Detected sub-agent delegation: @{}", subagent_name);
                                     delegations.start_delegation(id.clone(), subagent_name);
                                 }
                             }
                         }
 
                         ContentBlock::ToolResult { tool_use_id, .. } => {
-                            eprintln!("[DEBUG] Block {}: ToolResult - tool_use_id={}", i, tool_use_id);
                             // Check if this was a sub-agent delegation
                             if let Some(subagent_name) = delegations.complete_delegation(tool_use_id)
                             {
-                                eprintln!("[DEBUG] Sub-agent completed: @{}", subagent_name);
                                 log_agent_message!(
                                     task_id,
                                     agent_name,
@@ -345,23 +325,14 @@ async fn handle_stream(
                             }
                         }
 
-                        _ => {
-                            eprintln!("[DEBUG] Block {}: Other block type", i);
-                        }
+                        _ => {}
                     }
                 }
             }
-            Message::Result { .. } => {
-                eprintln!("[DEBUG] Received Result message, ending stream");
-                break;
-            }
-            _ => {
-                eprintln!("[DEBUG] Received other message type");
-            }
+            Message::Result { .. } => break,
+            _ => {}
         }
     }
-
-    eprintln!("[DEBUG] handle_stream complete: {} messages processed, {} chars collected", message_count, response_text.len());
 
     Ok(response_text)
 }

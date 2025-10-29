@@ -15,3 +15,6 @@ pub mod research;
 
 // Task planner module
 pub mod task_planner;
+
+// Workflow utilities module
+pub mod workflow_utils;

@@ -11,11 +11,10 @@
 //!
 //! Can run standalone on a directory of YAML files or as part of the full workflow.
 
-use anyhow::Result;
-use claude_agent_sdk::{query, ClaudeAgentOptions, ContentBlock, Message, SystemPrompt, SystemPromptPreset};
-use futures::StreamExt;
+use crate::workflow_utils::{execute_agent, extract_yaml, AgentConfig};
+use anyhow::{Context, Result};
+use claude_agent_sdk::{ClaudeAgentOptions, SystemPrompt, SystemPromptPreset};
 use tokio::fs;
-use workflow_manager_sdk::{log_agent_complete, log_agent_failed, log_agent_message, log_agent_start};
 
 /// Validate YAML file using check_yaml.py script
 pub async fn validate_yaml_file(file_path: &str) -> Result<(String, bool, String)> {
@@ -45,37 +44,25 @@ pub async fn validate_yaml_file(file_path: &str) -> Result<(String, bool, String
 pub async fn execute_fix_yaml(
     file_path: &str,
     error_message: &str,
-    prefix: Option<&str>,
+    _prefix: Option<&str>,
     fixer_number: usize,
 ) -> Result<()> {
-    let prefix = prefix.unwrap_or("");
     let task_id = format!("fix_yaml_{}", fixer_number);
     let agent_name = format!("YAML Fixer {}", fixer_number);
 
-    log_agent_start!(&task_id, &agent_name, format!("Fixing: {}", file_path));
-
     println!("\n{}", "-".repeat(80));
-    println!("{}FIXING: {}", prefix, file_path);
+    println!("FIXING: {}", file_path);
     println!("{}", "-".repeat(80));
 
     // Read the broken YAML
-    let broken_yaml = fs::read_to_string(file_path).await.map_err(|e| {
-        log_agent_failed!(&task_id, &agent_name, format!("Failed to read file: {}", e));
-        e
-    })?;
+    let broken_yaml = fs::read_to_string(file_path)
+        .await
+        .with_context(|| format!("Failed to read file for YAML fixing: {}", file_path))?;
 
-    log_agent_message!(
-        &task_id,
-        &agent_name,
-        format!("Read {} bytes from file", broken_yaml.len())
-    );
-    log_agent_message!(
-        &task_id,
-        &agent_name,
-        format!(
-            "Error: {}",
-            error_message.lines().next().unwrap_or("Unknown error")
-        )
+    println!("Read {} bytes from file", broken_yaml.len());
+    println!(
+        "Error: {}",
+        error_message.lines().next().unwrap_or("Unknown error")
     );
 
     let fix_prompt = format!(
@@ -106,92 +93,27 @@ Output the fixed YAML wrapped in ```yaml code blocks."#,
         .permission_mode(claude_agent_sdk::PermissionMode::BypassPermissions)
         .build();
 
-    let stream = query(&fix_prompt, Some(options)).await?;
-    let mut stream = Box::pin(stream);
+    // Execute agent (handles all stream processing, logging, etc.)
+    let config = AgentConfig::new(
+        task_id,
+        agent_name,
+        format!("Fixing YAML: {}", file_path),
+        fix_prompt,
+        options,
+    );
 
-    let mut response_text = String::new();
-
-    while let Some(message) = stream.next().await {
-        match message? {
-            Message::Assistant { message, .. } => {
-                for block in &message.content {
-                    match block {
-                        ContentBlock::Text { text } => {
-                            if !prefix.is_empty() {
-                                println!("{}{}", prefix, text);
-                            } else {
-                                println!("{}", text);
-                            }
-                            response_text.push_str(text);
-                            log_agent_message!(&task_id, &agent_name, text);
-                        }
-                        ContentBlock::ToolUse { name, .. } => {
-                            log_agent_message!(
-                                &task_id,
-                                &agent_name,
-                                format!("🔧 Using tool: {}", name)
-                            );
-                        }
-                        ContentBlock::ToolResult { tool_use_id, .. } => {
-                            log_agent_message!(
-                                &task_id,
-                                &agent_name,
-                                format!("✓ Tool result: {}", tool_use_id)
-                            );
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Message::Result { .. } => break,
-            _ => {}
-        }
-    }
+    let response_text = execute_agent(config).await?;
 
     // Extract and write fixed YAML
     let fixed_yaml = extract_yaml(&response_text);
-    fs::write(file_path, &fixed_yaml).await.map_err(|e| {
-        log_agent_failed!(
-            &task_id,
-            &agent_name,
-            format!("Failed to write fixed YAML: {}", e)
-        );
-        e
-    })?;
+    fs::write(file_path, &fixed_yaml)
+        .await
+        .with_context(|| format!("Failed to write fixed YAML to: {}", file_path))?;
 
-    println!("\n{}Fixed YAML written to: {}", prefix, file_path);
-    log_agent_complete!(
-        &task_id,
-        &agent_name,
-        format!("Fixed and saved {} bytes", fixed_yaml.len())
-    );
+    println!("\nFixed YAML written to: {}", file_path);
+    println!("Saved {} bytes", fixed_yaml.len());
 
     Ok(())
-}
-
-/// Extract YAML from markdown code blocks and clean document separators
-fn extract_yaml(text: &str) -> String {
-    let yaml = if text.contains("```yaml") {
-        let yaml_start = text.find("```yaml").unwrap() + 7;
-        let yaml_end = text[yaml_start..]
-            .rfind("```")
-            .map(|pos| pos + yaml_start)
-            .unwrap_or(text.len());
-        text[yaml_start..yaml_end].trim().to_string()
-    } else if text.contains("```") {
-        let yaml_start = text.find("```").unwrap() + 3;
-        let yaml_end = text[yaml_start..]
-            .rfind("```")
-            .map(|pos| pos + yaml_start)
-            .unwrap_or(text.len());
-        text[yaml_start..yaml_end].trim().to_string()
-    } else {
-        text.trim().to_string()
-    };
-
-    // Remove leading document separator (---) if present
-    // serde_yaml::from_str doesn't support multi-document YAML
-    yaml.trim_start_matches("---").trim().to_string()
 }
 
 /// Find all YAML files in a directory

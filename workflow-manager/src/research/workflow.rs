@@ -6,7 +6,7 @@
 //! The primary entry point is [`run_research_workflow`], which executes the complete
 //! multi-phase workflow based on the provided [`WorkflowConfig`].
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Local;
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::{
@@ -98,7 +98,9 @@ impl Default for WorkflowConfig {
 async fn load_prompt_file(file_path: &str) -> Result<String> {
     let path = Path::new(file_path);
     if path.exists() && path.is_file() {
-        Ok(fs::read_to_string(path).await?)
+        fs::read_to_string(path)
+            .await
+            .with_context(|| format!("Failed to read prompt file: {}", file_path))
     } else {
         Ok(file_path.to_string())
     }
@@ -189,8 +191,12 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
     }
 
     // Create directory structure for workflow artifacts
-    fs::create_dir_all("./RESULTS").await?;
-    fs::create_dir_all("./OUTPUT").await?;
+    fs::create_dir_all("./RESULTS")
+        .await
+        .with_context(|| "Failed to create ./RESULTS directory")?;
+    fs::create_dir_all("./OUTPUT")
+        .await
+        .with_context(|| "Failed to create ./OUTPUT directory")?;
 
     let mut codebase_analysis: Option<CodebaseAnalysis> = None;
     let mut prompts_data: Option<PromptsData> = None;
@@ -218,7 +224,9 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
         let timestamp = Local::now().format("%Y%m%d_%H%M%S");
         let analysis_path = PathBuf::from(format!("./OUTPUT/codebase_analysis_{}.yaml", timestamp));
         let analysis_yaml = serde_yaml::to_string(&analysis)?;
-        fs::write(&analysis_path, analysis_yaml).await?;
+        fs::write(&analysis_path, &analysis_yaml)
+            .await
+            .with_context(|| format!("Failed to write analysis file: {}", analysis_path.display()))?;
         println!("[Phase 0] Analysis saved to: {}", analysis_path.display());
 
         log_task_complete!("analyze", format!("Saved to {}", analysis_path.display()));
@@ -227,8 +235,13 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
 
         codebase_analysis = Some(analysis);
     } else if let Some(analysis_file) = &config.analysis_file {
-        let content = fs::read_to_string(analysis_file).await?;
-        codebase_analysis = Some(serde_yaml::from_str(&content)?);
+        let content = fs::read_to_string(analysis_file)
+            .await
+            .with_context(|| format!("Failed to read analysis file: {}", analysis_file))?;
+        codebase_analysis = Some(
+            serde_yaml::from_str(&content)
+                .with_context(|| format!("Failed to parse analysis YAML from: {}", analysis_file))?,
+        );
         println!("[Phase 0] Loaded analysis from: {}", analysis_file);
     }
 
@@ -256,7 +269,9 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
         let timestamp = Local::now().format("%Y%m%d_%H%M%S");
         let prompts_path = PathBuf::from(format!("./OUTPUT/research_prompts_{}.yaml", timestamp));
         let prompts_yaml = serde_yaml::to_string(&prompts)?;
-        fs::write(&prompts_path, prompts_yaml).await?;
+        fs::write(&prompts_path, &prompts_yaml)
+            .await
+            .with_context(|| format!("Failed to write prompts file: {}", prompts_path.display()))?;
         println!("[Phase 1] Prompts saved to: {}", prompts_path.display());
         println!("Generated {} research prompts", prompts.prompts.len());
 
@@ -273,8 +288,13 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
 
         prompts_data = Some(prompts);
     } else if let Some(prompts_file) = &config.prompts_file {
-        let content = fs::read_to_string(prompts_file).await?;
-        prompts_data = Some(serde_yaml::from_str(&content)?);
+        let content = fs::read_to_string(prompts_file)
+            .await
+            .with_context(|| format!("Failed to read prompts file: {}", prompts_file))?;
+        prompts_data = Some(
+            serde_yaml::from_str(&content)
+                .with_context(|| format!("Failed to parse prompts YAML from: {}", prompts_file))?,
+        );
         println!("[Phase 1] Loaded prompts from: {}", prompts_file);
     }
 
@@ -292,7 +312,9 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
         let timestamp = Local::now().format("%Y%m%d_%H%M%S");
         let results_path = PathBuf::from(format!("./RESULTS/research_results_{}.yaml", timestamp));
         let results_yaml = serde_yaml::to_string(&research_results)?;
-        fs::write(&results_path, results_yaml).await?;
+        fs::write(&results_path, &results_yaml)
+            .await
+            .with_context(|| format!("Failed to write results file: {}", results_path.display()))?;
         println!("\n[Phase 2] Results saved to: {}", results_path.display());
 
         log_state_file!(
@@ -304,8 +326,11 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
 
         results_file_path = Some(results_path);
     } else if let Some(results_file) = &config.results_file {
-        let content = fs::read_to_string(results_file).await?;
-        research_results = serde_yaml::from_str(&content)?;
+        let content = fs::read_to_string(results_file)
+            .await
+            .with_context(|| format!("Failed to read results file: {}", results_file))?;
+        research_results = serde_yaml::from_str(&content)
+            .with_context(|| format!("Failed to parse results YAML from: {}", results_file))?;
         println!("[Phase 2] Loaded results from: {}", results_file);
         results_file_path = Some(PathBuf::from(results_file));
     }

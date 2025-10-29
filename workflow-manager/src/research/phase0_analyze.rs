@@ -12,19 +12,14 @@
 //! The result is a comprehensive YAML analysis saved to `OUTPUT/codebase_analysis_<timestamp>.yaml`.
 
 use crate::research::types::CodebaseAnalysis;
-use claude_agent_sdk::{query, ClaudeAgentOptions, ContentBlock, Message};
-use futures::StreamExt;
+use crate::workflow_utils::{execute_agent, extract_yaml, parse_yaml, AgentConfig};
+use claude_agent_sdk::ClaudeAgentOptions;
 use std::path::Path;
-use workflow_manager_sdk::{
-    log_agent_complete, log_agent_failed, log_agent_message, log_agent_start,
-};
 
 /// Analyze codebase structure and generate comprehensive overview
 pub async fn analyze_codebase(codebase_path: &Path) -> anyhow::Result<CodebaseAnalysis> {
     let task_id = "analyze";
-    let agent_name = "Suborchestrator Agent";
-
-    log_agent_start!(task_id, agent_name, "Analyzing codebase structure");
+    let agent_name = "Codebase Analyzer";
 
     let analysis_prompt = format!(
         r#"Analyze the codebase at {} and provide a structured overview.
@@ -116,71 +111,22 @@ Provide detailed structural analysis with accurate, verified metrics."#
         .permission_mode(claude_agent_sdk::PermissionMode::BypassPermissions)
         .build();
 
-    let stream = query(&analysis_prompt, Some(options)).await?;
-    let mut stream = Box::pin(stream);
+    // Execute agent (handles all stream processing, logging, etc.)
+    let config = AgentConfig::new(
+        task_id,
+        agent_name,
+        "Analyzing codebase structure",
+        analysis_prompt,
+        options,
+    );
 
-    let mut response_text = String::new();
-
-    while let Some(message) = stream.next().await {
-        match message? {
-            Message::Assistant { message, .. } => {
-                for block in &message.content {
-                    if let ContentBlock::Text { text } = block {
-                        // Collect raw text without printing
-                        response_text.push_str(text);
-                        // Emit structured agent message for TUI
-                        log_agent_message!(task_id, agent_name, text);
-                    }
-                }
-            }
-            Message::Result { .. } => break,
-            _ => {}
-        }
-    }
+    let response_text = execute_agent(config).await?;
 
     // Extract and parse YAML
     let yaml_content = extract_yaml(&response_text);
-    let analysis: CodebaseAnalysis = serde_yaml::from_str(&yaml_content).map_err(|e| {
-        let error_msg = format!("Failed to parse analysis YAML: {}", e);
-        log_agent_failed!(task_id, agent_name, &error_msg);
+    let analysis: CodebaseAnalysis = parse_yaml(&yaml_content)?;
 
-        // If duplicate key error, provide helpful context
-        if error_msg.contains("duplicate") {
-            eprintln!("\n❌ YAML PARSING ERROR: Duplicate keys detected");
-            eprintln!("The analysis contains duplicate keys which is invalid YAML.");
-            eprintln!("Common fix: Combine duplicate keys into a single key with an array.");
-            eprintln!("\nGenerated YAML preview (first 500 chars):");
-            eprintln!("{}", &yaml_content.chars().take(500).collect::<String>());
-        }
+    println!("✓ Codebase analysis complete");
 
-        anyhow::anyhow!("{}", error_msg)
-    })?;
-
-    log_agent_complete!(task_id, agent_name, "Codebase analysis complete");
     Ok(analysis)
-}
-
-/// Extract YAML content from markdown code blocks
-fn extract_yaml(text: &str) -> String {
-    let yaml = if text.contains("```yaml") {
-        let yaml_start = text.find("```yaml").unwrap() + 7;
-        let yaml_end = text[yaml_start..]
-            .rfind("```")
-            .map(|pos| pos + yaml_start)
-            .unwrap_or(text.len());
-        text[yaml_start..yaml_end].trim().to_string()
-    } else if text.contains("```") {
-        let yaml_start = text.find("```").unwrap() + 3;
-        let yaml_end = text[yaml_start..]
-            .rfind("```")
-            .map(|pos| pos + yaml_start)
-            .unwrap_or(text.len());
-        text[yaml_start..yaml_end].trim().to_string()
-    } else {
-        text.trim().to_string()
-    };
-
-    // Remove leading document separator (---) if present
-    // serde_yaml::from_str doesn't support multi-document YAML
-    yaml.trim_start_matches("---").trim().to_string()
 }
