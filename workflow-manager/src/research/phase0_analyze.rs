@@ -74,8 +74,9 @@ BEFORE generating YAML:
 1. Verify all file counts are exact (not estimated)
 2. Use actual command outputs for line counts
 3. Double-check numbers match bash command results
-4. **CRITICAL: Check for duplicate keys at EVERY level - each key must appear ONCE**
-5. If you need multiple values, use YAML arrays/lists: `key:\n  - value1\n  - value2`
+4. **CRITICAL: Output a SINGLE YAML document ONLY - DO NOT use `---` document separators**
+5. **CRITICAL: Check for duplicate keys at EVERY level - each key must appear ONCE**
+6. If you need multiple values, use YAML arrays/lists: `key:\n  - value1\n  - value2`
 
 Be comprehensive and ACCURATE with all metrics."#,
         codebase_path.display()
@@ -93,6 +94,9 @@ CRITICAL REQUIREMENTS:
 - Verify your numbers before outputting YAML
 
 YAML OUTPUT REQUIREMENTS (CRITICAL):
+- Output a SINGLE YAML document ONLY
+- DO NOT use document separators (---)
+- DO NOT output multiple YAML documents
 - NO DUPLICATE KEYS at any level - each key must appear only once
 - Use arrays/lists for multiple items under one key
 - Example: WRONG: "documentation: a\ndocumentation: b"  CORRECT: "documentation:\n  - a\n  - b"
