@@ -81,6 +81,7 @@ impl App {
                             start_time: None,
                             status,
                             child_process: None,
+                            runtime_handle_id: None,
                             exit_code: None,
                             workflow_phases: Arc::new(Mutex::new(Vec::new())),
                             workflow_output: Arc::new(Mutex::new(saved.saved_logs)),

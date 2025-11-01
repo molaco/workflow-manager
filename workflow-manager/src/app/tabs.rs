@@ -79,17 +79,35 @@ impl App {
             return;
         }
 
-        // Kill process if running
-        if let Some(tab) = self.open_tabs.get_mut(self.active_tab_idx) {
-            if let Some(mut child) = tab.child_process.take() {
-                let _ = child.kill();
-            }
+        let tab = &mut self.open_tabs[self.active_tab_idx];
+
+        // PATH 1: Kill manual workflow (existing behavior)
+        if let Some(mut child) = tab.child_process.take() {
+            let _ = child.kill();
         }
 
-        // Remove tab
+        // PATH 2: Cancel MCP workflow (NEW behavior)
+        if let Some(handle_id) = tab.runtime_handle_id {
+            // Cancel via runtime
+            if let Some(runtime) = &self.runtime {
+                let runtime = runtime.clone();
+                self.tokio_runtime.block_on(async {
+                    if let Err(e) = runtime.cancel_workflow(&handle_id).await {
+                        eprintln!("Failed to cancel workflow {}: {}", handle_id, e);
+                    }
+                });
+            }
+
+            // Cancel background tasks (log streamers, etc.)
+            self.tokio_runtime.block_on(async {
+                self.task_registry.cancel_all(&handle_id).await;
+            });
+        }
+
+        // Remove tab (existing logic)
         self.open_tabs.remove(self.active_tab_idx);
 
-        // Adjust active index
+        // Adjust active index (existing logic)
         if self.open_tabs.is_empty() {
             self.active_tab_idx = 0;
         } else if self.active_tab_idx >= self.open_tabs.len() {
@@ -105,12 +123,34 @@ impl App {
         }
 
         if let Some(tab) = self.open_tabs.get_mut(self.active_tab_idx) {
+            // PATH 1: Kill manual workflow
             if let Some(mut child) = tab.child_process.take() {
                 let _ = child.kill();
                 tab.status = WorkflowStatus::Failed;
                 if let Ok(mut output) = tab.workflow_output.lock() {
                     output.push(String::new());
                     output.push("⚠️ Workflow killed by user".to_string());
+                }
+            }
+
+            // PATH 2: Cancel MCP workflow
+            if let Some(handle_id) = tab.runtime_handle_id {
+                if let Some(runtime) = &self.runtime {
+                    let runtime = runtime.clone();
+                    self.tokio_runtime.block_on(async {
+                        let _ = runtime.cancel_workflow(&handle_id).await;
+                    });
+                }
+
+                // Cancel background tasks
+                self.tokio_runtime.block_on(async {
+                    self.task_registry.cancel_all(&handle_id).await;
+                });
+
+                tab.status = WorkflowStatus::Failed;
+                if let Ok(mut output) = tab.workflow_output.lock() {
+                    output.push(String::new());
+                    output.push("⚠️ Workflow killed by user (MCP)".to_string());
                 }
             }
         }

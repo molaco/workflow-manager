@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::process::Child;
 use std::sync::{Arc, Mutex};
 use workflow_manager_sdk::WorkflowStatus;
+use uuid::Uuid;
 
 use super::workflow::WorkflowPhase;
 
@@ -26,7 +27,16 @@ pub struct WorkflowTab {
 
     // Execution state
     pub status: WorkflowStatus,
+
+    /// For manually-launched workflows (existing path)
+    /// Set when user launches workflow from TUI
     pub child_process: Option<Child>,
+
+    /// For MCP-launched workflows (NEW path)
+    /// Set when workflow is launched via MCP tools
+    /// Used for cleanup via ProcessBasedRuntime
+    pub runtime_handle_id: Option<Uuid>,
+
     pub exit_code: Option<i32>,
 
     // Workflow data (per tab)

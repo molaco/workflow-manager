@@ -12,12 +12,23 @@ use crate::chat::ChatInterface;
 mod models;
 pub use models::*;
 
+// Command pattern modules
+pub mod commands;
+pub mod notifications;
+pub mod task_registry;
+
 // Declare submodules
 mod file_browser;
 mod history;
 mod navigation;
 mod tabs;
 mod workflow_ops;
+mod command_handlers;
+
+// Re-export for convenience
+pub use commands::{AppCommand, NotificationLevel};
+pub use notifications::NotificationManager;
+pub use task_registry::TaskRegistry;
 
 // Re-export methods from submodules
 
@@ -29,6 +40,15 @@ impl App {
 
         // Create tokio runtime for async operations
         let tokio_runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+
+        // Create command channel
+        let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // Create notification manager
+        let notifications = NotificationManager::new();
+
+        // Create task registry
+        let task_registry = TaskRegistry::new();
 
         let mut app = Self {
             workflows,
@@ -70,6 +90,10 @@ impl App {
             chat: None,
             runtime: None,
             tokio_runtime,
+            command_tx: command_tx.clone(),
+            command_rx,
+            notifications,
+            task_registry: task_registry.clone(),
         };
 
         // Initialize runtime
@@ -84,6 +108,8 @@ impl App {
                 app.chat = Some(ChatInterface::new(
                     runtime_arc,
                     history_arc,
+                    command_tx,
+                    task_registry,
                     app.tokio_runtime.handle().clone(),
                 ));
             }

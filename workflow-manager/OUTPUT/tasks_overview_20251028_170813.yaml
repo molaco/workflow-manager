@@ -1,0 +1,871 @@
+task:
+  id: 1
+  name: "Implement Database Schema for Backtest Persistence"
+
+  overview:
+    purpose: |
+      Establish a persistent storage layer for backtest results, enabling long-term retention
+      of equity curve data, performance metrics, and trade history. This foundational task
+      creates the database schema and table structures required to store backtest runs and
+      their associated frame-by-frame equity snapshots.
+
+    motivation: |
+      Currently, all backtest results exist only in-memory and are lost when the application
+      closes or crashes. Users cannot review historical backtests, compare results across
+      different strategy configurations, or recover data after system failures. A database
+      persistence layer is essential for production-grade backtesting capabilities.
+
+    outcome: |
+      The application will have a robust database schema capable of storing complete backtest
+      results including equity curves, metrics, and metadata. The schema will support efficient
+      queries for loading historical results and enable future features like result comparison
+      and analytics.
+
+  scope_summary:
+    description: "Creates 2 database tables with indexes and foreign key constraints"
+    files_affected: 1
+    functions_added: 0
+    tests_required: 0
+    complexity: "simple"
+    estimated_effort: "1-2 hours"
+
+  key_components:
+    - component: "backtest_runs table"
+      type: "database schema"
+      purpose: "Stores metadata and summary data for each backtest execution"
+
+    - component: "backtest_frames table"
+      type: "database schema"
+      purpose: "Stores frame-by-frame equity snapshots with foreign key to backtest_runs"
+
+    - component: "Database indexes"
+      type: "database schema"
+      purpose: "Optimizes queries for timestamp ranges and run lookups"
+
+  implementation_hints:
+    approach: |
+      Create SQL migration scripts that define the table structures following the existing
+      database patterns in the codebase. Use the same SQLite practices as other tables
+      (trades, klines, etc.). Include proper indexes for common query patterns.
+
+    key_considerations:
+      - "Use INTEGER for timestamps (Unix milliseconds) to match existing patterns"
+      - "Store metrics as JSON blob for flexibility as metrics evolve"
+      - "Include foreign key constraint with CASCADE delete for data integrity"
+      - "Add index on timestamp column for efficient time-range queries"
+      - "Consider storage size - equity frames can be numerous in tick mode"
+
+    integration_points:
+      - "Integrates with existing SQLite database used for market data storage"
+      - "Follows same migration pattern as existing schema definitions"
+
+  testing_overview:
+    strategy: "integration"
+
+    rationale: |
+      Database schema testing is best done through integration tests that verify table
+      creation, constraints, and basic CRUD operations work correctly. Unit tests are
+      not applicable for schema definitions.
+
+    critical_properties:
+      - "Foreign key constraint properly cascades deletes"
+      - "Timestamp indexes improve query performance"
+      - "JSON metrics field accepts valid JSON"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: false
+      integration_testing: true
+
+    estimated_test_count: 0
+
+  dependencies:
+    requires_completion_of: []
+
+    enables_start_of:
+      - task_id: 2
+        reason: "CRUD operations need tables to exist"
+      - task_id: 3
+        reason: "Serialization targets database schema structure"
+
+    parallel_with: []
+
+  acceptance_criteria:
+    - "backtest_runs table created with all specified columns"
+    - "backtest_frames table created with foreign key to backtest_runs"
+    - "Indexes created on timestamp and run_id columns"
+    - "Schema matches existing SQLite database patterns"
+    - "Migration script runs successfully on fresh database"
+
+  risk_assessment:
+    complexity_risk: "low"
+    integration_risk: "low"
+    testing_risk: "low"
+
+    concerns: []
+
+  notes:
+    - "Consider adding index on (run_id, timestamp) composite for frame queries"
+    - "JSON metrics field allows schema evolution without migrations"
+    - "Storage size may grow large with tick-mode backtests - monitor in production"
+
+---
+
+task:
+  id: 2
+  name: "Implement CRUD Operations for Backtest Persistence"
+
+  overview:
+    purpose: |
+      Build the data access layer that provides create, read, update, and delete operations
+      for backtest results. This layer abstracts database operations behind a clean trait
+      interface, enabling the application to save and load backtest results programmatically.
+
+    motivation: |
+      With the database schema in place, the application needs a type-safe API for persisting
+      and retrieving backtest data. This layer handles the translation between in-memory
+      data structures and database rows, manages transactions, and provides error handling
+      for database operations.
+
+    outcome: |
+      The application will have a BacktestCRUD trait with implementations that allow saving
+      complete backtest results to the database, loading them by ID, listing available results
+      with filters, and deleting old results. All database interactions will be async and
+      properly handle errors.
+
+  scope_summary:
+    description: "Adds 1 trait with 4 methods and 1 implementation struct across 2 files"
+    files_affected: 2
+    functions_added: 5
+    tests_required: 8
+    complexity: "moderate"
+    estimated_effort: "half day"
+
+  key_components:
+    - component: "BacktestCRUD trait"
+      type: "trait"
+      purpose: "Defines interface for backtest persistence operations"
+
+    - component: "save_backtest_run function"
+      type: "function"
+      purpose: "Inserts backtest run and frames into database transactionally"
+
+    - component: "load_backtest_run function"
+      type: "function"
+      purpose: "Retrieves complete backtest results by ID"
+
+    - component: "list_backtest_runs function"
+      type: "function"
+      purpose: "Queries backtest runs with optional filtering"
+
+    - component: "delete_backtest_run function"
+      type: "function"
+      purpose: "Removes backtest run and associated frames"
+
+  implementation_hints:
+    approach: |
+      Create a trait similar to existing data access patterns in the codebase. Implement
+      using async SQLx queries with proper transaction handling. Use batch inserts for
+      frames to optimize performance. Follow the repository pattern used elsewhere.
+
+    key_considerations:
+      - "Use database transactions to ensure atomicity when saving runs and frames"
+      - "Batch insert frames in chunks (e.g., 1000 at a time) to avoid query size limits"
+      - "Return database-assigned IDs after successful inserts"
+      - "Handle connection pool exhaustion gracefully with retries"
+      - "Consider pagination for list_backtest_runs to handle large result sets"
+
+    integration_points:
+      - "Integrates with existing database connection pool infrastructure"
+      - "Uses same error handling patterns as other data access layers"
+      - "Follows async/await patterns established in codebase"
+
+  testing_overview:
+    strategy: "integration"
+
+    rationale: |
+      CRUD operations require database access to test properly. Integration tests with
+      a test database verify correct SQL generation, transaction handling, and data
+      round-tripping. Mock-based unit tests would not catch actual database issues.
+
+    critical_properties:
+      - "Save operation is atomic - either all data persists or none does"
+      - "Load operation correctly reconstructs original data structures"
+      - "Delete cascades to frames table"
+      - "Concurrent saves do not corrupt data"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: true
+      integration_testing: true
+
+    estimated_test_count: 8
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 1
+        reason: "CRUD operations need database tables to exist"
+      - task_id: 3
+        reason: "Serialization must be implemented before database storage"
+
+    enables_start_of:
+      - task_id: 4
+        reason: "Auto-save feature needs CRUD operations to persist results"
+      - task_id: 5
+        reason: "Load results UI depends on list and load functions"
+
+    parallel_with: []
+
+  acceptance_criteria:
+    - "BacktestCRUD trait defined with all 4 methods"
+    - "Implementation successfully saves and loads complete backtest results"
+    - "Batch insert of frames handles large datasets (10,000+ frames) efficiently"
+    - "Transaction rollback on error prevents partial data persistence"
+    - "All integration tests pass with test database"
+    - "Concurrent saves do not cause data corruption"
+    - "Delete operation cascades correctly to frames"
+
+  risk_assessment:
+    complexity_risk: "medium"
+    integration_risk: "medium"
+    testing_risk: "low"
+
+    concerns:
+      - "Large backtests with many frames may hit query size limits - need batch strategy"
+      - "Transaction isolation level must be appropriate for concurrent access"
+
+  notes:
+    - "Consider adding caching layer for frequently accessed results"
+    - "May need to add compression for frame data in future"
+    - "List operation should support pagination from the start"
+
+---
+
+task:
+  id: 3
+  name: "Add Serialization Support to Backtest Data Structures"
+
+  overview:
+    purpose: |
+      Enable serialization and deserialization of backtest data structures using Serde,
+      allowing conversion between in-memory Rust types and JSON/database-compatible formats.
+      This is a prerequisite for persistence and export features.
+
+    motivation: |
+      Currently, BacktestResults and BacktestFrame structs lack Serialize/Deserialize derives,
+      preventing them from being stored in databases or exported to JSON/CSV files. Adding
+      serialization support unblocks multiple features including persistence, file exports,
+      and API integrations.
+
+    outcome: |
+      All backtest data structures will support serialization and deserialization. The types
+      can be converted to/from JSON for storage and export. Custom serialization logic will
+      handle edge cases like NaN/Infinity values and maintain backward compatibility.
+
+  scope_summary:
+    description: "Adds Serde derives to 5 structs and implements 2 custom serializers"
+    files_affected: 2
+    functions_added: 2
+    tests_required: 6
+    complexity: "simple"
+    estimated_effort: "1-2 hours"
+
+  key_components:
+    - component: "Serde derives for BacktestResults"
+      type: "derive macro"
+      purpose: "Enables JSON serialization of complete backtest results"
+
+    - component: "Serde derives for BacktestFrame"
+      type: "derive macro"
+      purpose: "Enables JSON serialization of individual frames"
+
+    - component: "Custom f64 serializer"
+      type: "function"
+      purpose: "Handles NaN/Infinity values during serialization"
+
+    - component: "Serde derives for Position"
+      type: "derive macro"
+      purpose: "Enables position state serialization"
+
+  implementation_hints:
+    approach: |
+      Add #[derive(Serialize, Deserialize)] to relevant structs. Implement custom
+      serialization for f64 fields that may contain NaN/Infinity to prevent JSON
+      encoding errors. Use serde attributes like #[serde(serialize_with)] for custom
+      handling.
+
+    key_considerations:
+      - "NaN and Infinity values must be converted to null or strings for valid JSON"
+      - "Maintain backward compatibility if changing existing serialized formats"
+      - "Consider using #[serde(skip)] for fields that shouldn't be persisted"
+      - "Price type may need custom serialization depending on its internal representation"
+      - "Large frame arrays should serialize efficiently"
+
+    integration_points:
+      - "Integrates with existing Serde usage throughout codebase"
+      - "Supports both JSON and potentially MessagePack formats"
+      - "Used by CRUD operations for database storage"
+
+  testing_overview:
+    strategy: "unit"
+
+    rationale: |
+      Serialization logic is best tested with unit tests that verify correct JSON output
+      for various input scenarios, including edge cases like NaN values, empty collections,
+      and large datasets. Property-based testing can verify round-trip invariants.
+
+    critical_properties:
+      - "Round-trip serialization preserves data integrity"
+      - "NaN/Infinity values serialize to valid JSON"
+      - "Deserialization handles missing optional fields gracefully"
+      - "Large frame arrays serialize without stack overflow"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: true
+      concurrency_testing: false
+      integration_testing: false
+
+    estimated_test_count: 6
+
+  dependencies:
+    requires_completion_of: []
+
+    enables_start_of:
+      - task_id: 2
+        reason: "CRUD operations need serializable types"
+      - task_id: 6
+        reason: "CSV export requires serialization support"
+
+    parallel_with:
+      - 1
+
+  acceptance_criteria:
+    - "All backtest structs derive Serialize and Deserialize"
+    - "Custom serializer handles NaN/Infinity correctly"
+    - "Round-trip tests pass for all data structures"
+    - "Serialized JSON is valid and parseable"
+    - "Property tests verify no data loss during round-trips"
+    - "Compilation succeeds with no Serde errors"
+
+  risk_assessment:
+    complexity_risk: "low"
+    integration_risk: "low"
+    testing_risk: "low"
+
+    concerns:
+      - "Price type internal representation may complicate serialization"
+
+  notes:
+    - "Consider using serde_json::Number for better numeric precision"
+    - "May want to add version field for future schema evolution"
+    - "Large frame arrays could benefit from streaming serialization"
+
+---
+
+task:
+  id: 4
+  name: "Implement Auto-Save on Backtest Completion"
+
+  overview:
+    purpose: |
+      Automatically persist backtest results to the database upon completion of a backtest
+      run. This ensures users never lose backtest data due to application crashes or
+      unintended closures, providing seamless data protection without manual intervention.
+
+    motivation: |
+      Manual save operations are error-prone and users often forget to save results before
+      closing the application. Auto-save ensures all backtest data is protected by default,
+      improving user experience and preventing data loss. This is a critical reliability
+      feature for production use.
+
+    outcome: |
+      Every completed backtest will automatically save to the database with no user action
+      required. Users can optionally disable auto-save in settings. Save failures will be
+      handled gracefully with error notifications, and the UI will indicate save status.
+
+  scope_summary:
+    description: "Adds auto-save logic to backtest completion handler with settings integration"
+    files_affected: 2
+    functions_added: 3
+    tests_required: 4
+    complexity: "moderate"
+    estimated_effort: "half day"
+
+  key_components:
+    - component: "Auto-save handler in BacktestComplete message"
+      type: "function"
+      purpose: "Triggers save operation when backtest finishes"
+
+    - component: "Settings integration"
+      type: "struct field"
+      purpose: "Allows users to enable/disable auto-save"
+
+    - component: "Save status indicator"
+      type: "UI component"
+      purpose: "Shows save progress and completion status"
+
+    - component: "Error notification handler"
+      type: "function"
+      purpose: "Displays user-friendly error messages on save failures"
+
+  implementation_hints:
+    approach: |
+      Hook into the existing BacktestComplete message handler. Spawn an async task to
+      save results without blocking the UI. Add a setting in the configuration struct
+      with default value true. Show a temporary notification on save completion or error.
+
+    key_considerations:
+      - "Save operation must not block UI thread - use async task"
+      - "Handle concurrent backtests completing simultaneously"
+      - "Provide meaningful error messages if database is unavailable"
+      - "Consider adding save retry logic for transient failures"
+      - "Update UI to show 'Saving...' status during operation"
+
+    integration_points:
+      - "Integrates with BacktestComplete message handler in backtesting.rs"
+      - "Uses CRUD operations implemented in Task 2"
+      - "Connects to application settings system"
+      - "Uses notification/toast system for user feedback"
+
+  testing_overview:
+    strategy: "integration"
+
+    rationale: |
+      Auto-save functionality requires testing the interaction between backtest completion,
+      database operations, settings, and UI updates. Integration tests verify the complete
+      workflow including error scenarios and concurrent backtests.
+
+    critical_properties:
+      - "Results are saved exactly once per backtest completion"
+      - "UI remains responsive during save operation"
+      - "Save failures do not crash the application"
+      - "Settings correctly enable/disable auto-save"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: true
+      integration_testing: true
+
+    estimated_test_count: 4
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 2
+        reason: "Needs CRUD operations to persist results"
+
+    enables_start_of:
+      - task_id: 5
+        reason: "Load results UI becomes useful once auto-save is working"
+
+    parallel_with:
+      - 6
+
+  acceptance_criteria:
+    - "Backtest results automatically save to database on completion"
+    - "Settings toggle correctly enables/disables auto-save"
+    - "UI shows save status notification"
+    - "Save failures display user-friendly error messages"
+    - "Concurrent backtest completions save without data corruption"
+    - "Auto-save does not block UI responsiveness"
+    - "Integration tests verify complete auto-save workflow"
+
+  risk_assessment:
+    complexity_risk: "medium"
+    integration_risk: "medium"
+    testing_risk: "low"
+
+    concerns:
+      - "Database connection failures during save need graceful handling"
+      - "Very large backtests may take time to save - need progress indication"
+
+  notes:
+    - "Consider adding manual save button as well for user control"
+    - "May want to add save history/versioning in future"
+    - "Could add setting for max saved results with auto-cleanup"
+
+---
+
+task:
+  id: 5
+  name: "Build Load Previous Results UI Feature"
+
+  overview:
+    purpose: |
+      Create a user interface that allows users to browse, search, and load previously saved
+      backtest results. This feature provides access to historical backtests, enabling users
+      to review past strategy performance and compare different configurations.
+
+    motivation: |
+      With backtest results being persisted to the database, users need a way to access and
+      review them. A dedicated UI for loading results makes historical data useful and
+      accessible, supporting iterative strategy development and performance analysis workflows.
+
+    outcome: |
+      Users will have a browser/selector interface showing all saved backtests with filtering
+      by ticker, timeframe, date range, and strategy name. Selecting a result loads it into
+      the backtesting screen, restoring the complete state including equity curve, metrics,
+      and trade history.
+
+  scope_summary:
+    description: "Adds results browser UI with list view, filters, and load functionality"
+    files_affected: 3
+    functions_added: 8
+    tests_required: 5
+    complexity: "moderate"
+    estimated_effort: "1 day"
+
+  key_components:
+    - component: "Results browser modal"
+      type: "UI component"
+      purpose: "Displays list of saved backtest runs"
+
+    - component: "Filter controls"
+      type: "UI component"
+      purpose: "Allows filtering results by ticker, timeframe, date, strategy"
+
+    - component: "Result list item"
+      type: "UI component"
+      purpose: "Shows summary info for each backtest (date, metrics, ticker)"
+
+    - component: "Load result handler"
+      type: "function"
+      purpose: "Fetches full results from database and updates screen state"
+
+    - component: "Search functionality"
+      type: "function"
+      purpose: "Filters displayed results based on user criteria"
+
+  implementation_hints:
+    approach: |
+      Create a new modal dialog that opens from the backtesting screen. Use a scrollable
+      list view for results with summary cards. Implement filters using the existing UI
+      component patterns. Load full results asynchronously when user clicks a result.
+
+    key_considerations:
+      - "Use pagination or virtual scrolling for large result sets"
+      - "Show loading spinner while fetching results from database"
+      - "Display key metrics in list view for quick comparison"
+      - "Allow sorting by date, return, or other metrics"
+      - "Consider adding delete option for unwanted results"
+
+    integration_points:
+      - "Integrates with backtesting screen state management"
+      - "Uses CRUD list_backtest_runs function for data fetching"
+      - "Follows existing modal/dialog patterns in UI"
+      - "Restores BacktestingScreen state from loaded results"
+
+  testing_overview:
+    strategy: "integration"
+
+    rationale: |
+      UI testing requires verifying the complete user workflow from opening the browser,
+      applying filters, selecting a result, and loading it. Integration tests ensure
+      proper coordination between UI, state management, and database operations.
+
+    critical_properties:
+      - "Filter controls correctly narrow displayed results"
+      - "Loading a result restores complete backtest state"
+      - "UI remains responsive with large result sets"
+      - "Search functionality matches expected results"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: false
+      integration_testing: true
+
+    estimated_test_count: 5
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 2
+        reason: "Needs list and load CRUD operations"
+      - task_id: 4
+        reason: "Auto-save must work for results to exist"
+
+    enables_start_of:
+      - task_id: 7
+        reason: "Compare mode builds on ability to load multiple results"
+
+    parallel_with:
+      - 6
+
+  acceptance_criteria:
+    - "Modal opens showing list of all saved backtests"
+    - "Filters correctly narrow results by ticker, timeframe, date, strategy"
+    - "Clicking a result loads it into backtesting screen"
+    - "Loaded results restore complete state including equity curve"
+    - "UI shows loading state while fetching data"
+    - "List supports pagination or virtual scrolling for performance"
+    - "Results display key metrics for quick comparison"
+
+  risk_assessment:
+    complexity_risk: "medium"
+    integration_risk: "medium"
+    testing_risk: "medium"
+
+    concerns:
+      - "Large result sets may impact UI responsiveness - need efficient rendering"
+      - "State restoration must handle all edge cases to avoid partial loads"
+
+  notes:
+    - "Consider adding result thumbnails/previews in future"
+    - "May want to add export functionality directly from browser"
+    - "Could add tagging/categorization system for organization"
+
+---
+
+task:
+  id: 6
+  name: "Add Equity Curve CSV Export Functionality"
+
+  overview:
+    purpose: |
+      Implement CSV export functionality that outputs the complete frame-by-frame equity
+      curve data, enabling users to analyze results in external tools like Excel, Python,
+      or R. This complements the existing trade and metrics exports with time-series data.
+
+    motivation: |
+      While the application provides trade and metrics exports, it lacks equity curve
+      time-series export. Users performing advanced analysis need access to raw equity
+      data points for custom calculations, visualizations, and statistical analysis in
+      their preferred tools.
+
+    outcome: |
+      Users can export equity curve data to CSV with columns for timestamp, equity, balance,
+      unrealized PnL, realized PnL, drawdown, and position details. Export follows the same
+      patterns as existing trade/metrics exports with proper filename generation and error
+      handling.
+
+  scope_summary:
+    description: "Adds equity CSV export function and UI button following existing export patterns"
+    files_affected: 1
+    functions_added: 2
+    tests_required: 3
+    complexity: "simple"
+    estimated_effort: "1-2 hours"
+
+  key_components:
+    - component: "export_equity_curve_csv function"
+      type: "function"
+      purpose: "Generates CSV file from BacktestFrame array"
+
+    - component: "Export button in UI"
+      type: "UI component"
+      purpose: "Triggers equity curve export action"
+
+    - component: "CSV formatter"
+      type: "function"
+      purpose: "Formats frame data into CSV rows with headers"
+
+  implementation_hints:
+    approach: |
+      Follow the exact pattern used by existing export_trades_csv and export_metrics_csv
+      functions. Use same filename generation strategy with ticker, timeframe, and timestamp.
+      Include all relevant frame fields as columns. Handle NaN/Infinity values appropriately.
+
+    key_considerations:
+      - "Use same CSV library and error handling as existing exports"
+      - "Include header row with clear column names"
+      - "Format timestamps as readable dates or Unix milliseconds (match existing exports)"
+      - "Handle NaN/Infinity values by converting to empty strings or special markers"
+      - "Consider adding option to export only visible/filtered data vs full dataset"
+
+    integration_points:
+      - "Integrates with existing export infrastructure in backtesting.rs"
+      - "Uses same file dialog and error notification patterns"
+      - "Placed alongside existing export buttons in UI"
+
+  testing_overview:
+    strategy: "unit"
+
+    rationale: |
+      CSV export is primarily a data formatting operation that can be tested with unit
+      tests verifying correct CSV structure, header formatting, and edge case handling.
+      File I/O can be mocked or tested with temporary directories.
+
+    critical_properties:
+      - "CSV output is valid and parseable by standard CSV readers"
+      - "All frame fields are included in output"
+      - "NaN/Infinity values are handled correctly"
+      - "Filename follows existing naming convention"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: false
+      integration_testing: false
+
+    estimated_test_count: 3
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 3
+        reason: "May leverage serialization for CSV formatting"
+
+    enables_start_of: []
+
+    parallel_with:
+      - 4
+      - 5
+
+  acceptance_criteria:
+    - "Export button appears in backtesting UI alongside existing exports"
+    - "CSV file generated with all frame data"
+    - "Header row includes clear column names"
+    - "Filename follows pattern: backtest_equity_{ticker}_{timeframe}_{date}_{timestamp}.csv"
+    - "NaN/Infinity values handled appropriately"
+    - "File opens correctly in Excel and other CSV tools"
+    - "Export works for both candle and tick mode backtests"
+
+  risk_assessment:
+    complexity_risk: "low"
+    integration_risk: "low"
+    testing_risk: "low"
+
+    concerns: []
+
+  notes:
+    - "Consider adding option to export specific time ranges"
+    - "May want to include strategy parameters in CSV metadata rows"
+    - "Large tick-mode backtests may generate very large CSV files"
+
+---
+
+task:
+  id: 7
+  name: "Implement Backtest Comparison Mode"
+
+  overview:
+    purpose: |
+      Enable users to load and compare multiple backtest results side-by-side, displaying
+      their equity curves on the same chart and showing comparative metrics. This facilitates
+      strategy optimization by allowing direct visual and quantitative comparison of different
+      configurations.
+
+    motivation: |
+      Strategy development involves testing many parameter combinations. Without comparison
+      tools, users must manually record and compare results across separate runs. A dedicated
+      comparison mode streamlines this workflow, making it easy to identify which configurations
+      perform best across different metrics.
+
+    outcome: |
+      Users can select 2-4 saved backtests to display simultaneously. Equity curves render
+      with different colors on a single chart. A comparison table shows key metrics side-by-side
+      with highlighting for best/worst values. Users can toggle curves on/off and adjust
+      visual styling.
+
+  scope_summary:
+    description: "Adds multi-result display with overlay chart and comparison table"
+    files_affected: 4
+    functions_added: 10
+    tests_required: 6
+    complexity: "complex"
+    estimated_effort: "2-3 days"
+
+  key_components:
+    - component: "Comparison mode state management"
+      type: "struct"
+      purpose: "Manages multiple loaded results and comparison settings"
+
+    - component: "Multi-curve equity chart"
+      type: "UI component"
+      purpose: "Renders multiple equity curves with different colors"
+
+    - component: "Comparison metrics table"
+      type: "UI component"
+      purpose: "Displays metrics side-by-side with highlighting"
+
+    - component: "Result selector"
+      type: "UI component"
+      purpose: "Allows choosing which results to compare"
+
+    - component: "Color assignment system"
+      type: "function"
+      purpose: "Assigns distinct colors to each equity curve"
+
+    - component: "Curve toggle controls"
+      type: "UI component"
+      purpose: "Show/hide individual curves in comparison view"
+
+  implementation_hints:
+    approach: |
+      Extend the existing EquityCurveIndicator to support multiple data series with different
+      colors. Create a new comparison view that coexists with single-result view. Store
+      multiple BacktestResults in state. Use a table layout for metrics comparison with
+      conditional formatting for best/worst values.
+
+    key_considerations:
+      - "Y-axis scaling must accommodate all curves - use min/max across all datasets"
+      - "Distinguish curves with high-contrast colors for visibility"
+      - "Handle mismatched time ranges - align by timestamp or show full extent"
+      - "Performance may degrade with 3-4 large tick-mode backtests displayed"
+      - "Consider memory usage with multiple full result sets loaded"
+
+    integration_points:
+      - "Extends existing equity curve visualization infrastructure"
+      - "Uses load results functionality from Task 5"
+      - "Integrates with backtesting screen state management"
+      - "May require modifications to EquityCurveIndicator rendering logic"
+
+  testing_overview:
+    strategy: "integration"
+
+    rationale: |
+      Comparison mode involves complex interactions between result loading, chart rendering,
+      and UI state management. Integration tests verify that multiple results display correctly
+      and metrics comparison logic works properly across different scenarios.
+
+    critical_properties:
+      - "All selected curves render without overlapping/clipping issues"
+      - "Y-axis scaling accommodates all curves properly"
+      - "Metrics comparison highlights correct best/worst values"
+      - "Memory usage remains reasonable with multiple results loaded"
+
+    verification_needs:
+      formal_verification: false
+      property_testing: false
+      concurrency_testing: false
+      integration_testing: true
+
+    estimated_test_count: 6
+
+  dependencies:
+    requires_completion_of:
+      - task_id: 5
+        reason: "Needs ability to load multiple results"
+
+    enables_start_of: []
+
+    parallel_with: []
+
+  acceptance_criteria:
+    - "Users can select 2-4 backtests for comparison"
+    - "Equity curves display with distinct colors on single chart"
+    - "Y-axis scales appropriately for all curves"
+    - "Comparison table shows all key metrics side-by-side"
+    - "Best/worst values highlighted in metrics table"
+    - "Toggle controls show/hide individual curves"
+    - "Legend identifies which color corresponds to which result"
+    - "Performance remains acceptable with 3-4 results loaded"
+
+  risk_assessment:
+    complexity_risk: "high"
+    integration_risk: "high"
+    testing_risk: "medium"
+
+    concerns:
+      - "Rendering performance may degrade with multiple large datasets"
+      - "Color selection must ensure sufficient contrast for all combinations"
+      - "Time range misalignment between results needs careful handling"
+      - "Memory usage could be problematic with multiple tick-mode backtests"
+
+  notes:
+    - "Consider adding statistical comparison tests (t-test, etc.) in future"
+    - "May want to support exporting comparison results to CSV/PDF"
+    - "Could add interactive features like clicking curve to highlight in table"
+    - "Consider adding normalization option to compare percentage returns vs absolute"

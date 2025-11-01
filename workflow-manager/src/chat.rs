@@ -10,6 +10,7 @@ use tokio::sync::{mpsc, Mutex};
 use workflow_manager_sdk::WorkflowRuntime;
 
 use crate::mcp_tools::create_workflow_mcp_server;
+use crate::app::{AppCommand, TaskRegistry};
 
 /// Initialization result from background task
 pub enum InitResult {
@@ -90,6 +91,10 @@ pub struct ChatInterface {
     /// Initialization state
     pub initialized: bool,
     pub init_error: Option<String>,
+    /// Command sender for App communication
+    command_tx: mpsc::UnboundedSender<AppCommand>,
+    /// Task registry for background task cleanup
+    task_registry: TaskRegistry,
 }
 
 impl ChatInterface {
@@ -97,6 +102,8 @@ impl ChatInterface {
     pub fn new(
         runtime: Arc<dyn WorkflowRuntime>,
         history: Arc<Mutex<crate::models::WorkflowHistory>>,
+        command_tx: mpsc::UnboundedSender<AppCommand>,
+        task_registry: TaskRegistry,
         tokio_handle: tokio::runtime::Handle,
     ) -> Self {
         let mut chat = Self {
@@ -117,10 +124,12 @@ impl ChatInterface {
             tokio_handle: tokio_handle.clone(),
             initialized: false,
             init_error: None,
+            command_tx: command_tx.clone(),
+            task_registry: task_registry.clone(),
         };
 
         // Start initialization in background
-        chat.start_initialization(runtime, history, tokio_handle);
+        chat.start_initialization(runtime, history, command_tx, task_registry, tokio_handle);
 
         chat
     }
@@ -130,6 +139,8 @@ impl ChatInterface {
         &mut self,
         runtime: Arc<dyn WorkflowRuntime>,
         history: Arc<Mutex<crate::models::WorkflowHistory>>,
+        command_tx: mpsc::UnboundedSender<AppCommand>,
+        task_registry: TaskRegistry,
         tokio_handle: tokio::runtime::Handle,
     ) {
         // Create channel for initialization result
@@ -138,7 +149,7 @@ impl ChatInterface {
 
         // Spawn initialization task
         tokio_handle.spawn(async move {
-            let result = Self::initialize_internal(runtime, history).await;
+            let result = Self::initialize_internal(runtime, history, command_tx, task_registry).await;
             let _ = tx.send(result);
         });
     }
@@ -147,9 +158,11 @@ impl ChatInterface {
     async fn initialize_internal(
         runtime: Arc<dyn WorkflowRuntime>,
         history: Arc<Mutex<crate::models::WorkflowHistory>>,
+        command_tx: mpsc::UnboundedSender<AppCommand>,
+        task_registry: TaskRegistry,
     ) -> InitResult {
         // Create MCP server with workflow tools
-        let mcp_server = create_workflow_mcp_server(runtime, history);
+        let mcp_server = create_workflow_mcp_server(runtime, history, command_tx, task_registry);
 
         // Register MCP server
         let mut mcp_servers = HashMap::new();

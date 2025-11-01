@@ -47,7 +47,24 @@ fn main() -> Result<()> {
 
 fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
     loop {
-        // Poll all running tabs for output
+        // 1. Process pending commands (non-blocking) with error handling
+        while let Ok(cmd) = app.command_rx.try_recv() {
+            if let Err(e) = app.handle_command(cmd.clone()) {
+                // Log to stderr for debugging
+                eprintln!("Error handling command {:?}: {}", cmd, e);
+
+                // Show error to user in TUI
+                app.notifications.error(
+                    "Command Failed",
+                    format!("Failed to process command: {}", e)
+                );
+            }
+        }
+
+        // 2. Cleanup expired notifications
+        app.notifications.cleanup_expired();
+
+        // 3. Poll all running tabs for output
         app.poll_all_tabs();
 
         // Poll chat for initialization and responses
@@ -501,6 +518,12 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
         if app.should_quit {
             // Save session before quitting
             app.save_session();
+
+            // Cancel all background tasks before exit
+            app.tokio_runtime.block_on(async {
+                app.task_registry.cancel_everything().await;
+            });
+
             break;
         }
     }

@@ -1,0 +1,12 @@
+{"type":"phase_started","phase":3,"name":"Validate YAML","total_phases":5}
+{"type":"task_started","phase":3,"task_id":"validate_initial","description":"Initial YAML validation scan","total_tasks":null}
+{"type":"task_completed","task_id":"validate_initial","result":"Found 0 files with errors"}
+{"type":"phase_completed","phase":3,"name":"Validate YAML"}
+{"type":"phase_started","phase":3,"name":"Validate YAML","total_phases":5}
+{"type":"task_started","phase":3,"task_id":"validate_initial","description":"Initial YAML validation scan","total_tasks":null}
+{"type":"task_completed","task_id":"validate_initial","result":"Found 0 files with errors"}
+{"type":"phase_completed","phase":3,"name":"Validate YAML"}
+{"type":"phase_started","phase":3,"name":"Validate YAML","total_phases":5}
+{"type":"task_started","phase":3,"task_id":"validate_initial","description":"Initial YAML validation scan","total_tasks":null}
+{"type":"task_completed","task_id":"validate_initial","result":"Found 0 files with errors"}
+{"type":"phase_completed","phase":3,"name":"Validate YAML"}
