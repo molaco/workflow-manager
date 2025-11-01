@@ -137,10 +137,68 @@ impl App {
                 anyhow!("Tab with handle {} not found", handle_id)
             })?;
 
-        // Process log based on type (use existing logic from workflow_ops.rs)
-        App::handle_workflow_event(log, &tab.workflow_phases);
+        // Update structured logs (phases/tasks/agents)
+        App::handle_workflow_event(log.clone(), &tab.workflow_phases);
+
+        // ALSO update raw output buffer (for Raw Output pane)
+        if let Ok(mut output) = tab.workflow_output.lock() {
+            let formatted = Self::format_workflow_log(&log);
+            if !formatted.is_empty() {
+                output.push(formatted);
+            }
+        }
 
         Ok(())
+    }
+
+    /// Format a WorkflowLog for display in raw output
+    fn format_workflow_log(log: &WorkflowLog) -> String {
+        match log {
+            WorkflowLog::PhaseStarted { phase, name, total_phases } => {
+                format!("📋 Phase {}/{}: {}", phase + 1, total_phases, name)
+            }
+            WorkflowLog::PhaseCompleted { phase, name } => {
+                format!("✅ Phase {} completed: {}", phase + 1, name)
+            }
+            WorkflowLog::PhaseFailed { phase, name, error } => {
+                format!("❌ Phase {} failed: {} - {}", phase + 1, name, error)
+            }
+            WorkflowLog::TaskStarted { task_id, description, .. } => {
+                format!("  ▶ Task {}: {}", task_id, description)
+            }
+            WorkflowLog::TaskProgress { task_id, message } => {
+                format!("    • [{}] {}", task_id, message)
+            }
+            WorkflowLog::TaskCompleted { task_id, result } => {
+                if let Some(r) = result {
+                    format!("  ✓ Task {} completed: {}", task_id, r)
+                } else {
+                    format!("  ✓ Task {} completed", task_id)
+                }
+            }
+            WorkflowLog::TaskFailed { task_id, error } => {
+                format!("  ✗ Task {} failed: {}", task_id, error)
+            }
+            WorkflowLog::AgentStarted { agent_name, description, .. } => {
+                format!("    🤖 Agent '{}': {}", agent_name, description)
+            }
+            WorkflowLog::AgentMessage { agent_name, message, .. } => {
+                format!("       [{}] {}", agent_name, message)
+            }
+            WorkflowLog::AgentCompleted { agent_name, result, .. } => {
+                if let Some(r) = result {
+                    format!("    ✓ Agent '{}' completed: {}", agent_name, r)
+                } else {
+                    format!("    ✓ Agent '{}' completed", agent_name)
+                }
+            }
+            WorkflowLog::AgentFailed { agent_name, error, .. } => {
+                format!("    ✗ Agent '{}' failed: {}", agent_name, error)
+            }
+            WorkflowLog::StateFileCreated { phase, file_path, description } => {
+                format!("  💾 Phase {}: Created {} - {}", phase + 1, file_path, description)
+            }
+        }
     }
 
     /// Update tab status
