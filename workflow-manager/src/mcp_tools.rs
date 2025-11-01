@@ -1,11 +1,17 @@
 use claude_agent_sdk::mcp::{SdkMcpServer, SdkMcpTool, ToolResult};
 use serde_json::json;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 use workflow_manager_sdk::WorkflowRuntime;
 
+use crate::models::WorkflowHistory;
+
 /// Create the workflow manager MCP server with all tools
-pub fn create_workflow_mcp_server(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpServer {
+pub fn create_workflow_mcp_server(
+    runtime: Arc<dyn WorkflowRuntime>,
+    history: Arc<Mutex<WorkflowHistory>>,
+) -> SdkMcpServer {
     SdkMcpServer::new("workflow_manager")
         .version("1.0.0")
         .tool(list_workflows_tool(runtime.clone()))
@@ -13,6 +19,7 @@ pub fn create_workflow_mcp_server(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpSe
         .tool(get_workflow_logs_tool(runtime.clone()))
         .tool(get_workflow_status_tool(runtime.clone()))
         .tool(cancel_workflow_tool(runtime))
+        .tool(get_workflow_history_tool(history))
 }
 
 /// Tool: list_workflows
@@ -221,6 +228,81 @@ fn cancel_workflow_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
     )
 }
 
+/// Tool: get_workflow_history
+fn get_workflow_history_tool(history: Arc<Mutex<WorkflowHistory>>) -> SdkMcpTool {
+    SdkMcpTool::new(
+        "get_workflow_history",
+        "Get previous parameter values used for a workflow. Returns the history of field values from past executions.",
+        json!({
+            "type": "object",
+            "properties": {
+                "workflow_id": {
+                    "type": "string",
+                    "description": "The ID of the workflow to get history for"
+                },
+                "field_name": {
+                    "type": "string",
+                    "description": "Optional: Filter to a specific field name. If omitted, returns all field history."
+                }
+            },
+            "required": ["workflow_id"]
+        }),
+        move |params| {
+            let history = history.clone();
+            Box::pin(async move {
+                let workflow_id = match params.get("workflow_id").and_then(|v| v.as_str()) {
+                    Some(id) => id,
+                    None => return Ok(ToolResult::error("Missing workflow_id")),
+                };
+
+                let field_name = params.get("field_name").and_then(|v| v.as_str());
+
+                let history_lock = history.lock().await;
+
+                // Get workflow history
+                let workflow_history = match history_lock.workflows.get(workflow_id) {
+                    Some(h) => h,
+                    None => {
+                        // No history for this workflow yet
+                        let result = json!({
+                            "workflow_id": workflow_id,
+                            "field_history": {}
+                        });
+                        return Ok(ToolResult::text(
+                            serde_json::to_string_pretty(&result).unwrap(),
+                        ));
+                    }
+                };
+
+                // Filter by field_name if provided
+                let field_history = if let Some(field) = field_name {
+                    // Return only the specified field
+                    let mut filtered = serde_json::Map::new();
+                    if let Some(values) = workflow_history.get(field) {
+                        filtered.insert(field.to_string(), json!(values));
+                    }
+                    filtered
+                } else {
+                    // Return all fields
+                    workflow_history
+                        .iter()
+                        .map(|(k, v)| (k.clone(), json!(v)))
+                        .collect()
+                };
+
+                let result = json!({
+                    "workflow_id": workflow_id,
+                    "field_history": field_history
+                });
+
+                Ok(ToolResult::text(
+                    serde_json::to_string_pretty(&result).unwrap(),
+                ))
+            })
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,7 +311,8 @@ mod tests {
     #[tokio::test]
     async fn test_create_mcp_server() {
         let runtime = Arc::new(ProcessBasedRuntime::new().unwrap());
-        let server = create_workflow_mcp_server(runtime);
+        let history = Arc::new(Mutex::new(WorkflowHistory::default()));
+        let server = create_workflow_mcp_server(runtime, history);
         println!("MCP Server created: {}", server.name());
     }
 }

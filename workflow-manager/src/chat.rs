@@ -83,6 +83,8 @@ pub struct ChatInterface {
     pub active_pane: ActivePane,
     /// Runtime for workflow operations
     runtime: Arc<dyn WorkflowRuntime>,
+    /// Workflow history for parameter suggestions
+    history: Arc<Mutex<crate::models::WorkflowHistory>>,
     /// Tokio runtime handle for spawning tasks
     tokio_handle: tokio::runtime::Handle,
     /// Initialization state
@@ -92,7 +94,11 @@ pub struct ChatInterface {
 
 impl ChatInterface {
     /// Create a new chat interface and start background initialization
-    pub fn new(runtime: Arc<dyn WorkflowRuntime>, tokio_handle: tokio::runtime::Handle) -> Self {
+    pub fn new(
+        runtime: Arc<dyn WorkflowRuntime>,
+        history: Arc<Mutex<crate::models::WorkflowHistory>>,
+        tokio_handle: tokio::runtime::Handle,
+    ) -> Self {
         let mut chat = Self {
             messages: Vec::new(),
             input_buffer: String::new(),
@@ -107,34 +113,43 @@ impl ChatInterface {
             log_scroll: 0,
             active_pane: ActivePane::ChatMessages,
             runtime: runtime.clone(),
+            history: history.clone(),
             tokio_handle: tokio_handle.clone(),
             initialized: false,
             init_error: None,
         };
 
         // Start initialization in background
-        chat.start_initialization(runtime, tokio_handle);
+        chat.start_initialization(runtime, history, tokio_handle);
 
         chat
     }
 
     /// Start initialization in background
-    fn start_initialization(&mut self, runtime: Arc<dyn WorkflowRuntime>, tokio_handle: tokio::runtime::Handle) {
+    fn start_initialization(
+        &mut self,
+        runtime: Arc<dyn WorkflowRuntime>,
+        history: Arc<Mutex<crate::models::WorkflowHistory>>,
+        tokio_handle: tokio::runtime::Handle,
+    ) {
         // Create channel for initialization result
         let (tx, rx) = mpsc::unbounded_channel();
         self.init_rx = Some(rx);
 
         // Spawn initialization task
         tokio_handle.spawn(async move {
-            let result = Self::initialize_internal(runtime).await;
+            let result = Self::initialize_internal(runtime, history).await;
             let _ = tx.send(result);
         });
     }
 
     /// Internal initialization logic (runs in background task)
-    async fn initialize_internal(runtime: Arc<dyn WorkflowRuntime>) -> InitResult {
+    async fn initialize_internal(
+        runtime: Arc<dyn WorkflowRuntime>,
+        history: Arc<Mutex<crate::models::WorkflowHistory>>,
+    ) -> InitResult {
         // Create MCP server with workflow tools
-        let mcp_server = create_workflow_mcp_server(runtime);
+        let mcp_server = create_workflow_mcp_server(runtime, history);
 
         // Register MCP server
         let mut mcp_servers = HashMap::new();

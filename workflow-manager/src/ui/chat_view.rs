@@ -11,6 +11,117 @@ use ratatui::{
 use crate::chat::{self, ActivePane};
 use crate::models::App;
 
+/// Parse message content with basic markdown formatting into styled lines
+fn format_message_content(content: &str) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Skip completely empty lines but preserve them as blank lines
+        if trimmed.is_empty() {
+            lines.push(Line::from(""));
+            continue;
+        }
+
+        // Detect list items (numbered or bulleted)
+        let (is_list, indent_level, list_content) = if let Some(rest) = trimmed.strip_prefix("**") {
+            // Bold headers (e.g., "**Workflow Management Tools:**")
+            if let Some(end_idx) = rest.find("**") {
+                let bold_text = &rest[..end_idx];
+                let after = &rest[end_idx + 2..];
+
+                let mut spans = vec![
+                    Span::styled(
+                        format!("  {}", bold_text),
+                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                    ),
+                ];
+
+                if !after.is_empty() {
+                    spans.push(Span::styled(
+                        after.to_string(),
+                        Style::default().fg(Color::White),
+                    ));
+                }
+
+                lines.push(Line::from(spans));
+                continue;
+            }
+            (false, 0, trimmed)
+        } else if let Some(rest) = trimmed.strip_prefix(|c: char| c.is_ascii_digit()) {
+            // Numbered list (e.g., "1. Item")
+            if let Some(rest) = rest.strip_prefix(". ") {
+                (true, 1, rest)
+            } else {
+                (false, 0, trimmed)
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("- ") {
+            // Bullet list
+            (true, 1, rest)
+        } else if let Some(rest) = trimmed.strip_prefix("* ") {
+            // Asterisk list
+            (true, 1, rest)
+        } else {
+            (false, 0, trimmed)
+        };
+
+        // Format the content with inline markdown
+        let formatted_spans = if list_content.contains("**") {
+            // Parse inline bold
+            let mut spans = Vec::new();
+            let mut remaining = list_content;
+            let indent = "  ".repeat(indent_level);
+
+            if is_list {
+                spans.push(Span::raw(format!("{}• ", indent)));
+            } else {
+                spans.push(Span::raw(format!("{}", indent)));
+            }
+
+            while let Some(start) = remaining.find("**") {
+                // Add text before bold
+                if start > 0 {
+                    spans.push(Span::raw(remaining[..start].to_string()));
+                }
+
+                // Find end of bold
+                if let Some(end) = remaining[start + 2..].find("**") {
+                    let bold_text = &remaining[start + 2..start + 2 + end];
+                    spans.push(Span::styled(
+                        bold_text.to_string(),
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    ));
+                    remaining = &remaining[start + 2 + end + 2..];
+                } else {
+                    // No closing **, just add the rest
+                    spans.push(Span::raw(remaining[start..].to_string()));
+                    break;
+                }
+            }
+
+            // Add any remaining text
+            if !remaining.is_empty() {
+                spans.push(Span::raw(remaining.to_string()));
+            }
+
+            spans
+        } else {
+            // No inline formatting
+            let indent = "  ".repeat(indent_level);
+            if is_list {
+                vec![Span::raw(format!("{}• {}", indent, list_content))]
+            } else {
+                vec![Span::raw(format!("{}{}", indent, list_content))]
+            }
+        };
+
+        lines.push(Line::from(formatted_spans));
+    }
+
+    lines
+}
+
 pub fn render_chat(f: &mut Frame, area: Rect, app: &App) {
     let chat = match &app.chat {
         Some(c) => c,
@@ -97,10 +208,14 @@ pub fn render_chat(f: &mut Frame, area: Rect, app: &App) {
                 format!("{}: ", role_text),
                 role_style,
             )]));
-            message_lines.push(Line::from(msg.content.clone()));
+
+            // Use formatted message content with markdown parsing
+            let formatted_lines = format_message_content(&msg.content);
+            message_lines.extend(formatted_lines);
 
             // Show tool calls (simplified - details in logs pane)
             if !msg.tool_calls.is_empty() {
+                message_lines.push(Line::from(""));
                 message_lines.push(Line::from(vec![
                     Span::styled(
                         format!("  🔧 {} tool(s) used (see logs →)", msg.tool_calls.len()),
