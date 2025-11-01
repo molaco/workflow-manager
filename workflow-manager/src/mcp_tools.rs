@@ -6,16 +6,23 @@ use uuid::Uuid;
 use workflow_manager_sdk::WorkflowRuntime;
 
 use crate::models::WorkflowHistory;
+use crate::app::{AppCommand, NotificationLevel, TaskRegistry};
 
 /// Create the workflow manager MCP server with all tools
 pub fn create_workflow_mcp_server(
     runtime: Arc<dyn WorkflowRuntime>,
     history: Arc<Mutex<WorkflowHistory>>,
+    command_tx: tokio::sync::mpsc::UnboundedSender<AppCommand>,
+    task_registry: TaskRegistry,
 ) -> SdkMcpServer {
     SdkMcpServer::new("workflow_manager")
         .version("1.0.0")
         .tool(list_workflows_tool(runtime.clone()))
-        .tool(execute_workflow_tool(runtime.clone()))
+        .tool(execute_workflow_tool(
+            runtime.clone(),
+            command_tx.clone(),
+            task_registry.clone(),
+        ))
         .tool(get_workflow_logs_tool(runtime.clone()))
         .tool(get_workflow_status_tool(runtime.clone()))
         .tool(cancel_workflow_tool(runtime))
@@ -47,10 +54,14 @@ fn list_workflows_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
 }
 
 /// Tool: execute_workflow
-fn execute_workflow_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
+fn execute_workflow_tool(
+    runtime: Arc<dyn WorkflowRuntime>,
+    command_tx: tokio::sync::mpsc::UnboundedSender<AppCommand>,
+    task_registry: TaskRegistry,
+) -> SdkMcpTool {
     SdkMcpTool::new(
         "execute_workflow",
-        "Execute a workflow with provided parameters",
+        "Execute a workflow with provided parameters. Creates a tab in the TUI and streams logs in real-time.",
         json!({
             "type": "object",
             "properties": {
@@ -61,6 +72,9 @@ fn execute_workflow_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
         }),
         move |params| {
             let runtime = runtime.clone();
+            let command_tx = command_tx.clone();
+            let task_registry = task_registry.clone();
+
             Box::pin(async move {
                 let workflow_id = match params.get("workflow_id").and_then(|v| v.as_str()) {
                     Some(id) => id,
@@ -77,18 +91,104 @@ fn execute_workflow_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
                     .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
                     .collect();
 
-                match runtime.execute_workflow(workflow_id, params_map).await {
+                // Execute workflow via runtime
+                match runtime.execute_workflow(workflow_id, params_map.clone()).await {
                     Ok(handle) => {
+                        let handle_id = *handle.id();
+
+                        // 1. Send command to create tab in TUI
+                        if let Err(e) = command_tx.send(AppCommand::CreateTab {
+                            workflow_id: workflow_id.to_string(),
+                            params: params_map,
+                            handle_id,
+                        }) {
+                            eprintln!("Failed to send CreateTab command: {}", e);
+                            return Ok(ToolResult::error("Failed to create tab"));
+                        }
+
+                        // 2. Send success notification
+                        let _ = command_tx.send(AppCommand::ShowNotification {
+                            level: NotificationLevel::Success,
+                            title: "Workflow Started".to_string(),
+                            message: format!("Executing {}", workflow_id),
+                        });
+
+                        // 3. Spawn task to stream logs to tab with rate limiting
+                        let log_task = tokio::spawn({
+                            let runtime_clone = runtime.clone();
+                            let command_tx_clone = command_tx.clone();
+
+                            async move {
+                                if let Ok(mut logs_rx) = runtime_clone.subscribe_logs(&handle_id).await {
+                                    // Rate limiting for high-frequency logs
+                                    let mut last_sent = tokio::time::Instant::now();
+                                    let min_interval = tokio::time::Duration::from_millis(16); // ~60 FPS
+                                    let mut buffered_logs = Vec::new();
+
+                                    while let Ok(log) = logs_rx.recv().await {
+                                        buffered_logs.push(log);
+
+                                        let now = tokio::time::Instant::now();
+
+                                        // Send batch if enough time passed OR buffer is full
+                                        if now.duration_since(last_sent) >= min_interval
+                                           || buffered_logs.len() > 100 {
+                                            // Send batched logs
+                                            for log in buffered_logs.drain(..) {
+                                                if command_tx_clone.send(AppCommand::AppendTabLog {
+                                                    handle_id,
+                                                    log,
+                                                }).is_err() {
+                                                    return; // App shut down
+                                                }
+                                            }
+                                            last_sent = now;
+                                        }
+                                    }
+
+                                    // Send remaining buffered logs
+                                    for log in buffered_logs {
+                                        let _ = command_tx_clone.send(AppCommand::AppendTabLog {
+                                            handle_id,
+                                            log,
+                                        });
+                                    }
+                                }
+
+                                // When logs stream ends, update status
+                                if let Ok(status) = runtime_clone.get_status(&handle_id).await {
+                                    let _ = command_tx_clone.send(AppCommand::UpdateTabStatus {
+                                        handle_id,
+                                        status,
+                                    });
+                                }
+                            }
+                        });
+
+                        // 4. Register task for cleanup
+                        task_registry.register(handle_id, log_task).await;
+
+                        // Return success to Claude
                         let result = json!({
-                            "handle_id": handle.id().to_string(),
+                            "handle_id": handle_id.to_string(),
                             "workflow_id": handle.workflow_id,
-                            "status": "running"
+                            "status": "running",
+                            "message": "Workflow started and tab created in TUI"
                         });
                         Ok(ToolResult::text(
                             serde_json::to_string_pretty(&result).unwrap(),
                         ))
                     }
-                    Err(e) => Ok(ToolResult::error(format!("Execution failed: {}", e))),
+                    Err(e) => {
+                        // Send error notification
+                        let _ = command_tx.send(AppCommand::ShowNotification {
+                            level: NotificationLevel::Error,
+                            title: "Workflow Failed".to_string(),
+                            message: format!("Failed to start {}: {}", workflow_id, e),
+                        });
+
+                        Ok(ToolResult::error(format!("Execution failed: {}", e)))
+                    }
                 }
             })
         },
@@ -312,7 +412,9 @@ mod tests {
     async fn test_create_mcp_server() {
         let runtime = Arc::new(ProcessBasedRuntime::new().unwrap());
         let history = Arc::new(Mutex::new(WorkflowHistory::default()));
-        let server = create_workflow_mcp_server(runtime, history);
+        let (command_tx, _command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let task_registry = TaskRegistry::new();
+        let server = create_workflow_mcp_server(runtime, history, command_tx, task_registry);
         println!("MCP Server created: {}", server.name());
     }
 }
