@@ -113,45 +113,22 @@ fn execute_workflow_tool(
                             message: format!("Executing {}", workflow_id),
                         });
 
-                        // 3. Spawn task to stream logs to tab with rate limiting
+                        // 3. Spawn task to stream logs to tab (no rate limiting - send immediately)
                         let log_task = tokio::spawn({
                             let runtime_clone = runtime.clone();
                             let command_tx_clone = command_tx.clone();
 
                             async move {
                                 if let Ok(mut logs_rx) = runtime_clone.subscribe_logs(&handle_id).await {
-                                    // Rate limiting for high-frequency logs
-                                    let mut last_sent = tokio::time::Instant::now();
-                                    let min_interval = tokio::time::Duration::from_millis(16); // ~60 FPS
-                                    let mut buffered_logs = Vec::new();
-
+                                    // Stream logs immediately as they arrive
                                     while let Ok(log) = logs_rx.recv().await {
-                                        buffered_logs.push(log);
-
-                                        let now = tokio::time::Instant::now();
-
-                                        // Send batch if enough time passed OR buffer is full
-                                        if now.duration_since(last_sent) >= min_interval
-                                           || buffered_logs.len() > 100 {
-                                            // Send batched logs
-                                            for log in buffered_logs.drain(..) {
-                                                if command_tx_clone.send(AppCommand::AppendTabLog {
-                                                    handle_id,
-                                                    log,
-                                                }).is_err() {
-                                                    return; // App shut down
-                                                }
-                                            }
-                                            last_sent = now;
-                                        }
-                                    }
-
-                                    // Send remaining buffered logs
-                                    for log in buffered_logs {
-                                        let _ = command_tx_clone.send(AppCommand::AppendTabLog {
+                                        if command_tx_clone.send(AppCommand::AppendTabLog {
                                             handle_id,
                                             log,
-                                        });
+                                        }).is_err() {
+                                            // App shut down or tab closed
+                                            return;
+                                        }
                                     }
                                 }
 
