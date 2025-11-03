@@ -717,6 +717,11 @@ impl App {
                         p.output_files.push((file_path, description));
                     }
                 }
+                WorkflowLog::RawOutput { .. } => {
+                    // Raw output is handled separately in format_workflow_log()
+                    // for display in the raw output pane. This function only updates
+                    // the structured log view (phases/tasks/agents tree).
+                }
             }
         }
     }

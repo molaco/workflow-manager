@@ -193,6 +193,11 @@ pub enum WorkflowLog {
         file_path: String,
         description: String,
     },
+    /// Raw output from workflow process (stdout/stderr)
+    RawOutput {
+        stream: String,  // "stdout" or "stderr"
+        line: String,
+    },
 }
 
 impl WorkflowLog {

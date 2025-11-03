@@ -165,12 +165,20 @@ impl WorkflowRuntime for ProcessBasedRuntime {
         self.executions.lock().unwrap().insert(exec_id, state);
 
         // Spawn stderr parser task
-        let executions = self.executions.clone();
-        let exec_id_clone = exec_id;
-
+        let executions_stderr = self.executions.clone();
+        let exec_id_stderr = exec_id;
         tokio::spawn(async move {
-            if let Err(e) = parse_workflow_stderr(exec_id_clone, executions).await {
+            if let Err(e) = parse_workflow_stderr(exec_id_stderr, executions_stderr).await {
                 eprintln!("Error parsing workflow stderr: {}", e);
+            }
+        });
+
+        // Spawn stdout parser task
+        let executions_stdout = self.executions.clone();
+        let exec_id_stdout = exec_id;
+        tokio::spawn(async move {
+            if let Err(e) = parse_workflow_stdout(exec_id_stdout, executions_stdout).await {
+                eprintln!("Error parsing workflow stdout: {}", e);
             }
         });
 
@@ -211,7 +219,7 @@ impl WorkflowRuntime for ProcessBasedRuntime {
     }
 }
 
-/// Parse workflow stderr for __WF_EVENT__:<JSON> messages
+/// Parse workflow stderr for __WF_EVENT__:<JSON> messages and raw output
 async fn parse_workflow_stderr(
     exec_id: Uuid,
     executions: Arc<Mutex<HashMap<Uuid, ExecutionState>>>,
@@ -236,13 +244,19 @@ async fn parse_workflow_stderr(
 
     // Parse lines
     while let Ok(Some(line)) = lines.next_line().await {
-        if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
-            if let Ok(log) = serde_json::from_str::<WorkflowLog>(json_str) {
-                // Broadcast to subscribers
-                let execs = executions.lock().unwrap();
-                if let Some(state) = execs.get(&exec_id) {
+        let execs = executions.lock().unwrap();
+        if let Some(state) = execs.get(&exec_id) {
+            if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
+                // Structured log event
+                if let Ok(log) = serde_json::from_str::<WorkflowLog>(json_str) {
                     let _ = state.logs_tx.send(log);
                 }
+            } else {
+                // Raw stderr output
+                let _ = state.logs_tx.send(WorkflowLog::RawOutput {
+                    stream: "stderr".to_string(),
+                    line,
+                });
             }
         }
     }
@@ -251,6 +265,44 @@ async fn parse_workflow_stderr(
     let mut execs = executions.lock().unwrap();
     if let Some(state) = execs.get_mut(&exec_id) {
         state.status = WorkflowStatus::Completed;
+    }
+
+    Ok(())
+}
+
+/// Parse workflow stdout for raw output
+async fn parse_workflow_stdout(
+    exec_id: Uuid,
+    executions: Arc<Mutex<HashMap<Uuid, ExecutionState>>>,
+) -> Result<()> {
+    // Get stdout handle
+    let stdout = {
+        let mut execs = executions.lock().unwrap();
+        let state = execs
+            .get_mut(&exec_id)
+            .ok_or_else(|| anyhow!("Execution not found"))?;
+        state
+            .child
+            .as_mut()
+            .and_then(|c| c.stdout.take())
+            .ok_or_else(|| anyhow!("No stdout available"))?
+    };
+
+    // Wrap in tokio async reader
+    let stdout = tokio::process::ChildStdout::from_std(stdout)?;
+    let reader = BufReader::new(stdout);
+    let mut lines = reader.lines();
+
+    // Parse lines
+    while let Ok(Some(line)) = lines.next_line().await {
+        let execs = executions.lock().unwrap();
+        if let Some(state) = execs.get(&exec_id) {
+            // All stdout is raw output
+            let _ = state.logs_tx.send(WorkflowLog::RawOutput {
+                stream: "stdout".to_string(),
+                line,
+            });
+        }
     }
 
     Ok(())

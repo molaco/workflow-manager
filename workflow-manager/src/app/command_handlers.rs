@@ -198,6 +198,14 @@ impl App {
             WorkflowLog::StateFileCreated { phase, file_path, description } => {
                 format!("  💾 Phase {}: Created {} - {}", phase + 1, file_path, description)
             }
+            WorkflowLog::RawOutput { stream, line } => {
+                // Match manual workflow behavior: stderr gets "ERROR:" prefix
+                if stream == "stderr" {
+                    format!("ERROR: {}", line)
+                } else {
+                    line.to_string()
+                }
+            }
         }
     }
 
