@@ -198,17 +198,10 @@ fn get_workflow_logs_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
                     Err(e) => return Ok(ToolResult::error(format!("Invalid UUID: {}", e))),
                 };
 
-                let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+                let limit = params.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
 
-                match runtime.subscribe_logs(&handle_id).await {
-                    Ok(mut logs_rx) => {
-                        let mut logs = Vec::new();
-                        while logs.len() < limit {
-                            match logs_rx.try_recv() {
-                                Ok(log) => logs.push(log),
-                                Err(_) => break,
-                            }
-                        }
+                match runtime.get_logs(&handle_id, limit).await {
+                    Ok(logs) => {
                         match serde_json::to_string_pretty(&logs) {
                             Ok(json) => Ok(ToolResult::text(json)),
                             Err(e) => Ok(ToolResult::error(format!("Serialization error: {}", e))),

@@ -422,11 +422,14 @@ pub trait WorkflowRuntime: Send + Sync {
         params: HashMap<String, String>,
     ) -> WorkflowResult<WorkflowHandle>;
 
-    /// Subscribe to logs from a running workflow
+    /// Subscribe to logs from a running workflow (real-time stream)
     async fn subscribe_logs(
         &self,
         handle_id: &Uuid,
     ) -> WorkflowResult<tokio::sync::broadcast::Receiver<WorkflowLog>>;
+
+    /// Get historical logs from a workflow execution (for MCP tools)
+    async fn get_logs(&self, handle_id: &Uuid, limit: Option<usize>) -> WorkflowResult<Vec<WorkflowLog>>;
 
     /// Get current status of a running workflow
     async fn get_status(&self, handle_id: &Uuid) -> WorkflowResult<WorkflowStatus>;

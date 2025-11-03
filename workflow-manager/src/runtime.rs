@@ -20,6 +20,8 @@ struct ExecutionState {
     child: Option<Child>,
     logs_tx: broadcast::Sender<WorkflowLog>,
     binary_path: PathBuf,
+    /// Persistent buffer of all logs for historical retrieval
+    logs_buffer: Arc<Mutex<Vec<WorkflowLog>>>,
 }
 
 /// Process-based workflow runtime implementation
@@ -155,12 +157,14 @@ impl WorkflowRuntime for ProcessBasedRuntime {
         let exec_id = Uuid::new_v4();
 
         // Store execution state
+        let logs_buffer = Arc::new(Mutex::new(Vec::new()));
         let state = ExecutionState {
             workflow_id: id.to_string(),
             status: WorkflowStatus::Running,
             child: Some(child),
             logs_tx: logs_tx.clone(),
             binary_path: workflow.binary_path.clone(),
+            logs_buffer: logs_buffer.clone(),
         };
         self.executions.lock().unwrap().insert(exec_id, state);
 
@@ -194,6 +198,22 @@ impl WorkflowRuntime for ProcessBasedRuntime {
             .get(handle_id)
             .ok_or_else(|| anyhow!("Execution not found: {}", handle_id))?;
         Ok(state.logs_tx.subscribe())
+    }
+
+    async fn get_logs(&self, handle_id: &Uuid, limit: Option<usize>) -> WorkflowResult<Vec<WorkflowLog>> {
+        let executions = self.executions.lock().unwrap();
+        let state = executions
+            .get(handle_id)
+            .ok_or_else(|| anyhow!("Execution not found: {}", handle_id))?;
+
+        let buffer = state.logs_buffer.lock().unwrap();
+        let logs = if let Some(limit) = limit {
+            buffer.iter().rev().take(limit).rev().cloned().collect()
+        } else {
+            buffer.clone()
+        };
+
+        Ok(logs)
     }
 
     async fn get_status(&self, handle_id: &Uuid) -> WorkflowResult<WorkflowStatus> {
@@ -246,17 +266,25 @@ async fn parse_workflow_stderr(
     while let Ok(Some(line)) = lines.next_line().await {
         let execs = executions.lock().unwrap();
         if let Some(state) = execs.get(&exec_id) {
-            if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
+            let log = if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
                 // Structured log event
-                if let Ok(log) = serde_json::from_str::<WorkflowLog>(json_str) {
-                    let _ = state.logs_tx.send(log);
-                }
+                serde_json::from_str::<WorkflowLog>(json_str).ok()
             } else {
                 // Raw stderr output
-                let _ = state.logs_tx.send(WorkflowLog::RawOutput {
+                Some(WorkflowLog::RawOutput {
                     stream: "stderr".to_string(),
                     line,
-                });
+                })
+            };
+
+            if let Some(log) = log {
+                // Broadcast to real-time subscribers
+                let _ = state.logs_tx.send(log.clone());
+
+                // Store in buffer for historical retrieval
+                if let Ok(mut buffer) = state.logs_buffer.lock() {
+                    buffer.push(log);
+                }
             }
         }
     }
@@ -298,10 +326,18 @@ async fn parse_workflow_stdout(
         let execs = executions.lock().unwrap();
         if let Some(state) = execs.get(&exec_id) {
             // All stdout is raw output
-            let _ = state.logs_tx.send(WorkflowLog::RawOutput {
+            let log = WorkflowLog::RawOutput {
                 stream: "stdout".to_string(),
                 line,
-            });
+            };
+
+            // Broadcast to real-time subscribers
+            let _ = state.logs_tx.send(log.clone());
+
+            // Store in buffer for historical retrieval
+            if let Ok(mut buffer) = state.logs_buffer.lock() {
+                buffer.push(log);
+            }
         }
     }
 
