@@ -140,11 +140,14 @@ impl App {
         // Update structured logs (phases/tasks/agents)
         App::handle_workflow_event(log.clone(), &tab.workflow_phases);
 
-        // ALSO update raw output buffer (for Raw Output pane)
-        if let Ok(mut output) = tab.workflow_output.lock() {
-            let formatted = Self::format_workflow_log(&log);
-            if !formatted.is_empty() {
-                output.push(formatted);
+        // ONLY append RawOutput to raw output buffer (actual stdout/stderr)
+        // Structured logs are already visible in the phases/tasks/agents tree
+        if let WorkflowLog::RawOutput { .. } = &log {
+            if let Ok(mut output) = tab.workflow_output.lock() {
+                let formatted = Self::format_workflow_log(&log);
+                if !formatted.is_empty() {
+                    output.push(formatted);
+                }
             }
         }
 
