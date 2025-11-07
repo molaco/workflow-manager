@@ -8,7 +8,7 @@ use workflow_manager_sdk::WorkflowDefinition;
 #[workflow(
     id = "research_agent",
     name = "Research Agent Workflow",
-    description = "Multi-phase research workflow: Analyze codebase → Generate prompts → Execute research → Validate YAML → Synthesize docs"
+    description = "Multi-phase research workflow: Analyze codebase → Validate analysis → Generate prompts → Execute research → Validate YAML → Synthesize docs"
 )]
 pub struct Args {
     /// Research objective/question
@@ -17,7 +17,7 @@ pub struct Args {
         label = "Research Objective",
         description = "[TEXT] What do you want to research about the codebase?",
         type = "text",
-        required_for_phases = "1"
+        required_for_phases = "2"
     )]
     pub input: Option<String>,
 
@@ -27,7 +27,7 @@ pub struct Args {
         label = "System Prompt",
         description = "[TEXT] Path to prompt writer system prompt file",
         type = "file_path",
-        required_for_phases = "1"
+        required_for_phases = "2"
     )]
     pub system_prompt: Option<String>,
 
@@ -37,7 +37,7 @@ pub struct Args {
         label = "Output Style",
         description = "[TEXT] Path to output style format file",
         type = "file_path",
-        required_for_phases = "1"
+        required_for_phases = "2"
     )]
     pub append: Option<String>,
 
@@ -61,46 +61,46 @@ pub struct Args {
     )]
     pub batch_size: usize,
 
-    /// Comma-separated phases to execute (0=analyze, 1=prompts, 2=research, 3=validate, 4=synthesize)
-    #[arg(long, default_value = "0,1,2,3,4")]
+    /// Comma-separated phases to execute (0=analyze, 1=validate, 2=prompts, 3=research, 4=validate_yaml, 5=synthesize)
+    #[arg(long, default_value = "0,1,2,3,4,5")]
     #[field(
         label = "Phases to Run",
-        description = "[PHASES] Select which phases to execute (0-4)",
+        description = "[PHASES] Select which phases to execute (0-5)",
         type = "phase_selector",
-        total_phases = "5"
+        total_phases = "6"
     )]
     pub phases: String,
 
-    /// Path to saved codebase analysis YAML (for resuming from Phase 1)
+    /// Path to saved codebase analysis YAML (for resuming from Phase 1 or 2)
     #[arg(long)]
     #[field(
         label = "Analysis File",
         description = "[STATE FILE] Resume with existing codebase analysis",
         type = "state_file",
         pattern = "codebase_analysis_*.yaml",
-        required_for_phases = "1"
+        required_for_phases = "1,2"
     )]
     pub analysis_file: Option<String>,
 
-    /// Path to saved prompts YAML (for resuming from Phase 2)
+    /// Path to saved prompts YAML (for resuming from Phase 3)
     #[arg(long)]
     #[field(
         label = "Prompts File",
         description = "[STATE FILE] Resume with existing research prompts",
         type = "state_file",
         pattern = "research_prompts_*.yaml",
-        required_for_phases = "2"
+        required_for_phases = "3"
     )]
     pub prompts_file: Option<String>,
 
-    /// Path to saved research results YAML (for resuming from Phase 3)
+    /// Path to saved research results YAML (for resuming from Phase 4 or 5)
     #[arg(long)]
     #[field(
         label = "Results File",
         description = "[STATE FILE] Resume with existing research results",
         type = "state_file",
         pattern = "research_results_*.yaml",
-        required_for_phases = "3,4"
+        required_for_phases = "4,5"
     )]
     pub results_file: Option<String>,
 
@@ -113,13 +113,13 @@ pub struct Args {
     )]
     pub dir: Option<String>,
 
-    /// Directory containing YAML files to validate (for Phase 3)
+    /// Directory containing YAML files to validate (for Phase 4)
     #[arg(long)]
     #[field(
         label = "Results Directory",
         description = "[TEXT] Directory containing YAML files to validate",
         type = "file_path",
-        required_for_phases = "3"
+        required_for_phases = "4"
     )]
     pub results_dir: Option<String>,
 

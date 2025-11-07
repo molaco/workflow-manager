@@ -22,10 +22,11 @@ use workflow_manager_sdk::{
 
 use crate::research::{
     phase0_analyze::analyze_codebase,
-    phase1_prompts::generate_prompts,
-    phase2_research::execute_research,
-    phase3_validate::{execute_fix_yaml, find_yaml_files, validate_yaml_file},
-    phase4_synthesize::synthesize_documentation,
+    phase1_validate_analysis::validate_codebase_analysis,
+    phase2_prompts::generate_prompts,
+    phase3_research::execute_research,
+    phase4_validate::{execute_fix_yaml, find_yaml_files, validate_yaml_file},
+    phase5_synthesize::synthesize_documentation,
     types::{CodebaseAnalysis, PromptsData, ResearchResult},
 };
 use crate::workflow_utils::{execute_task, TaskContext};
@@ -43,7 +44,7 @@ use crate::workflow_utils::{execute_task, TaskContext};
 /// // Full workflow with all phases
 /// let config = WorkflowConfig {
 ///     objective: Some("Analyze the API layer".to_string()),
-///     phases: vec![0, 1, 2, 3, 4],
+///     phases: vec![0, 1, 2, 3, 4, 5],
 ///     batch_size: 2,
 ///     dir: Some(".".to_string()),
 ///     system_prompt: Some("prompts/writer.md".to_string()),
@@ -53,27 +54,27 @@ use crate::workflow_utils::{execute_task, TaskContext};
 /// ```
 #[derive(Debug, Clone)]
 pub struct WorkflowConfig {
-    /// Research objective/question (required for Phase 1)
+    /// Research objective/question (required for Phase 2)
     pub objective: Option<String>,
-    /// Which phases to execute (0-4)
+    /// Which phases to execute (0-5)
     pub phases: Vec<u32>,
-    /// Number of concurrent agents for Phase 2 and Phase 3
+    /// Number of concurrent agents for Phase 3 and Phase 4
     pub batch_size: usize,
     /// Directory to analyze (for Phase 0)
     pub dir: Option<String>,
-    /// Path to saved codebase analysis (for resuming from Phase 1)
+    /// Path to saved codebase analysis (for resuming from Phase 1 or 2)
     pub analysis_file: Option<String>,
-    /// Path to saved prompts (for resuming from Phase 2)
+    /// Path to saved prompts (for resuming from Phase 3)
     pub prompts_file: Option<String>,
-    /// Path to saved results (for resuming from Phase 3 or 4)
+    /// Path to saved results (for resuming from Phase 4 or 5)
     pub results_file: Option<String>,
-    /// Directory containing YAML files to validate (for Phase 3)
+    /// Directory containing YAML files to validate (for Phase 4)
     pub results_dir: Option<String>,
-    /// Output path for final documentation (Phase 4)
+    /// Output path for final documentation (Phase 5)
     pub output: Option<String>,
-    /// System prompt for prompt generation (required for Phase 1)
+    /// System prompt for prompt generation (required for Phase 2)
     pub system_prompt: Option<String>,
-    /// Output style template (required for Phase 1)
+    /// Output style template (required for Phase 2)
     pub append: Option<String>,
 }
 
@@ -81,7 +82,7 @@ impl Default for WorkflowConfig {
     fn default() -> Self {
         Self {
             objective: None,
-            phases: vec![0, 1, 2, 3, 4],
+            phases: vec![0, 1, 2, 3, 4, 5],
             batch_size: 1,
             dir: None,
             analysis_file: None,
@@ -122,17 +123,18 @@ async fn load_prompt_file(file_path: &str) -> Result<String> {
 /// Based on `config.phases`, the following phases may be executed:
 ///
 /// - **Phase 0**: Analyze codebase structure and save to `OUTPUT/codebase_analysis_*.yaml`
-/// - **Phase 1**: Generate research prompts and save to `OUTPUT/research_prompts_*.yaml`
-/// - **Phase 2**: Execute research in parallel and save to `RESULTS/research_result_*.yaml`
-/// - **Phase 3**: Validate and fix YAML files iteratively until all are valid
-/// - **Phase 4**: Synthesize documentation and save to output path
+/// - **Phase 1**: Validate codebase analysis YAML structure
+/// - **Phase 2**: Generate research prompts and save to `OUTPUT/research_prompts_*.yaml`
+/// - **Phase 3**: Execute research in parallel and save to `RESULTS/research_result_*.yaml`
+/// - **Phase 4**: Validate and fix YAML files iteratively until all are valid
+/// - **Phase 5**: Synthesize documentation and save to output path
 ///
 /// # Resumability
 ///
 /// The workflow can be resumed from any phase by providing saved state files:
 /// - Use `analysis_file` to skip Phase 0
-/// - Use `prompts_file` to skip Phases 0-1
-/// - Use `results_file` to skip Phases 0-2
+/// - Use `prompts_file` to skip Phases 0-2
+/// - Use `results_file` to skip Phases 0-3
 ///
 /// # Errors
 ///
@@ -149,7 +151,7 @@ async fn load_prompt_file(file_path: &str) -> Result<String> {
 /// # async fn example() -> anyhow::Result<()> {
 /// let config = WorkflowConfig {
 ///     objective: Some("How does authentication work?".to_string()),
-///     phases: vec![0, 1, 2, 3, 4],
+///     phases: vec![0, 1, 2, 3, 4, 5],
 ///     batch_size: 2,
 ///     dir: Some(".".to_string()),
 ///     system_prompt: Some("prompts/writer.md".to_string()),
@@ -163,15 +165,15 @@ async fn load_prompt_file(file_path: &str) -> Result<String> {
 /// ```
 pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
     // Validate required arguments based on phases
-    if config.phases.contains(&1) {
+    if config.phases.contains(&2) {
         if config.objective.is_none() {
-            anyhow::bail!("--input is required when running phase 1");
+            anyhow::bail!("--input is required when running phase 2");
         }
         if config.system_prompt.is_none() {
-            anyhow::bail!("--system-prompt is required when running phase 1");
+            anyhow::bail!("--system-prompt is required when running phase 2");
         }
         if config.append.is_none() {
-            anyhow::bail!("--append is required when running phase 1");
+            anyhow::bail!("--append is required when running phase 2");
         }
     }
 
@@ -200,13 +202,14 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
         .with_context(|| "Failed to create ./OUTPUT directory")?;
 
     let mut codebase_analysis: Option<CodebaseAnalysis> = None;
+    let mut analysis_file_path: Option<PathBuf> = None;
     let mut prompts_data: Option<PromptsData> = None;
     let mut research_results: Vec<ResearchResult> = Vec::new();
     let mut results_file_path: Option<PathBuf> = None;
 
     // Phase 0: Analyze codebase
     if config.phases.contains(&0) {
-        log_phase_start!(0, "Analyze Codebase", 5);
+        log_phase_start!(0, "Analyze Codebase", 6);
         log_task_start!(
             0,
             "analyze",
@@ -235,6 +238,7 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
         log_phase_complete!(0, "Analyze Codebase");
 
         codebase_analysis = Some(analysis);
+        analysis_file_path = Some(analysis_path);
     } else if let Some(analysis_file) = &config.analysis_file {
         let content = fs::read_to_string(analysis_file)
             .await
@@ -243,16 +247,40 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
             serde_yaml::from_str(&content)
                 .with_context(|| format!("Failed to parse analysis YAML from: {}", analysis_file))?,
         );
+        analysis_file_path = Some(PathBuf::from(analysis_file));
         println!("[Phase 0] Loaded analysis from: {}", analysis_file);
     }
 
-    // Phase 1: Generate prompts
+    // Phase 1: Validate codebase analysis
     if config.phases.contains(&1) {
-        log_phase_start!(1, "Generate Prompts", 5);
-        log_task_start!(1, "generate", "Generating research prompts from objective");
+        log_phase_start!(1, "Validate Analysis", 6);
+        log_task_start!(
+            1,
+            "validate_analysis",
+            "Validating codebase analysis YAML structure"
+        );
+
+        let analysis_path = analysis_file_path.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Phase 0 must run before Phase 1, or provide --analysis-file")
+        })?;
+
+        let validated_analysis = validate_codebase_analysis(
+            &analysis_path.display().to_string()
+        ).await?;
+
+        codebase_analysis = Some(validated_analysis);
+
+        log_task_complete!("validate_analysis", "Codebase analysis validated successfully");
+        log_phase_complete!(1, "Validate Analysis");
+    }
+
+    // Phase 2: Generate prompts
+    if config.phases.contains(&2) {
+        log_phase_start!(2, "Generate Prompts", 6);
+        log_task_start!(2, "generate", "Generating research prompts from objective");
 
         let analysis = codebase_analysis.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("Phase 0 must run before Phase 1, or provide --analysis-file")
+            anyhow::anyhow!("Phase 0-1 must run before Phase 2, or provide --analysis-file")
         })?;
 
         let prompt_writer = load_prompt_file(config.system_prompt.as_ref().unwrap()).await?;
@@ -273,7 +301,7 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
         fs::write(&prompts_path, &prompts_yaml)
             .await
             .with_context(|| format!("Failed to write prompts file: {}", prompts_path.display()))?;
-        println!("[Phase 1] Prompts saved to: {}", prompts_path.display());
+        println!("[Phase 2] Prompts saved to: {}", prompts_path.display());
         println!("Generated {} research prompts", prompts.prompts.len());
 
         log_task_complete!(
@@ -281,11 +309,11 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
             format!("Generated {} prompts", prompts.prompts.len())
         );
         log_state_file!(
-            1,
+            2,
             prompts_path.display().to_string(),
-            "Research prompts for Phase 2"
+            "Research prompts for Phase 3"
         );
-        log_phase_complete!(1, "Generate Prompts");
+        log_phase_complete!(2, "Generate Prompts");
 
         prompts_data = Some(prompts);
     } else if let Some(prompts_file) = &config.prompts_file {
@@ -296,15 +324,15 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
             serde_yaml::from_str(&content)
                 .with_context(|| format!("Failed to parse prompts YAML from: {}", prompts_file))?,
         );
-        println!("[Phase 1] Loaded prompts from: {}", prompts_file);
+        println!("[Phase 2] Loaded prompts from: {}", prompts_file);
     }
 
-    // Phase 2: Execute research prompts concurrently
-    if config.phases.contains(&2) {
-        log_phase_start!(2, "Execute Research", 5);
+    // Phase 3: Execute research prompts concurrently
+    if config.phases.contains(&3) {
+        log_phase_start!(3, "Execute Research", 6);
 
         let prompts = prompts_data.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("Phase 1 must run before Phase 2, or provide --prompts-file")
+            anyhow::anyhow!("Phase 2 must run before Phase 3, or provide --prompts-file")
         })?;
 
         research_results = execute_research(prompts, config.batch_size).await?;
@@ -316,14 +344,14 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
         fs::write(&results_path, &results_yaml)
             .await
             .with_context(|| format!("Failed to write results file: {}", results_path.display()))?;
-        println!("\n[Phase 2] Results saved to: {}", results_path.display());
+        println!("\n[Phase 3] Results saved to: {}", results_path.display());
 
         log_state_file!(
-            2,
+            3,
             results_path.display().to_string(),
-            "Research results for Phase 3 validation"
+            "Research results for Phase 4 validation"
         );
-        log_phase_complete!(2, "Execute Research");
+        log_phase_complete!(3, "Execute Research");
 
         results_file_path = Some(results_path);
     } else if let Some(results_file) = &config.results_file {
@@ -332,17 +360,17 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
             .with_context(|| format!("Failed to read results file: {}", results_file))?;
         research_results = serde_yaml::from_str(&content)
             .with_context(|| format!("Failed to parse results YAML from: {}", results_file))?;
-        println!("[Phase 2] Loaded results from: {}", results_file);
+        println!("[Phase 3] Loaded results from: {}", results_file);
         results_file_path = Some(PathBuf::from(results_file));
     }
 
-    // Phase 3: Validate and fix YAML files
-    if config.phases.contains(&3) {
-        log_phase_start!(3, "Validate YAML", 5);
-        log_task_start!(3, "validate_initial", "Initial YAML validation scan");
+    // Phase 4: Validate and fix YAML files
+    if config.phases.contains(&4) {
+        log_phase_start!(4, "Validate YAML", 6);
+        log_task_start!(4, "validate_initial", "Initial YAML validation scan");
 
         println!("\n{}", "=".repeat(80));
-        println!("PHASE 3: Validating YAML Results");
+        println!("PHASE 4: Validating YAML Results");
         println!("{}", "=".repeat(80));
 
         // Determine which files to validate
@@ -359,7 +387,7 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
                 .map(|r| r.response_file.clone())
                 .collect()
         } else {
-            anyhow::bail!("No YAML files to validate. Run Phase 2 first, provide --results-file, or specify --results-dir");
+            anyhow::bail!("No YAML files to validate. Run Phase 3 first, provide --results-file, or specify --results-dir");
         };
 
         let mut validation_tasks = FuturesUnordered::new();
@@ -392,7 +420,7 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
             fix_iteration += 1;
             let task_id = format!("fix_iteration_{}", fix_iteration);
             log_task_start!(
-                3,
+                4,
                 &task_id,
                 format!(
                     "Fixing {} YAML files (iteration {})",
@@ -427,7 +455,7 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
 
                     let fix_task_id = format!("fix_yaml_{}", fixer_number);
                     log_task_start!(
-                        3,
+                        4,
                         &fix_task_id,
                         format!("Fixing YAML file {}", fixer_number)
                     );
@@ -463,16 +491,16 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
             );
         }
 
-        log_phase_complete!(3, "Validate YAML");
+        log_phase_complete!(4, "Validate YAML");
     }
 
-    // Phase 4: Synthesize documentation
-    if config.phases.contains(&4) {
-        log_phase_start!(4, "Synthesize Docs", 5);
+    // Phase 5: Synthesize documentation
+    if config.phases.contains(&5) {
+        log_phase_start!(5, "Synthesize Docs", 6);
 
         let results_file = results_file_path.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
-                "No research results file available. Run Phase 2 first or provide --results-file"
+                "No research results file available. Run Phase 3 first or provide --results-file"
             )
         })?;
 
@@ -487,7 +515,7 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
             "synthesize",
             "Synthesizing documentation from research results",
             TaskContext {
-                phase: 4,
+                phase: 5,
                 task_number: 1,
                 total_tasks: 1,
             },
@@ -499,11 +527,11 @@ pub async fn run_research_workflow(config: WorkflowConfig) -> Result<()> {
         .await?;
 
         log_state_file!(
-            4,
+            5,
             output_path.display().to_string(),
             "Final synthesized documentation"
         );
-        log_phase_complete!(4, "Synthesize Docs");
+        log_phase_complete!(5, "Synthesize Docs");
 
         println!("\n{}", "=".repeat(80));
         println!(

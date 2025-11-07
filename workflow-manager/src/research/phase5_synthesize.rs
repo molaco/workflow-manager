@@ -1,9 +1,9 @@
-//! Phase 4: Documentation synthesis
+//! Phase 5: Documentation synthesis
 //!
 //! Synthesizes all research findings into comprehensive, well-structured documentation.
 //!
 //! This phase:
-//! - Reads the research results summary from Phase 2/3
+//! - Reads the research results summary from Phase 3/4
 //! - For each result, reads the detailed YAML file
 //! - Uses a file-condenser subagent for large files (>30k chars)
 //! - Combines all findings into cohesive markdown documentation
@@ -17,7 +17,7 @@ use std::path::Path;
 use crate::workflow_utils::{execute_agent, AgentConfig};
 use claude_agent_sdk::{AgentDefinition, ClaudeAgentOptions, SystemPrompt, SystemPromptPreset};
 
-/// Phase 4: Synthesize documentation from research results
+/// Phase 5: Synthesize documentation from research results
 pub async fn synthesize_documentation(
     results_file: &Path,
     output_path: &Path,

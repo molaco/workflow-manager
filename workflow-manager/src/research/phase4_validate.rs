@@ -1,9 +1,9 @@
-//! Phase 3: YAML validation and repair
+//! Phase 4: YAML validation and repair
 //!
 //! Validates and automatically fixes YAML syntax errors in research results.
 //!
 //! This phase:
-//! - Validates all YAML files from Phase 2 using an external Python validator
+//! - Validates all YAML files from Phase 3 using an external Python validator
 //! - Identifies files with syntax errors
 //! - Uses Claude agents to fix broken YAML files in parallel
 //! - Re-validates after each fix iteration

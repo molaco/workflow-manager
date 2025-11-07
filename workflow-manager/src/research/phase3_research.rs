@@ -1,9 +1,9 @@
-//! Phase 2: Research execution with parallel agents
+//! Phase 3: Research execution with parallel agents
 //!
 //! Executes research prompts concurrently using multiple Claude agents.
 //!
 //! This phase:
-//! - Takes research prompts from Phase 1
+//! - Takes research prompts from Phase 2
 //! - Spawns concurrent agents (configurable batch size)
 //! - Each agent executes one research prompt with full tool access
 //! - Results are saved as individual YAML files in `RESULTS/`

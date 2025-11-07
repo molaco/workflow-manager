@@ -15,7 +15,16 @@
 
          ↓
 
-  Phase 1: GENERATE RESEARCH PROMPTS
+  Phase 1: VALIDATE ANALYSIS
+    │
+    ├─> Input: codebase_analysis.yaml
+    ├─> Validate YAML structure with check_yaml.py
+    ├─> If invalid: Fix with Claude agent
+    └─> Loop until valid
+
+         ↓
+
+  Phase 2: GENERATE RESEARCH PROMPTS
     │
     ├─> Input: objective + codebase_analysis.yaml
     ├─> Use custom system prompt + output style
@@ -24,7 +33,7 @@
 
          ↓
 
-  Phase 2: EXECUTE RESEARCH (concurrent)
+  Phase 3: EXECUTE RESEARCH (concurrent)
     │
     ├─> For each prompt in research_prompts.yaml:
     │   ├─> Query Claude with prompt (concurrent execution)
@@ -34,7 +43,7 @@
 
          ↓
 
-  Phase 3: VALIDATE & FIX YAML (loop until valid)
+  Phase 4: VALIDATE & FIX YAML (loop until valid)
     │
     ├─> Validate all result files with check_yaml.py
     ├─> Identify files with errors
@@ -45,7 +54,7 @@
 
          ↓
 
-  Phase 4: SYNTHESIZE DOCUMENTATION
+  Phase 5: SYNTHESIZE DOCUMENTATION
     │
     ├─> Input: objective + research_results.yaml
     ├─> LLM synthesizes all findings
@@ -56,9 +65,9 @@
 │ FEATURES:                                                                    │
 │ • Resume from any phase (--analysis-file, --prompts-file, --results-file)  │
 │ • Concurrent execution (--batch-size N for parallel prompts & fixes)       │
-│ • Phase selection (--phases 0,1,2,3,4)                                      │
+│ • Phase selection (--phases 0,1,2,3,4,5)                                    │
 │ • Custom prompts (--system-prompt, --append for output style)              │
-│ • YAML validation & repair (Phase 3 - can run standalone or after Phase 2) │
+│ • YAML validation & repair (Phases 1 & 4 - can run standalone or in flow)  │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 EXAMPLE COMMANDS:
@@ -75,46 +84,51 @@ EXAMPLE COMMANDS:
     --phases 0 \
     --dir /path/to/codebase
 
-  # Phase 1 only: Generate prompts (requires analysis file)
+  # Phase 1 only: Validate codebase analysis
   cargo run --example new_research_agent -- \
     --phases 1 \
+    --analysis-file codebase_analysis_20250101_120000.yaml
+
+  # Phase 2 only: Generate prompts (requires analysis file)
+  cargo run --example new_research_agent -- \
+    --phases 2 \
     --input "Explain the database layer" \
     --system-prompt prompts/writer.md \
     --append prompts/style.md \
     --analysis-file codebase_analysis_20250101_120000.yaml
 
-  # Phase 2 only: Execute research (sequential)
+  # Phase 3 only: Execute research (sequential)
   cargo run --example new_research_agent -- \
-    --phases 2 \
+    --phases 3 \
     --prompts-file research_prompts_20250101_120000.yaml
 
-  # Phase 2 only: Execute research (parallel batch of 3)
+  # Phase 3 only: Execute research (parallel batch of 3)
   cargo run --example new_research_agent -- \
-    --phases 2 \
+    --phases 3 \
     --prompts-file research_prompts_20250101_120000.yaml \
     --batch-size 3
 
-  # Phase 3 only: Validate & fix YAML files (using directory)
+  # Phase 4 only: Validate & fix YAML files (using directory)
   cargo run --example new_research_agent -- \
-    --phases 3 \
+    --phases 4 \
     --results-dir ./RESULTS \
     --batch-size 2
 
-  # Phase 3 only: Validate & fix YAML files (using results file)
-  cargo run --example new_research_agent -- \
-    --phases 3 \
-    --results-file research_results_20250101_120000.yaml \
-    --batch-size 2
-
-  # Phase 4 only: Synthesize documentation (input optional)
+  # Phase 4 only: Validate & fix YAML files (using results file)
   cargo run --example new_research_agent -- \
     --phases 4 \
     --results-file research_results_20250101_120000.yaml \
+    --batch-size 2
+
+  # Phase 5 only: Synthesize documentation (input optional)
+  cargo run --example new_research_agent -- \
+    --phases 5 \
+    --results-file research_results_20250101_120000.yaml \
     --output docs/api_guide.md
 
-  # Resume from Phase 2 onwards (includes validation, input optional for phase 4)
+  # Resume from Phase 3 onwards (includes validation, input optional for phase 5)
   cargo run --example new_research_agent -- \
-    --phases 2,3,4 \
+    --phases 3,4,5 \
     --prompts-file research_prompts_20250101_120000.yaml \
     --output docs/testing.md
 

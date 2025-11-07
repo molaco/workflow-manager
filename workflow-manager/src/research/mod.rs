@@ -14,7 +14,7 @@
 //! # async fn example() -> anyhow::Result<()> {
 //! let config = WorkflowConfig {
 //!     objective: Some("Analyze authentication system".to_string()),
-//!     phases: vec![0, 1, 2, 3, 4],
+//!     phases: vec![0, 1, 2, 3, 4, 5],
 //!     batch_size: 2,
 //!     dir: Some(".".to_string()),
 //!     analysis_file: None,
@@ -33,26 +33,30 @@
 //!
 //! # Workflow Phases
 //!
-//! The research workflow consists of 5 distinct phases:
+//! The research workflow consists of 6 distinct phases:
 //!
 //! ## Phase 0: Codebase Analysis
 //! [`phase0_analyze`] - Analyzes the codebase structure, file statistics, dependencies,
 //! and architecture patterns using Claude agents with tool access.
 //!
-//! ## Phase 1: Prompt Generation
-//! [`phase1_prompts`] - Generates targeted research prompts based on the research
+//! ## Phase 1: Validate Analysis
+//! [`phase1_validate_analysis`] - Validates the codebase analysis YAML structure from
+//! Phase 0 and automatically fixes any syntax errors before prompt generation.
+//!
+//! ## Phase 2: Prompt Generation
+//! [`phase2_prompts`] - Generates targeted research prompts based on the research
 //! objective and codebase analysis.
 //!
-//! ## Phase 2: Research Execution
-//! [`phase2_research`] - Executes research prompts in parallel using multiple Claude
+//! ## Phase 3: Research Execution
+//! [`phase3_research`] - Executes research prompts in parallel using multiple Claude
 //! agents, with configurable concurrency control.
 //!
-//! ## Phase 3: YAML Validation
-//! [`phase3_validate`] - Validates and automatically fixes YAML syntax errors in
+//! ## Phase 4: YAML Validation
+//! [`phase4_validate`] - Validates and automatically fixes YAML syntax errors in
 //! research results using iterative agent-based repair.
 //!
-//! ## Phase 4: Documentation Synthesis
-//! [`phase4_synthesize`] - Synthesizes all research findings into comprehensive,
+//! ## Phase 5: Documentation Synthesis
+//! [`phase5_synthesize`] - Synthesizes all research findings into comprehensive,
 //! well-structured documentation.
 //!
 //! # Examples
@@ -76,10 +80,10 @@
 //! use workflow_manager::research::{run_research_workflow, WorkflowConfig};
 //!
 //! # async fn example() -> anyhow::Result<()> {
-//! // Resume from Phase 2 using saved prompts
+//! // Resume from Phase 3 using saved prompts
 //! let config = WorkflowConfig {
 //!     objective: None,
-//!     phases: vec![2, 3, 4],
+//!     phases: vec![3, 4, 5],
 //!     batch_size: 3,
 //!     dir: None,
 //!     analysis_file: None,
@@ -102,10 +106,11 @@
 //! - [`cli`] - Command-line argument parsing
 //! - [`workflow`] - Main orchestration logic
 //! - [`phase0_analyze`] - Codebase analysis implementation
-//! - [`phase1_prompts`] - Prompt generation implementation
-//! - [`phase2_research`] - Research execution implementation
-//! - [`phase3_validate`] - YAML validation and repair implementation
-//! - [`phase4_synthesize`] - Documentation synthesis implementation
+//! - [`phase1_validate_analysis`] - Analysis YAML validation implementation
+//! - [`phase2_prompts`] - Prompt generation implementation
+//! - [`phase3_research`] - Research execution implementation
+//! - [`phase4_validate`] - YAML validation and repair implementation
+//! - [`phase5_synthesize`] - Documentation synthesis implementation
 
 // Module declarations
 pub mod cli;
@@ -114,10 +119,11 @@ pub mod workflow;
 
 // Phase modules
 pub mod phase0_analyze;
-pub mod phase1_prompts;
-pub mod phase2_research;
-pub mod phase3_validate;
-pub mod phase4_synthesize;
+pub mod phase1_validate_analysis;
+pub mod phase2_prompts;
+pub mod phase3_research;
+pub mod phase4_validate;
+pub mod phase5_synthesize;
 
 // Re-export commonly used items for convenience
 pub use types::{CodebaseAnalysis, PromptsData, ResearchPrompt, ResearchResult};
