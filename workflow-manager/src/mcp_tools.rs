@@ -121,13 +121,32 @@ fn execute_workflow_tool(
                             async move {
                                 if let Ok(mut logs_rx) = runtime_clone.subscribe_logs(&handle_id).await {
                                     // Stream logs immediately as they arrive
-                                    while let Ok(log) = logs_rx.recv().await {
-                                        if command_tx_clone.send(AppCommand::AppendTabLog {
-                                            handle_id,
-                                            log,
-                                        }).is_err() {
-                                            // App shut down or tab closed
-                                            return;
+                                    loop {
+                                        match logs_rx.recv().await {
+                                            Ok(log) => {
+                                                if command_tx_clone.send(AppCommand::AppendTabLog {
+                                                    handle_id,
+                                                    log,
+                                                }).is_err() {
+                                                    // App shut down or tab closed
+                                                    return;
+                                                }
+                                            }
+                                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                                eprintln!("Warning: MCP log receiver lagged by {} messages for workflow {}", n, handle_id);
+                                                // Send notification about lag
+                                                let _ = command_tx_clone.send(AppCommand::ShowNotification {
+                                                    level: NotificationLevel::Warning,
+                                                    title: "Log Stream Lagged".to_string(),
+                                                    message: format!("Skipped {} messages due to high log volume", n),
+                                                });
+                                                // Continue receiving - don't exit on lag
+                                                continue;
+                                            }
+                                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                                // Channel closed, exit gracefully
+                                                break;
+                                            }
                                         }
                                     }
                                 }

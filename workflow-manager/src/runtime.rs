@@ -59,6 +59,15 @@ impl ProcessBasedRuntime {
         Ok(())
     }
 
+    /// Clean up completed/failed workflow executions
+    /// Removes execution state for workflows that have finished, freeing memory
+    pub fn cleanup_completed_executions(&self) {
+        let mut execs = self.executions.lock().unwrap();
+        execs.retain(|_, state| {
+            matches!(state.status, WorkflowStatus::Running)
+        });
+    }
+
     /// Build CLI command from parameters
     fn build_command(
         &self,
@@ -150,8 +159,9 @@ impl WorkflowRuntime for ProcessBasedRuntime {
             .spawn()
             .map_err(|e| anyhow!("Failed to spawn workflow process: {}", e))?;
 
-        // Create broadcast channel for logs (capacity 100)
-        let (logs_tx, _) = broadcast::channel(100);
+        // Create broadcast channel for logs (capacity 1000)
+        // Increased from 100 to reduce lagging in high-frequency workflows
+        let (logs_tx, _) = broadcast::channel(1000);
 
         // Generate execution ID
         let exec_id = Uuid::new_v4();
@@ -172,8 +182,13 @@ impl WorkflowRuntime for ProcessBasedRuntime {
         let executions_stderr = self.executions.clone();
         let exec_id_stderr = exec_id;
         tokio::spawn(async move {
-            if let Err(e) = parse_workflow_stderr(exec_id_stderr, executions_stderr).await {
+            if let Err(e) = parse_workflow_stderr(exec_id_stderr, executions_stderr.clone()).await {
                 eprintln!("Error parsing workflow stderr: {}", e);
+                // Mark execution as failed
+                let mut execs = executions_stderr.lock().unwrap();
+                if let Some(state) = execs.get_mut(&exec_id_stderr) {
+                    state.status = WorkflowStatus::Failed;
+                }
             }
         });
 
@@ -181,8 +196,22 @@ impl WorkflowRuntime for ProcessBasedRuntime {
         let executions_stdout = self.executions.clone();
         let exec_id_stdout = exec_id;
         tokio::spawn(async move {
-            if let Err(e) = parse_workflow_stdout(exec_id_stdout, executions_stdout).await {
+            if let Err(e) = parse_workflow_stdout(exec_id_stdout, executions_stdout.clone()).await {
                 eprintln!("Error parsing workflow stdout: {}", e);
+                // Mark execution as failed
+                let mut execs = executions_stdout.lock().unwrap();
+                if let Some(state) = execs.get_mut(&exec_id_stdout) {
+                    state.status = WorkflowStatus::Failed;
+                }
+            }
+        });
+
+        // Spawn task to wait for process exit and update status
+        let executions_wait = self.executions.clone();
+        let exec_id_wait = exec_id;
+        tokio::spawn(async move {
+            if let Err(e) = wait_for_process_exit(exec_id_wait, executions_wait).await {
+                eprintln!("Error waiting for process exit: {}", e);
             }
         });
 
@@ -244,17 +273,20 @@ async fn parse_workflow_stderr(
     exec_id: Uuid,
     executions: Arc<Mutex<HashMap<Uuid, ExecutionState>>>,
 ) -> Result<()> {
-    // Get stderr handle
-    let stderr = {
+    // Get stderr handle and clone necessary state once to avoid locking on every line
+    let (stderr, logs_tx, logs_buffer) = {
         let mut execs = executions.lock().unwrap();
         let state = execs
             .get_mut(&exec_id)
             .ok_or_else(|| anyhow!("Execution not found"))?;
-        state
+        let stderr = state
             .child
             .as_mut()
             .and_then(|c| c.stderr.take())
-            .ok_or_else(|| anyhow!("No stderr available"))?
+            .ok_or_else(|| anyhow!("No stderr available"))?;
+
+        // Clone state we need for parsing to avoid holding lock
+        (stderr, state.logs_tx.clone(), state.logs_buffer.clone())
     };
 
     // Wrap in tokio async reader
@@ -262,38 +294,32 @@ async fn parse_workflow_stderr(
     let reader = BufReader::new(stderr);
     let mut lines = reader.lines();
 
-    // Parse lines
+    // Parse lines without holding the main executions lock
     while let Ok(Some(line)) = lines.next_line().await {
-        let execs = executions.lock().unwrap();
-        if let Some(state) = execs.get(&exec_id) {
-            let log = if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
-                // Structured log event
-                serde_json::from_str::<WorkflowLog>(json_str).ok()
-            } else {
-                // Raw stderr output
-                Some(WorkflowLog::RawOutput {
-                    stream: "stderr".to_string(),
-                    line,
-                })
-            };
+        let log = if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
+            // Structured log event
+            serde_json::from_str::<WorkflowLog>(json_str).ok()
+        } else {
+            // Raw stderr output
+            Some(WorkflowLog::RawOutput {
+                stream: "stderr".to_string(),
+                line,
+            })
+        };
 
-            if let Some(log) = log {
-                // Broadcast to real-time subscribers
-                let _ = state.logs_tx.send(log.clone());
+        if let Some(log) = log {
+            // Broadcast to real-time subscribers
+            let _ = logs_tx.send(log.clone());
 
-                // Store in buffer for historical retrieval
-                if let Ok(mut buffer) = state.logs_buffer.lock() {
-                    buffer.push(log);
-                }
+            // Store in buffer for historical retrieval
+            if let Ok(mut buffer) = logs_buffer.lock() {
+                buffer.push(log);
             }
         }
     }
 
-    // Mark as completed
-    let mut execs = executions.lock().unwrap();
-    if let Some(state) = execs.get_mut(&exec_id) {
-        state.status = WorkflowStatus::Completed;
-    }
+    // Status is now updated by wait_for_process_exit based on exit code
+    // No longer marking as completed here to avoid race condition
 
     Ok(())
 }
@@ -303,17 +329,20 @@ async fn parse_workflow_stdout(
     exec_id: Uuid,
     executions: Arc<Mutex<HashMap<Uuid, ExecutionState>>>,
 ) -> Result<()> {
-    // Get stdout handle
-    let stdout = {
+    // Get stdout handle and clone necessary state once to avoid locking on every line
+    let (stdout, logs_tx, logs_buffer) = {
         let mut execs = executions.lock().unwrap();
         let state = execs
             .get_mut(&exec_id)
             .ok_or_else(|| anyhow!("Execution not found"))?;
-        state
+        let stdout = state
             .child
             .as_mut()
             .and_then(|c| c.stdout.take())
-            .ok_or_else(|| anyhow!("No stdout available"))?
+            .ok_or_else(|| anyhow!("No stdout available"))?;
+
+        // Clone state we need for parsing to avoid holding lock
+        (stdout, state.logs_tx.clone(), state.logs_buffer.clone())
     };
 
     // Wrap in tokio async reader
@@ -321,25 +350,58 @@ async fn parse_workflow_stdout(
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
 
-    // Parse lines
+    // Parse lines without holding the main executions lock
     while let Ok(Some(line)) = lines.next_line().await {
-        let execs = executions.lock().unwrap();
-        if let Some(state) = execs.get(&exec_id) {
-            // All stdout is raw output
-            let log = WorkflowLog::RawOutput {
-                stream: "stdout".to_string(),
-                line,
-            };
+        // All stdout is raw output
+        let log = WorkflowLog::RawOutput {
+            stream: "stdout".to_string(),
+            line,
+        };
 
-            // Broadcast to real-time subscribers
-            let _ = state.logs_tx.send(log.clone());
+        // Broadcast to real-time subscribers
+        let _ = logs_tx.send(log.clone());
 
-            // Store in buffer for historical retrieval
-            if let Ok(mut buffer) = state.logs_buffer.lock() {
-                buffer.push(log);
-            }
+        // Store in buffer for historical retrieval
+        if let Ok(mut buffer) = logs_buffer.lock() {
+            buffer.push(log);
         }
     }
+
+    Ok(())
+}
+
+/// Wait for workflow process to exit and update status accordingly
+async fn wait_for_process_exit(
+    exec_id: Uuid,
+    executions: Arc<Mutex<HashMap<Uuid, ExecutionState>>>,
+) -> Result<()> {
+    // Take the child process from the execution state
+    let mut child = {
+        let mut execs = executions.lock().unwrap();
+        let state = execs
+            .get_mut(&exec_id)
+            .ok_or_else(|| anyhow!("Execution not found"))?;
+        state
+            .child
+            .take()
+            .ok_or_else(|| anyhow!("No child process available"))?
+    };
+
+    // Wait for the process to exit
+    let exit_status = child.wait()?;
+
+    // Update status based on exit code
+    let mut execs = executions.lock().unwrap();
+    if let Some(state) = execs.get_mut(&exec_id) {
+        state.status = if exit_status.success() {
+            WorkflowStatus::Completed
+        } else {
+            WorkflowStatus::Failed
+        };
+    }
+
+    // Note: ExecutionState is kept in HashMap for historical log retrieval
+    // The broadcast channel will close naturally when parser tasks complete and drop their senders
 
     Ok(())
 }
