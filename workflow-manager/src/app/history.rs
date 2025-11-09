@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
-use workflow_manager_sdk::WorkflowStatus;
 
 use super::*;
 
@@ -12,37 +11,26 @@ impl App {
     // Session persistence
     pub fn save_session(&self) {
         #[derive(Serialize)]
-        struct SavedTab {
-            workflow_idx: usize,
-            workflow_name: String,
-            instance_number: usize,
-            field_values: HashMap<String, String>,
-            status: String,
-            saved_logs: Vec<String>,
+        struct MinimalSession {
+            active_tab_idx: usize,
+            pinned_executions: Vec<String>, // Store UUIDs as strings
         }
 
-        let saved_tabs: Vec<SavedTab> = self
+        // Save all open tabs as "pinned" executions
+        let pinned_executions: Vec<String> = self
             .open_tabs
             .iter()
-            .map(|t| SavedTab {
-                workflow_idx: t.workflow_idx,
-                workflow_name: t.workflow_name.clone(),
-                instance_number: t.instance_number,
-                field_values: t.field_values.clone(),
-                status: format!("{:?}", t.status),
-                saved_logs: {
-                    let mut logs = Vec::new();
-                    if let Ok(output) = t.workflow_output.lock() {
-                        logs = output.clone();
-                    }
-                    logs
-                },
-            })
+            .map(|t| t.runtime_handle_id.to_string())
             .collect();
+
+        let session = MinimalSession {
+            active_tab_idx: self.active_tab_idx,
+            pinned_executions,
+        };
 
         if let Some(data_dir) = directories::ProjectDirs::from("", "", "workflow-manager") {
             let session_path = data_dir.data_dir().join("session.json");
-            if let Ok(json) = serde_json::to_string_pretty(&saved_tabs) {
+            if let Ok(json) = serde_json::to_string_pretty(&session) {
                 let _ = std::fs::write(session_path, json);
             }
         }
@@ -50,70 +38,117 @@ impl App {
 
     pub fn restore_session(&mut self) {
         #[derive(Deserialize)]
-        struct SavedTab {
-            workflow_idx: usize,
-            workflow_name: String,
-            instance_number: usize,
-            field_values: HashMap<String, String>,
-            status: String,
-            saved_logs: Vec<String>,
+        struct MinimalSession {
+            active_tab_idx: usize,
+            pinned_executions: Vec<String>,
         }
+
+        // Get runtime reference - if not available, can't restore from database
+        let runtime = match &self.runtime {
+            Some(r) => r.clone(),
+            None => return, // No runtime means no database access
+        };
 
         if let Some(data_dir) = directories::ProjectDirs::from("", "", "workflow-manager") {
             let session_path = data_dir.data_dir().join("session.json");
-            if let Ok(json) = std::fs::read_to_string(session_path) {
-                if let Ok(saved_tabs) = serde_json::from_str::<Vec<SavedTab>>(&json) {
-                    for saved in saved_tabs {
-                        if saved.workflow_idx >= self.workflows.len() {
-                            continue;
+            if let Ok(json) = std::fs::read_to_string(&session_path) {
+                if let Ok(session) = serde_json::from_str::<MinimalSession>(&json) {
+                    // Restore each pinned execution from database
+                    for handle_id_str in session.pinned_executions {
+                        if let Ok(handle_id) = Uuid::parse_str(&handle_id_str) {
+                            if let Some(tab) = self.create_tab_from_database(&runtime, &handle_id) {
+                                self.open_tabs.push(tab);
+                            }
                         }
+                    }
 
-                        let status = match saved.status.as_str() {
-                            "Completed" => WorkflowStatus::Completed,
-                            "Failed" => WorkflowStatus::Failed,
-                            _ => WorkflowStatus::NotStarted,
-                        };
-
-                        let tab = WorkflowTab {
-                            id: format!("restored_{}", saved.instance_number),
-                            workflow_idx: saved.workflow_idx,
-                            workflow_name: saved.workflow_name,
-                            instance_number: saved.instance_number,
-                            start_time: None,
-                            status,
-                            runtime_handle_id: Uuid::new_v4(),
-                            exit_code: None,
-                            workflow_phases: Arc::new(Mutex::new(Vec::new())),
-                            workflow_output: Arc::new(Mutex::new(saved.saved_logs)),
-                            field_values: saved.field_values,
-                            scroll_offset: 0,
-                            expanded_phases: HashSet::new(),
-                            expanded_tasks: HashSet::new(),
-                            expanded_agents: HashSet::new(),
-                            selected_phase: 0,
-                            selected_task: None,
-                            selected_agent: None,
-                            agent_scroll_offsets: HashMap::new(),
-                            focused_pane: WorkflowPane::StructuredLogs,
-                            raw_output_scroll_offset: 0,
-                            saved_logs: None,
-                        };
-
-                        self.open_tabs.push(tab);
-
-                        // Update counter
-                        let workflow = &self.workflows[saved.workflow_idx];
-                        let counter = self
-                            .workflow_counters
-                            .entry(workflow.info.id.clone())
-                            .or_insert(0);
-                        if saved.instance_number >= *counter {
-                            *counter = saved.instance_number + 1;
-                        }
+                    // Restore active tab index (clamp to valid range)
+                    if !self.open_tabs.is_empty() {
+                        self.active_tab_idx = session.active_tab_idx.min(self.open_tabs.len() - 1);
                     }
                 }
             }
         }
+    }
+
+    /// Create a WorkflowTab from database using handle_id
+    fn create_tab_from_database(
+        &mut self,
+        runtime: &Arc<dyn workflow_manager_sdk::WorkflowRuntime>,
+        handle_id: &Uuid,
+    ) -> Option<WorkflowTab> {
+        // Use tokio runtime to call async database methods
+        let execution = self.tokio_runtime.block_on(async {
+            // Get execution from database via runtime
+            // Query database directly since runtime doesn't expose get_execution yet
+            // We need to access the ProcessBasedRuntime's database
+            // For now, we'll use list_executions with filtering to find our execution
+            match runtime.list_executions(1000, 0, None).await {
+                Ok(executions) => executions.into_iter().find(|e| e.id == *handle_id),
+                Err(_) => None,
+            }
+        })?;
+
+        // Find workflow index by workflow_id
+        let workflow_idx = self
+            .workflows
+            .iter()
+            .position(|w| w.info.id == execution.workflow_id)?;
+
+        // Get params from database
+        let field_values = self.tokio_runtime.block_on(async {
+            // Similar issue - we need database access
+            // For now return empty, will fix in next iteration
+            HashMap::new()
+        });
+
+        // Get logs from database
+        let logs = self.tokio_runtime.block_on(async {
+            match runtime.get_logs(handle_id, None).await {
+                Ok(workflow_logs) => {
+                    // Convert WorkflowLog to display strings
+                    workflow_logs
+                        .iter()
+                        .map(|log| format!("{:?}", log))
+                        .collect()
+                }
+                Err(_) => Vec::new(),
+            }
+        });
+
+        // Generate instance number
+        let workflow = &self.workflows[workflow_idx];
+        let counter = self
+            .workflow_counters
+            .entry(workflow.info.id.clone())
+            .or_insert(0);
+        let instance_number = *counter;
+        *counter += 1;
+
+        Some(WorkflowTab {
+            id: format!("restored_{}", handle_id),
+            workflow_idx,
+            workflow_name: execution.workflow_name.clone(),
+            instance_number,
+            start_time: Some(execution.start_time),
+            status: execution.status,
+            runtime_handle_id: execution.id, // Use REAL handle_id from database!
+            exit_code: execution.exit_code,
+            workflow_phases: Arc::new(Mutex::new(Vec::new())),
+            workflow_output: Arc::new(Mutex::new(logs)),
+            field_values,
+            scroll_offset: 0,
+            expanded_phases: HashSet::new(),
+            expanded_tasks: HashSet::new(),
+            expanded_agents: HashSet::new(),
+            selected_phase: 0,
+            selected_task: None,
+            selected_agent: None,
+            agent_scroll_offsets: HashMap::new(),
+            focused_pane: WorkflowPane::StructuredLogs,
+            raw_output_scroll_offset: 0,
+            saved_logs: None,
+        })
     }
 
     pub fn load_latest_values_from_history(&mut self, workflow_idx: usize) {
