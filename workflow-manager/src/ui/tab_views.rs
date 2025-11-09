@@ -181,6 +181,14 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
     // Build structured logs for left pane
     let mut structured_logs: Vec<Line> = Vec::new();
 
+    // Add handle ID (for all workflows)
+    structured_logs.push(Line::from(vec![
+        Span::styled(
+            format!("Handle ID: {}", tab.runtime_handle_id),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+
     // Display hierarchical phase/task/agent structure
     let phases_snapshot: Vec<WorkflowPhase> = if let Ok(phases) = tab.workflow_phases.lock() {
         phases.clone()

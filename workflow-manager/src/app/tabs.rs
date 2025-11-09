@@ -1,9 +1,6 @@
 //! Tab management operations
 
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::thread;
-use workflow_manager_sdk::{WorkflowLog, WorkflowStatus};
+use workflow_manager_sdk::WorkflowStatus;
 
 use super::*;
 
@@ -79,35 +76,28 @@ impl App {
             return;
         }
 
-        let tab = &mut self.open_tabs[self.active_tab_idx];
+        let tab = &self.open_tabs[self.active_tab_idx];
+        let handle_id = tab.runtime_handle_id;
 
-        // PATH 1: Kill manual workflow (existing behavior)
-        if let Some(mut child) = tab.child_process.take() {
-            let _ = child.kill();
-        }
-
-        // PATH 2: Cancel MCP workflow (NEW behavior)
-        if let Some(handle_id) = tab.runtime_handle_id {
-            // Cancel via runtime
-            if let Some(runtime) = &self.runtime {
-                let runtime = runtime.clone();
-                self.tokio_runtime.block_on(async {
-                    if let Err(e) = runtime.cancel_workflow(&handle_id).await {
-                        eprintln!("Failed to cancel workflow {}: {}", handle_id, e);
-                    }
-                });
-            }
-
-            // Cancel background tasks (log streamers, etc.)
+        // Unified path: Cancel ALL workflows via runtime
+        if let Some(runtime) = &self.runtime {
+            let runtime = runtime.clone();
             self.tokio_runtime.block_on(async {
-                self.task_registry.cancel_all(&handle_id).await;
+                if let Err(e) = runtime.cancel_workflow(&handle_id).await {
+                    eprintln!("Failed to cancel workflow {}: {}", handle_id, e);
+                }
             });
         }
 
-        // Remove tab (existing logic)
+        // Cancel background tasks (log streamers, etc.)
+        self.tokio_runtime.block_on(async {
+            self.task_registry.cancel_all(&handle_id).await;
+        });
+
+        // Remove tab
         self.open_tabs.remove(self.active_tab_idx);
 
-        // Adjust active index (existing logic)
+        // Adjust active index
         if self.open_tabs.is_empty() {
             self.active_tab_idx = 0;
         } else if self.active_tab_idx >= self.open_tabs.len() {
@@ -123,35 +113,25 @@ impl App {
         }
 
         if let Some(tab) = self.open_tabs.get_mut(self.active_tab_idx) {
-            // PATH 1: Kill manual workflow
-            if let Some(mut child) = tab.child_process.take() {
-                let _ = child.kill();
-                tab.status = WorkflowStatus::Failed;
-                if let Ok(mut output) = tab.workflow_output.lock() {
-                    output.push(String::new());
-                    output.push("⚠️ Workflow killed by user".to_string());
-                }
+            let handle_id = tab.runtime_handle_id;
+
+            // Unified path: Cancel ALL workflows via runtime
+            if let Some(runtime) = &self.runtime {
+                let runtime = runtime.clone();
+                self.tokio_runtime.block_on(async {
+                    let _ = runtime.cancel_workflow(&handle_id).await;
+                });
             }
 
-            // PATH 2: Cancel MCP workflow
-            if let Some(handle_id) = tab.runtime_handle_id {
-                if let Some(runtime) = &self.runtime {
-                    let runtime = runtime.clone();
-                    self.tokio_runtime.block_on(async {
-                        let _ = runtime.cancel_workflow(&handle_id).await;
-                    });
-                }
+            // Cancel background tasks
+            self.tokio_runtime.block_on(async {
+                self.task_registry.cancel_all(&handle_id).await;
+            });
 
-                // Cancel background tasks
-                self.tokio_runtime.block_on(async {
-                    self.task_registry.cancel_all(&handle_id).await;
-                });
-
-                tab.status = WorkflowStatus::Failed;
-                if let Ok(mut output) = tab.workflow_output.lock() {
-                    output.push(String::new());
-                    output.push("⚠️ Workflow killed by user (MCP)".to_string());
-                }
+            tab.status = WorkflowStatus::Failed;
+            if let Ok(mut output) = tab.workflow_output.lock() {
+                output.push(String::new());
+                output.push("⚠️ Workflow killed by user".to_string());
             }
         }
     }
@@ -162,121 +142,23 @@ impl App {
         }
 
         let tab = &mut self.open_tabs[self.active_tab_idx];
+        let handle_id = tab.runtime_handle_id;
 
-        // Kill existing process if running
-        if let Some(mut child) = tab.child_process.take() {
-            let _ = child.kill();
+        // Cancel existing workflow if running
+        if let Some(runtime) = &self.runtime {
+            let runtime = runtime.clone();
+            self.tokio_runtime.block_on(async {
+                let _ = runtime.cancel_workflow(&handle_id).await;
+            });
         }
 
-        // Get workflow info
-        let workflow_idx = tab.workflow_idx;
-        let field_values = tab.field_values.clone();
-
-        let workflow = match self.workflows.get(workflow_idx) {
-            Some(w) => w,
-            None => return,
-        };
-
-        let workflow_id = &workflow.info.id;
-        let binary_path = PathBuf::from("../target/debug").join(workflow_id);
-
-        // Build command arguments from saved field values
-        let mut args = Vec::new();
-        for field in &workflow.info.fields {
-            if let Some(value) = field_values.get(&field.name) {
-                if !value.is_empty() {
-                    // Use the actual CLI argument from metadata, not the field name
-                    let arg_name = &field.cli_arg;
-
-                    if field.description.contains("[BOOL]")
-                        || value.eq_ignore_ascii_case("true")
-                        || value.eq_ignore_ascii_case("false")
-                    {
-                        if value.eq_ignore_ascii_case("true") {
-                            args.push(arg_name.clone());
-                        }
-                    } else {
-                        args.push(arg_name.clone());
-                        args.push(value.clone());
-                    }
-                }
-            }
-        }
-
-        // Reset tab state
-        tab.status = WorkflowStatus::Running;
-        tab.exit_code = None;
-        tab.start_time = Some(chrono::Local::now());
-
-        // Clear output and phases
+        // TODO: Implement rerun via runtime.execute_workflow()
+        // For now, just show error message
+        tab.status = WorkflowStatus::Failed;
         if let Ok(mut output) = tab.workflow_output.lock() {
             output.clear();
-        }
-        if let Ok(mut phases) = tab.workflow_phases.lock() {
-            phases.clear();
-        }
-
-        // Spawn new process
-        match std::process::Command::new(&binary_path)
-            .args(&args)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-        {
-            Ok(mut child) => {
-                let output_clone = Arc::clone(&tab.workflow_output);
-                let phases_clone = Arc::clone(&tab.workflow_phases);
-
-                // Spawn thread to read stdout
-                if let Some(stdout) = child.stdout.take() {
-                    let output = Arc::clone(&output_clone);
-                    thread::spawn(move || {
-                        use std::io::BufRead;
-                        let reader = std::io::BufReader::new(stdout);
-                        for line in reader.lines().flatten() {
-                            if let Ok(mut output) = output.lock() {
-                                output.push(line);
-                            }
-                        }
-                    });
-                }
-
-                // Spawn thread to read stderr and parse structured logs
-                if let Some(stderr) = child.stderr.take() {
-                    let output = Arc::clone(&output_clone);
-                    let phases = phases_clone;
-                    thread::spawn(move || {
-                        use std::io::BufRead;
-                        let reader = std::io::BufReader::new(stderr);
-                        for line in reader.lines().flatten() {
-                            if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
-                                if let Ok(event) = serde_json::from_str::<WorkflowLog>(json_str) {
-                                    Self::handle_workflow_event(event, &phases);
-                                }
-                            } else {
-                                // Strip ANSI color codes before displaying
-                                let cleaned = Self::strip_ansi_codes(&line);
-                                if !cleaned.trim().is_empty() {
-                                    if let Ok(mut output) = output.lock() {
-                                        output.push(cleaned);
-                                    }
-                                }
-                            }
-                        }
-                    });
-                }
-
-                tab.child_process = Some(child);
-            }
-            Err(e) => {
-                tab.status = WorkflowStatus::Failed;
-                if let Ok(mut output) = tab.workflow_output.lock() {
-                    output.push(format!("❌ Failed to rerun workflow: {}", e));
-                    output.push(format!("   Binary path: {}", binary_path.display()));
-                    output.push(format!("   Args: {:?}", args));
-                }
-            }
+            output.push("❌ Rerun not yet implemented with runtime-based execution".to_string());
+            output.push("   Please close this tab and create a new one.".to_string());
         }
     }
 
@@ -339,69 +221,62 @@ impl App {
         }
     }
 
-    // Poll all running tabs for process status (output is read by threads)
+    // Poll all running tabs for process status (logs are streamed via runtime)
     pub fn poll_all_tabs(&mut self) {
+        if self.runtime.is_none() {
+            return;
+        }
+
+        let runtime = self.runtime.as_ref().unwrap().clone();
+
         for tab in &mut self.open_tabs {
             if tab.status != WorkflowStatus::Running {
                 continue;
             }
 
-            // Check process status
-            if let Some(child) = &mut tab.child_process {
-                match child.try_wait() {
-                    Ok(Some(status)) => {
-                        tab.status = if status.success() {
-                            WorkflowStatus::Completed
-                        } else {
-                            WorkflowStatus::Failed
-                        };
-                        tab.exit_code = status.code();
+            let handle_id = tab.runtime_handle_id;
 
-                        // Add completion message
-                        if let Ok(mut output) = tab.workflow_output.lock() {
-                            output.push(String::new());
-                            if tab.status == WorkflowStatus::Completed {
-                                output.push("✅ Workflow completed successfully".to_string());
+            // Check workflow status via runtime
+            let status = self.tokio_runtime.block_on(async {
+                runtime.get_status(&handle_id).await
+            });
 
-                                // Save to history on success
-                                if let Some(workflow) = self.workflows.get(tab.workflow_idx) {
-                                    for (field_name, value) in &tab.field_values {
-                                        if !value.is_empty() {
-                                            let workflow_history = self
-                                                .history
-                                                .workflows
-                                                .entry(workflow.info.id.clone())
-                                                .or_default();
+            if let Ok(new_status) = status {
+                if new_status != WorkflowStatus::Running {
+                    tab.status = new_status.clone();
 
-                                            let field_history = workflow_history
-                                                .entry(field_name.clone())
-                                                .or_default();
+                    // Add completion message
+                    if let Ok(mut output) = tab.workflow_output.lock() {
+                        output.push(String::new());
+                        if new_status == WorkflowStatus::Completed {
+                            output.push("✅ Workflow completed successfully".to_string());
 
-                                            if !field_history.contains(value) {
-                                                field_history.insert(0, value.clone());
-                                                if field_history.len() > 10 {
-                                                    field_history.truncate(10);
-                                                }
+                            // Save to history on success
+                            if let Some(workflow) = self.workflows.get(tab.workflow_idx) {
+                                for (field_name, value) in &tab.field_values {
+                                    if !value.is_empty() {
+                                        let workflow_history = self
+                                            .history
+                                            .workflows
+                                            .entry(workflow.info.id.clone())
+                                            .or_default();
+
+                                        let field_history = workflow_history
+                                            .entry(field_name.clone())
+                                            .or_default();
+
+                                        if !field_history.contains(value) {
+                                            field_history.insert(0, value.clone());
+                                            if field_history.len() > 10 {
+                                                field_history.truncate(10);
                                             }
                                         }
                                     }
-                                    let _ = crate::utils::save_history(&self.history);
                                 }
-                            } else {
-                                output.push(format!(
-                                    "❌ Workflow failed with exit code: {:?}",
-                                    tab.exit_code
-                                ));
+                                let _ = crate::utils::save_history(&self.history);
                             }
-                        }
-                    }
-                    Ok(None) => {
-                        // Still running - threads are reading output
-                    }
-                    Err(_) => {
-                        tab.status = WorkflowStatus::Failed;
-                        if let Ok(mut output) = tab.workflow_output.lock() {
-                            output.push("❌ Error checking workflow status".to_string());
+                        } else {
+                            output.push("❌ Workflow failed".to_string());
                         }
                     }
                 }

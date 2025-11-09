@@ -85,9 +85,8 @@ impl App {
             start_time: Some(chrono::Local::now()),
             status: workflow_manager_sdk::WorkflowStatus::Running,
 
-            // MCP workflows: no child_process, but have runtime_handle_id
-            child_process: None,
-            runtime_handle_id: Some(handle_id),
+            // MCP workflows use runtime_handle_id
+            runtime_handle_id: handle_id,
 
             exit_code: None,
             workflow_phases: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -235,21 +234,20 @@ impl App {
 
         if let Some(idx) = self.open_tabs.iter().position(|t| t.id == handle_id_str) {
             let tab = &self.open_tabs[idx];
+            let runtime_handle_id = tab.runtime_handle_id;
 
             // Cancel MCP workflow if applicable
-            if let Some(runtime_handle_id) = tab.runtime_handle_id {
-                if let Some(runtime) = &self.runtime {
-                    let runtime = runtime.clone();
-                    self.tokio_runtime.block_on(async {
-                        let _ = runtime.cancel_workflow(&runtime_handle_id).await;
-                    });
-                }
-
-                // Cancel background tasks
+            if let Some(runtime) = &self.runtime {
+                let runtime = runtime.clone();
                 self.tokio_runtime.block_on(async {
-                    self.task_registry.cancel_all(&runtime_handle_id).await;
+                    let _ = runtime.cancel_workflow(&runtime_handle_id).await;
                 });
             }
+
+            // Cancel background tasks
+            self.tokio_runtime.block_on(async {
+                self.task_registry.cancel_all(&runtime_handle_id).await;
+            });
 
             // Remove tab
             self.open_tabs.remove(idx);

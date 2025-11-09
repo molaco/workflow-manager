@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use uuid::Uuid;
 use workflow_manager_sdk::WorkflowStatus;
 
 use super::*;
@@ -80,8 +81,7 @@ impl App {
                             instance_number: saved.instance_number,
                             start_time: None,
                             status,
-                            child_process: None,
-                            runtime_handle_id: None,
+                            runtime_handle_id: Uuid::new_v4(),
                             exit_code: None,
                             workflow_phases: Arc::new(Mutex::new(Vec::new())),
                             workflow_output: Arc::new(Mutex::new(saved.saved_logs)),
