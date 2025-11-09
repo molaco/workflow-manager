@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
+use chrono::{DateTime, Local};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -11,17 +12,23 @@ use workflow_manager_sdk::{
     WorkflowRuntime, WorkflowStatus,
 };
 
+use crate::database::{Database, PersistedExecution};
 use crate::discovery::{discover_workflows, DiscoveredWorkflow};
 
 /// Internal execution state for a running workflow
-struct ExecutionState {
-    workflow_id: String,
-    status: WorkflowStatus,
-    child: Option<Child>,
-    logs_tx: broadcast::Sender<WorkflowLog>,
-    binary_path: PathBuf,
+pub struct ExecutionState {
+    pub workflow_id: String,
+    pub workflow_name: String,
+    pub status: WorkflowStatus,
+    pub child: Option<Child>,
+    pub logs_tx: broadcast::Sender<WorkflowLog>,
+    pub binary_path: PathBuf,
     /// Persistent buffer of all logs for historical retrieval
-    logs_buffer: Arc<Mutex<Vec<WorkflowLog>>>,
+    pub logs_buffer: Arc<Mutex<Vec<WorkflowLog>>>,
+    pub start_time: DateTime<Local>,
+    pub end_time: Option<DateTime<Local>>,
+    pub params: HashMap<String, String>,
+    pub exit_code: Option<i32>,
 }
 
 /// Process-based workflow runtime implementation
@@ -30,6 +37,8 @@ pub struct ProcessBasedRuntime {
     workflows: Arc<Mutex<HashMap<String, DiscoveredWorkflow>>>,
     /// Active executions (uuid -> state)
     executions: Arc<Mutex<HashMap<Uuid, ExecutionState>>>,
+    /// SQLite database for persistent workflow execution history
+    database: Arc<Mutex<Database>>,
 }
 
 impl ProcessBasedRuntime {
@@ -41,10 +50,30 @@ impl ProcessBasedRuntime {
             .map(|w| (w.metadata.id.clone(), w))
             .collect();
 
-        Ok(Self {
+        // Initialize database
+        let db_path = dirs::home_dir()
+            .ok_or_else(|| anyhow!("Could not find home directory"))?
+            .join(".workflow-manager")
+            .join("executions.db");
+
+        std::fs::create_dir_all(db_path.parent().unwrap())?;
+
+        let database = Database::new(db_path)?;
+        database.initialize_schema()?;
+
+        let runtime = Self {
             workflows: Arc::new(Mutex::new(workflows_map)),
             executions: Arc::new(Mutex::new(HashMap::new())),
-        })
+            database: Arc::new(Mutex::new(database)),
+        };
+
+        // Load past executions from database
+        if let Err(e) = runtime.restore_from_database() {
+            eprintln!("Warning: Failed to restore executions from database: {}", e);
+            // Don't fail startup if restore fails
+        }
+
+        Ok(runtime)
     }
 
     /// Refresh workflow discovery
@@ -85,6 +114,57 @@ impl ProcessBasedRuntime {
         }
 
         cmd
+    }
+
+    /// Restore past executions from database on startup
+    fn restore_from_database(&self) -> Result<()> {
+        let db = self.database.lock().unwrap();
+
+        // Load recent completed executions (last 100)
+        let persisted = db.list_executions(100, 0, None)?;
+
+        let mut executions = self.executions.lock().unwrap();
+        for mut exec in persisted {
+            // Skip Running status - these are stale from previous session
+            if exec.status == WorkflowStatus::Running {
+                // Mark as Failed since app was restarted
+                exec.status = WorkflowStatus::Failed;
+                exec.end_time = Some(exec.start_time); // Approximate end time
+
+                // Update in database
+                db.update_execution(
+                    &exec.id,
+                    WorkflowStatus::Failed,
+                    exec.end_time,
+                    None
+                )?;
+            }
+
+            // Load logs from database for this execution
+            let logs = db.get_logs(&exec.id, None)?;
+
+            // Load params from database for this execution
+            let params = db.get_params(&exec.id)?;
+
+            // Convert to ExecutionState and load into memory
+            let (logs_tx, _) = broadcast::channel(1000);
+            let state = ExecutionState {
+                workflow_id: exec.workflow_id.clone(),
+                workflow_name: exec.workflow_name.clone(),
+                status: exec.status.clone(),
+                child: None, // Cannot restore running process
+                logs_tx,
+                binary_path: exec.binary_path.clone(),
+                logs_buffer: Arc::new(Mutex::new(logs)),
+                start_time: exec.start_time,
+                end_time: exec.end_time,
+                params,
+                exit_code: exec.exit_code,
+            };
+            executions.insert(exec.id, state);
+        }
+
+        Ok(())
     }
 }
 
@@ -151,7 +231,7 @@ impl WorkflowRuntime for ProcessBasedRuntime {
         };
 
         // Build command
-        let mut cmd = self.build_command(&workflow, params);
+        let mut cmd = self.build_command(&workflow, params.clone());
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
         // Spawn process
@@ -170,19 +250,51 @@ impl WorkflowRuntime for ProcessBasedRuntime {
         let logs_buffer = Arc::new(Mutex::new(Vec::new()));
         let state = ExecutionState {
             workflow_id: id.to_string(),
+            workflow_name: workflow.metadata.name.clone(),
             status: WorkflowStatus::Running,
             child: Some(child),
             logs_tx: logs_tx.clone(),
             binary_path: workflow.binary_path.clone(),
             logs_buffer: logs_buffer.clone(),
+            start_time: Local::now(),
+            end_time: None,
+            params: params.clone(),
+            exit_code: None,
         };
         self.executions.lock().unwrap().insert(exec_id, state);
 
+        // Persist execution to database
+        {
+            let db = self.database.lock().unwrap();
+            let persisted = PersistedExecution {
+                id: exec_id,
+                workflow_id: workflow.metadata.id.clone(),
+                workflow_name: workflow.metadata.name.clone(),
+                status: WorkflowStatus::Running,
+                start_time: Local::now(),
+                end_time: None,
+                exit_code: None,
+                binary_path: workflow.binary_path.clone(),
+                created_at: Local::now(),
+                updated_at: Local::now(),
+            };
+
+            if let Err(e) = db.insert_execution(&persisted) {
+                eprintln!("Warning: Failed to persist execution to database: {}", e);
+            }
+
+            // Persist params
+            if let Err(e) = db.insert_params(&exec_id, &params) {
+                eprintln!("Warning: Failed to persist params to database: {}", e);
+            }
+        }
+
         // Spawn stderr parser task
         let executions_stderr = self.executions.clone();
+        let database_stderr = self.database.clone();
         let exec_id_stderr = exec_id;
         tokio::spawn(async move {
-            if let Err(e) = parse_workflow_stderr(exec_id_stderr, executions_stderr.clone()).await {
+            if let Err(e) = parse_workflow_stderr(exec_id_stderr, executions_stderr.clone(), database_stderr).await {
                 eprintln!("Error parsing workflow stderr: {}", e);
                 // Mark execution as failed
                 let mut execs = executions_stderr.lock().unwrap();
@@ -194,9 +306,10 @@ impl WorkflowRuntime for ProcessBasedRuntime {
 
         // Spawn stdout parser task
         let executions_stdout = self.executions.clone();
+        let database_stdout = self.database.clone();
         let exec_id_stdout = exec_id;
         tokio::spawn(async move {
-            if let Err(e) = parse_workflow_stdout(exec_id_stdout, executions_stdout.clone()).await {
+            if let Err(e) = parse_workflow_stdout(exec_id_stdout, executions_stdout.clone(), database_stdout).await {
                 eprintln!("Error parsing workflow stdout: {}", e);
                 // Mark execution as failed
                 let mut execs = executions_stdout.lock().unwrap();
@@ -208,9 +321,10 @@ impl WorkflowRuntime for ProcessBasedRuntime {
 
         // Spawn task to wait for process exit and update status
         let executions_wait = self.executions.clone();
+        let database_wait = self.database.clone();
         let exec_id_wait = exec_id;
         tokio::spawn(async move {
-            if let Err(e) = wait_for_process_exit(exec_id_wait, executions_wait).await {
+            if let Err(e) = wait_for_process_exit(exec_id_wait, executions_wait, database_wait).await {
                 eprintln!("Error waiting for process exit: {}", e);
             }
         });
@@ -230,27 +344,41 @@ impl WorkflowRuntime for ProcessBasedRuntime {
     }
 
     async fn get_logs(&self, handle_id: &Uuid, limit: Option<usize>) -> WorkflowResult<Vec<WorkflowLog>> {
-        let executions = self.executions.lock().unwrap();
-        let state = executions
-            .get(handle_id)
-            .ok_or_else(|| anyhow!("Execution not found: {}", handle_id))?;
+        // Try in-memory first (for running workflows)
+        {
+            let executions = self.executions.lock().unwrap();
+            if let Some(state) = executions.get(handle_id) {
+                let logs = state.logs_buffer.lock().unwrap();
+                let logs_vec = if let Some(limit) = limit {
+                    logs.iter().rev().take(limit).rev().cloned().collect()
+                } else {
+                    logs.clone()
+                };
+                return Ok(logs_vec);
+            }
+        }
 
-        let buffer = state.logs_buffer.lock().unwrap();
-        let logs = if let Some(limit) = limit {
-            buffer.iter().rev().take(limit).rev().cloned().collect()
-        } else {
-            buffer.clone()
-        };
-
-        Ok(logs)
+        // Not in memory, try database
+        let db = self.database.lock().unwrap();
+        db.get_logs(handle_id, limit)
+            .map_err(|e| e.into())
     }
 
     async fn get_status(&self, handle_id: &Uuid) -> WorkflowResult<WorkflowStatus> {
-        let executions = self.executions.lock().unwrap();
-        let state = executions
-            .get(handle_id)
-            .ok_or_else(|| anyhow!("Execution not found: {}", handle_id))?;
-        Ok(state.status.clone())
+        // Try in-memory first
+        {
+            let executions = self.executions.lock().unwrap();
+            if let Some(state) = executions.get(handle_id) {
+                return Ok(state.status.clone());
+            }
+        }
+
+        // Not in memory, try database
+        let db = self.database.lock().unwrap();
+        db.get_execution(handle_id)
+            .map_err(|e: anyhow::Error| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?
+            .map(|exec| exec.status)
+            .ok_or_else(|| anyhow!("Execution not found: {}", handle_id).into())
     }
 
     async fn cancel_workflow(&self, handle_id: &Uuid) -> WorkflowResult<()> {
@@ -262,6 +390,8 @@ impl WorkflowRuntime for ProcessBasedRuntime {
         if let Some(mut child) = state.child.take() {
             let _ = child.kill();
             state.status = WorkflowStatus::Failed;
+            state.end_time = Some(Local::now());
+            // exit_code remains None when killed
         }
 
         Ok(())
@@ -272,6 +402,7 @@ impl WorkflowRuntime for ProcessBasedRuntime {
 async fn parse_workflow_stderr(
     exec_id: Uuid,
     executions: Arc<Mutex<HashMap<Uuid, ExecutionState>>>,
+    database: Arc<Mutex<Database>>,
 ) -> Result<()> {
     // Get stderr handle and clone necessary state once to avoid locking on every line
     let (stderr, logs_tx, logs_buffer) = {
@@ -294,6 +425,10 @@ async fn parse_workflow_stderr(
     let reader = BufReader::new(stderr);
     let mut lines = reader.lines();
 
+    // Batch logging state
+    let mut pending_logs: Vec<(usize, WorkflowLog)> = Vec::new();
+    let mut last_flush = std::time::Instant::now();
+
     // Parse lines without holding the main executions lock
     while let Ok(Some(line)) = lines.next_line().await {
         let log = if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
@@ -311,10 +446,35 @@ async fn parse_workflow_stderr(
             // Broadcast to real-time subscribers
             let _ = logs_tx.send(log.clone());
 
-            // Store in buffer for historical retrieval
-            if let Ok(mut buffer) = logs_buffer.lock() {
-                buffer.push(log);
+            // Store in buffer for historical retrieval and get sequence number
+            let sequence = if let Ok(mut buffer) = logs_buffer.lock() {
+                let seq = buffer.len();
+                buffer.push(log.clone());
+                seq
+            } else {
+                continue;
+            };
+
+            // Add to pending batch
+            pending_logs.push((sequence, log));
+
+            // Flush if batch is full or time elapsed
+            if pending_logs.len() >= 50 || last_flush.elapsed() > std::time::Duration::from_secs(5) {
+                let db = database.lock().unwrap();
+                if let Err(e) = db.batch_insert_logs(&exec_id, &pending_logs) {
+                    eprintln!("Warning: Failed to batch insert logs: {}", e);
+                }
+                pending_logs.clear();
+                last_flush = std::time::Instant::now();
             }
+        }
+    }
+
+    // Flush remaining logs
+    if !pending_logs.is_empty() {
+        let db = database.lock().unwrap();
+        if let Err(e) = db.batch_insert_logs(&exec_id, &pending_logs) {
+            eprintln!("Warning: Failed to flush remaining logs: {}", e);
         }
     }
 
@@ -328,6 +488,7 @@ async fn parse_workflow_stderr(
 async fn parse_workflow_stdout(
     exec_id: Uuid,
     executions: Arc<Mutex<HashMap<Uuid, ExecutionState>>>,
+    database: Arc<Mutex<Database>>,
 ) -> Result<()> {
     // Get stdout handle and clone necessary state once to avoid locking on every line
     let (stdout, logs_tx, logs_buffer) = {
@@ -350,6 +511,10 @@ async fn parse_workflow_stdout(
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
 
+    // Batch logging state
+    let mut pending_logs: Vec<(usize, WorkflowLog)> = Vec::new();
+    let mut last_flush = std::time::Instant::now();
+
     // Parse lines without holding the main executions lock
     while let Ok(Some(line)) = lines.next_line().await {
         // All stdout is raw output
@@ -361,9 +526,34 @@ async fn parse_workflow_stdout(
         // Broadcast to real-time subscribers
         let _ = logs_tx.send(log.clone());
 
-        // Store in buffer for historical retrieval
-        if let Ok(mut buffer) = logs_buffer.lock() {
-            buffer.push(log);
+        // Store in buffer for historical retrieval and get sequence number
+        let sequence = if let Ok(mut buffer) = logs_buffer.lock() {
+            let seq = buffer.len();
+            buffer.push(log.clone());
+            seq
+        } else {
+            continue;
+        };
+
+        // Add to pending batch
+        pending_logs.push((sequence, log));
+
+        // Flush if batch is full or time elapsed
+        if pending_logs.len() >= 50 || last_flush.elapsed() > std::time::Duration::from_secs(5) {
+            let db = database.lock().unwrap();
+            if let Err(e) = db.batch_insert_logs(&exec_id, &pending_logs) {
+                eprintln!("Warning: Failed to batch insert logs: {}", e);
+            }
+            pending_logs.clear();
+            last_flush = std::time::Instant::now();
+        }
+    }
+
+    // Flush remaining logs
+    if !pending_logs.is_empty() {
+        let db = database.lock().unwrap();
+        if let Err(e) = db.batch_insert_logs(&exec_id, &pending_logs) {
+            eprintln!("Warning: Failed to flush remaining logs: {}", e);
         }
     }
 
@@ -374,6 +564,7 @@ async fn parse_workflow_stdout(
 async fn wait_for_process_exit(
     exec_id: Uuid,
     executions: Arc<Mutex<HashMap<Uuid, ExecutionState>>>,
+    database: Arc<Mutex<Database>>,
 ) -> Result<()> {
     // Take the child process from the execution state
     let mut child = {
@@ -398,6 +589,19 @@ async fn wait_for_process_exit(
         } else {
             WorkflowStatus::Failed
         };
+        state.end_time = Some(Local::now());
+        state.exit_code = exit_status.code();
+
+        // Persist completion to database
+        let db = database.lock().unwrap();
+        if let Err(e) = db.update_execution(
+            &exec_id,
+            state.status.clone(),
+            state.end_time,
+            state.exit_code,
+        ) {
+            eprintln!("Warning: Failed to update execution in database: {}", e);
+        }
     }
 
     // Note: ExecutionState is kept in HashMap for historical log retrieval

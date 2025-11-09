@@ -10,6 +10,7 @@ use workflow_manager_sdk::FieldType;
 
 mod app;
 mod chat;
+mod database;
 mod discovery;
 mod mcp_tools;
 mod models;

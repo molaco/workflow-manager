@@ -25,7 +25,8 @@ pub fn create_workflow_mcp_server(
         ))
         .tool(get_workflow_logs_tool(runtime.clone()))
         .tool(get_workflow_status_tool(runtime.clone()))
-        .tool(cancel_workflow_tool(runtime))
+        .tool(cancel_workflow_tool(runtime.clone()))
+        .tool(list_execution_history_tool(runtime))
         .tool(get_workflow_history_tool(history))
 }
 
@@ -312,6 +313,58 @@ fn cancel_workflow_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
                     }
                     Err(e) => Ok(ToolResult::error(format!("Failed to cancel: {}", e))),
                 }
+            })
+        },
+    )
+}
+
+/// Tool: list_execution_history
+///
+/// TODO: Full implementation requires adding list_executions() method to WorkflowRuntime trait.
+/// This is a skeleton implementation that provides the MCP interface.
+fn list_execution_history_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
+    SdkMcpTool::new(
+        "list_execution_history",
+        "List recent workflow executions with pagination and optional filtering",
+        json!({
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of executions to return",
+                    "default": 10
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Number of executions to skip (for pagination)",
+                    "default": 0
+                },
+                "workflow_id": {
+                    "type": "string",
+                    "description": "Filter by specific workflow type (optional)"
+                }
+            }
+        }),
+        move |params| {
+            let _runtime = runtime.clone();
+            Box::pin(async move {
+                let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+                let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let workflow_id = params.get("workflow_id").and_then(|v| v.as_str()).map(String::from);
+
+                // TODO: Query via runtime - need to add list_executions() method to WorkflowRuntime trait
+                // Expected signature: async fn list_executions(&self, limit: usize, offset: usize, workflow_id: Option<String>) -> Result<Vec<ExecutionRecord>>
+                // For now, return placeholder response
+
+                let result = json!({
+                    "message": "list_execution_history implementation pending - requires WorkflowRuntime trait extension",
+                    "requested_params": {
+                        "limit": limit,
+                        "offset": offset,
+                        "workflow_id": workflow_id
+                    }
+                });
+                Ok(ToolResult::text(serde_json::to_string_pretty(&result).unwrap()))
             })
         },
     )

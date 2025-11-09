@@ -16,6 +16,9 @@ pub mod discovery;
 // Workflow runtime module
 pub mod runtime;
 
+// Database module
+pub mod database;
+
 // MCP tools module
 pub mod mcp_tools;
 
