@@ -474,7 +474,7 @@ impl App {
             self.in_new_tab_flow = false;
 
             // Subscribe to logs and spawn streaming task
-            let log_task = tokio::spawn({
+            let log_task = self.tokio_runtime.spawn({
                 let runtime_clone = runtime.clone();
 
                 async move {
