@@ -319,9 +319,6 @@ fn cancel_workflow_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
 }
 
 /// Tool: list_execution_history
-///
-/// TODO: Full implementation requires adding list_executions() method to WorkflowRuntime trait.
-/// This is a skeleton implementation that provides the MCP interface.
 fn list_execution_history_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
     SdkMcpTool::new(
         "list_execution_history",
@@ -346,25 +343,48 @@ fn list_execution_history_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool 
             }
         }),
         move |params| {
-            let _runtime = runtime.clone();
+            let runtime = runtime.clone();
             Box::pin(async move {
-                let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
-                let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let workflow_id = params.get("workflow_id").and_then(|v| v.as_str()).map(String::from);
+                // Parse parameters
+                let limit = params
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(10) as usize;
+                let offset = params
+                    .get("offset")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                let workflow_id = params
+                    .get("workflow_id")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
 
-                // TODO: Query via runtime - need to add list_executions() method to WorkflowRuntime trait
-                // Expected signature: async fn list_executions(&self, limit: usize, offset: usize, workflow_id: Option<String>) -> Result<Vec<ExecutionRecord>>
-                // For now, return placeholder response
-
-                let result = json!({
-                    "message": "list_execution_history implementation pending - requires WorkflowRuntime trait extension",
-                    "requested_params": {
-                        "limit": limit,
-                        "offset": offset,
-                        "workflow_id": workflow_id
+                // Query runtime
+                match runtime.list_executions(limit, offset, workflow_id).await {
+                    Ok(executions) => {
+                        // Format response
+                        let result = json!({
+                            "total": executions.len(),
+                            "limit": limit,
+                            "offset": offset,
+                            "executions": executions.iter().map(|exec| {
+                                json!({
+                                    "handle_id": exec.id.to_string(),
+                                    "workflow_id": exec.workflow_id,
+                                    "workflow_name": exec.workflow_name,
+                                    "status": format!("{:?}", exec.status),
+                                    "start_time": exec.start_time.to_rfc3339(),
+                                    "end_time": exec.end_time.map(|t| t.to_rfc3339()),
+                                    "exit_code": exec.exit_code,
+                                })
+                            }).collect::<Vec<_>>()
+                        });
+                        Ok(ToolResult::text(
+                            serde_json::to_string_pretty(&result).unwrap()
+                        ))
                     }
-                });
-                Ok(ToolResult::text(serde_json::to_string_pretty(&result).unwrap()))
+                    Err(e) => Ok(ToolResult::error(format!("Failed to list executions: {}", e))),
+                }
             })
         },
     )

@@ -8,8 +8,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 use workflow_manager_sdk::{
-    async_trait, FullWorkflowMetadata, WorkflowHandle, WorkflowLog, WorkflowResult,
-    WorkflowRuntime, WorkflowStatus,
+    async_trait, ExecutionSummary, FullWorkflowMetadata, WorkflowHandle, WorkflowLog,
+    WorkflowResult, WorkflowRuntime, WorkflowStatus,
 };
 
 use crate::database::{Database, PersistedExecution};
@@ -395,6 +395,35 @@ impl WorkflowRuntime for ProcessBasedRuntime {
         }
 
         Ok(())
+    }
+
+    async fn list_executions(
+        &self,
+        limit: usize,
+        offset: usize,
+        workflow_id: Option<String>,
+    ) -> WorkflowResult<Vec<ExecutionSummary>> {
+        // Query database
+        let db = self.database.lock().unwrap();
+        let persisted = db
+            .list_executions(limit, offset, workflow_id.as_deref())
+            .map_err(|e| anyhow!("Failed to list executions from database: {}", e))?;
+
+        // Convert to lightweight summaries
+        let summaries = persisted
+            .iter()
+            .map(|exec| ExecutionSummary {
+                id: exec.id,
+                workflow_id: exec.workflow_id.clone(),
+                workflow_name: exec.workflow_name.clone(),
+                status: exec.status.clone(),
+                start_time: exec.start_time,
+                end_time: exec.end_time,
+                exit_code: exec.exit_code,
+            })
+            .collect();
+
+        Ok(summaries)
     }
 }
 

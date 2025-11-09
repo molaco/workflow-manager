@@ -3929,6 +3929,7 @@ name = "workflow-manager-sdk"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "claude-agent-sdk",
  "serde",
  "serde_json",

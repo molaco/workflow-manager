@@ -7,6 +7,7 @@ pub use claude_agent_sdk;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
+use chrono::{DateTime, Local};
 
 // Re-export async trait for convenience
 pub use async_trait::async_trait;
@@ -398,6 +399,18 @@ impl WorkflowHandle {
 /// Result type for workflow operations
 pub type WorkflowResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+/// Lightweight execution summary for listing (excludes logs and params)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionSummary {
+    pub id: Uuid,
+    pub workflow_id: String,
+    pub workflow_name: String,
+    pub status: WorkflowStatus,
+    pub start_time: DateTime<Local>,
+    pub end_time: Option<DateTime<Local>>,
+    pub exit_code: Option<i32>,
+}
+
 /// Runtime trait for workflow discovery and execution
 /// This provides a unified API for both TUI and MCP consumers
 #[async_trait]
@@ -436,4 +449,20 @@ pub trait WorkflowRuntime: Send + Sync {
 
     /// Cancel a running workflow
     async fn cancel_workflow(&self, handle_id: &Uuid) -> WorkflowResult<()>;
+
+    /// List workflow executions with pagination and optional filtering
+    ///
+    /// # Arguments
+    /// * `limit` - Maximum number of executions to return
+    /// * `offset` - Number of executions to skip (for pagination)
+    /// * `workflow_id` - Optional filter by workflow type
+    ///
+    /// # Returns
+    /// Vector of execution summaries, ordered by start_time descending (newest first)
+    async fn list_executions(
+        &self,
+        limit: usize,
+        offset: usize,
+        workflow_id: Option<String>,
+    ) -> WorkflowResult<Vec<ExecutionSummary>>;
 }
