@@ -465,4 +465,13 @@ pub trait WorkflowRuntime: Send + Sync {
         offset: usize,
         workflow_id: Option<String>,
     ) -> WorkflowResult<Vec<ExecutionSummary>>;
+
+    /// Get parameters used for a specific workflow execution
+    ///
+    /// # Arguments
+    /// * `handle_id` - The execution UUID
+    ///
+    /// # Returns
+    /// HashMap of parameter names to values used in the execution
+    async fn get_params(&self, handle_id: &Uuid) -> WorkflowResult<HashMap<String, String>>;
 }

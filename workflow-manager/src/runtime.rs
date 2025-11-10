@@ -425,6 +425,21 @@ impl WorkflowRuntime for ProcessBasedRuntime {
 
         Ok(summaries)
     }
+
+    async fn get_params(&self, handle_id: &Uuid) -> WorkflowResult<HashMap<String, String>> {
+        // First check if execution is in memory (running)
+        {
+            let executions = self.executions.lock().unwrap();
+            if let Some(state) = executions.get(handle_id) {
+                return Ok(state.params.clone());
+            }
+        }
+
+        // Not in memory, query database
+        let db = self.database.lock().unwrap();
+        db.get_params(handle_id)
+            .map_err(|e| anyhow!("Failed to get params from database: {}", e).into())
+    }
 }
 
 /// Parse workflow stderr for __WF_EVENT__:<JSON> messages and raw output

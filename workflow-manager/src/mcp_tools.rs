@@ -26,7 +26,8 @@ pub fn create_workflow_mcp_server(
         .tool(get_workflow_logs_tool(runtime.clone()))
         .tool(get_workflow_status_tool(runtime.clone()))
         .tool(cancel_workflow_tool(runtime.clone()))
-        .tool(list_execution_history_tool(runtime))
+        .tool(list_execution_history_tool(runtime.clone()))
+        .tool(get_execution_params_tool(runtime))
         .tool(get_workflow_history_tool(history))
 }
 
@@ -384,6 +385,51 @@ fn list_execution_history_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool 
                         ))
                     }
                     Err(e) => Ok(ToolResult::error(format!("Failed to list executions: {}", e))),
+                }
+            })
+        },
+    )
+}
+
+/// Tool: get_execution_params
+fn get_execution_params_tool(runtime: Arc<dyn WorkflowRuntime>) -> SdkMcpTool {
+    SdkMcpTool::new(
+        "get_execution_params",
+        "Get the parameters used for a specific workflow execution",
+        json!({
+            "type": "object",
+            "properties": {
+                "handle_id": {
+                    "type": "string",
+                    "description": "The execution UUID (handle_id from list_execution_history)"
+                }
+            },
+            "required": ["handle_id"]
+        }),
+        move |params| {
+            let runtime = runtime.clone();
+            Box::pin(async move {
+                let handle_id_str = match params.get("handle_id").and_then(|v| v.as_str()) {
+                    Some(id) => id,
+                    None => return Ok(ToolResult::error("Missing handle_id")),
+                };
+
+                let handle_id = match Uuid::parse_str(handle_id_str) {
+                    Ok(id) => id,
+                    Err(e) => return Ok(ToolResult::error(format!("Invalid UUID: {}", e))),
+                };
+
+                match runtime.get_params(&handle_id).await {
+                    Ok(params) => {
+                        let result = json!({
+                            "handle_id": handle_id.to_string(),
+                            "params": params
+                        });
+                        Ok(ToolResult::text(
+                            serde_json::to_string_pretty(&result).unwrap()
+                        ))
+                    }
+                    Err(e) => Ok(ToolResult::error(format!("Failed to get params: {}", e))),
                 }
             })
         },
