@@ -42,15 +42,14 @@ pub struct ProcessBasedRuntime {
 }
 
 impl ProcessBasedRuntime {
-    /// Create a new runtime and discover workflows
-    pub fn new() -> Result<Self> {
-        let workflows = discover_workflows();
+    /// Create runtime with pre-discovered workflows (avoids duplicate discovery)
+    pub fn new_with_workflows(workflows: Vec<DiscoveredWorkflow>) -> Result<Self> {
         let workflows_map: HashMap<String, DiscoveredWorkflow> = workflows
             .into_iter()
             .map(|w| (w.metadata.id.clone(), w))
             .collect();
 
-        // Initialize database
+        // Initialize database (same as new())
         let db_path = dirs::home_dir()
             .ok_or_else(|| anyhow!("Could not find home directory"))?
             .join(".workflow-manager")
@@ -67,13 +66,18 @@ impl ProcessBasedRuntime {
             database: Arc::new(Mutex::new(database)),
         };
 
-        // Load past executions from database
+        // Restore from database
         if let Err(e) = runtime.restore_from_database() {
             eprintln!("Warning: Failed to restore executions from database: {}", e);
-            // Don't fail startup if restore fails
         }
 
         Ok(runtime)
+    }
+
+    /// Create a new runtime and discover workflows
+    pub fn new() -> Result<Self> {
+        let workflows = discover_workflows();
+        Self::new_with_workflows(workflows)
     }
 
     /// Refresh workflow discovery

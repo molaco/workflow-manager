@@ -34,7 +34,26 @@ pub use task_registry::TaskRegistry;
 
 impl App {
     pub fn new() -> Self {
-        let workflows = crate::utils::load_workflows();
+        // CHANGE: Discover workflows ONCE
+        let discovered_workflows = crate::discovery::discover_workflows();
+
+        // Convert to UI model (clone metadata since we need it for runtime too)
+        let workflows = discovered_workflows
+            .iter()
+            .map(|dw| workflow_manager_sdk::Workflow {
+                info: workflow_manager_sdk::WorkflowInfo {
+                    id: dw.metadata.id.clone(),
+                    name: dw.metadata.name.clone(),
+                    description: dw.metadata.description.clone(),
+                    status: workflow_manager_sdk::WorkflowStatus::NotStarted,
+                    metadata: dw.metadata.clone(),
+                    fields: dw.fields.clone(),
+                    progress_messages: vec![],
+                },
+                source: workflow_manager_sdk::WorkflowSource::BuiltIn,
+            })
+            .collect();
+
         let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
         let history = crate::utils::load_history();
 
@@ -96,8 +115,8 @@ impl App {
             task_registry: task_registry.clone(),
         };
 
-        // Initialize runtime
-        match crate::runtime::ProcessBasedRuntime::new() {
+        // CHANGE: Initialize runtime WITH discovered workflows
+        match crate::runtime::ProcessBasedRuntime::new_with_workflows(discovered_workflows) {
             Ok(runtime) => {
                 let runtime_arc =
                     Arc::new(runtime) as Arc<dyn workflow_manager_sdk::WorkflowRuntime>;
