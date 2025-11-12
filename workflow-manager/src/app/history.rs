@@ -102,17 +102,28 @@ impl App {
             HashMap::new()
         });
 
-        // Get logs from database
-        let logs = self.tokio_runtime.block_on(async {
+        // Get logs from database and process them properly
+        let (workflow_phases, raw_output) = self.tokio_runtime.block_on(async {
             match runtime.get_logs(handle_id, None).await {
                 Ok(workflow_logs) => {
-                    // Convert WorkflowLog to display strings
-                    workflow_logs
-                        .iter()
-                        .map(|log| format!("{:?}", log))
-                        .collect()
+                    // Create phases structure for structured logs
+                    let phases = Arc::new(Mutex::new(Vec::new()));
+                    let mut raw_logs = Vec::new();
+
+                    // Process each log
+                    for log in workflow_logs {
+                        // Process structured logs (phases, tasks, agents)
+                        App::handle_workflow_event(log.clone(), &phases);
+
+                        // Only add RawOutput to text buffer (same as live execution)
+                        if let workflow_manager_sdk::WorkflowLog::RawOutput { line, .. } = &log {
+                            raw_logs.push(line.clone());
+                        }
+                    }
+
+                    (phases, raw_logs)
                 }
-                Err(_) => Vec::new(),
+                Err(_) => (Arc::new(Mutex::new(Vec::new())), Vec::new()),
             }
         });
 
@@ -134,8 +145,8 @@ impl App {
             status: execution.status,
             runtime_handle_id: execution.id, // Use REAL handle_id from database!
             exit_code: execution.exit_code,
-            workflow_phases: Arc::new(Mutex::new(Vec::new())),
-            workflow_output: Arc::new(Mutex::new(logs)),
+            workflow_phases, // Use properly processed phases
+            workflow_output: Arc::new(Mutex::new(raw_output)), // Only raw stdout/stderr
             field_values,
             scroll_offset: 0,
             expanded_phases: HashSet::new(),
