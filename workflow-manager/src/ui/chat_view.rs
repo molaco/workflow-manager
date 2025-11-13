@@ -122,8 +122,8 @@ fn format_message_content(content: &str) -> Vec<Line<'static>> {
     lines
 }
 
-pub fn render_chat(f: &mut Frame, area: Rect, app: &App) {
-    let chat = match &app.chat {
+pub fn render_chat(f: &mut Frame, area: Rect, app: &mut App) {
+    let chat = match &mut app.chat {
         Some(c) => c,
         None => {
             let error = Paragraph::new("Chat unavailable - runtime initialization failed")
@@ -289,6 +289,12 @@ pub fn render_chat(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(Color::DarkGray),
         )
     };
+
+    // Calculate viewport height (subtract 2 for borders)
+    let viewport_height = messages_area.height.saturating_sub(2);
+
+    // Auto-scroll to bottom if enabled
+    chat.auto_scroll_to_bottom(viewport_height);
 
     let messages_widget = Paragraph::new(message_lines)
         .block(

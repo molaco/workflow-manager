@@ -32,7 +32,7 @@ pub use workflow_views::{
 };
 
 /// Main UI rendering function - orchestrates all view rendering
-pub fn ui(f: &mut Frame, app: &App) {
+pub fn ui(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
         .constraints([

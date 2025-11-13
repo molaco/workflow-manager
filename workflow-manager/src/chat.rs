@@ -367,10 +367,7 @@ impl ChatInterface {
                         }
                     }
 
-                    // Auto-scroll to bottom if enabled
-                    if self.auto_scroll {
-                        self.message_scroll = 9999; // Large number forces scroll to bottom
-                    }
+                    // Note: Actual scrolling happens in render function after layout is known
                 }
                 Err(mpsc::error::TryRecvError::Empty) => {
                     // No response yet, keep waiting
@@ -386,10 +383,7 @@ impl ChatInterface {
                         tool_calls: Vec::new(),
                     });
 
-                    // Auto-scroll to bottom if enabled
-                    if self.auto_scroll {
-                        self.message_scroll = 9999; // Large number forces scroll to bottom
-                    }
+                    // Note: Actual scrolling happens in render function after layout is known
                 }
             }
         }
@@ -452,6 +446,50 @@ impl ChatInterface {
     /// Update spinner animation frame
     pub fn update_spinner(&mut self) {
         self.spinner_frame = (self.spinner_frame + 1) % 8;
+    }
+
+    /// Calculate total number of rendered lines for all messages
+    /// This accounts for multi-line content, tool calls, spacing, etc.
+    pub fn calculate_total_lines(&self) -> u16 {
+        let mut total_lines = 0u16;
+
+        for msg in &self.messages {
+            // Role line (e.g., "You: " or "Claude: ")
+            total_lines = total_lines.saturating_add(1);
+
+            // Message content lines (count newlines + 1)
+            let content_lines = msg.content.lines().count().max(1);
+            total_lines = total_lines.saturating_add(content_lines as u16);
+
+            // Tool calls display (if any)
+            if !msg.tool_calls.is_empty() {
+                total_lines = total_lines.saturating_add(1); // Blank line
+                total_lines = total_lines.saturating_add(1); // "🔧 X tool(s) used"
+            }
+
+            // Blank line after each message
+            total_lines = total_lines.saturating_add(1);
+        }
+
+        // Add lines for "Thinking..." indicator if waiting
+        if self.waiting_for_response {
+            total_lines = total_lines.saturating_add(2); // Spinner + help text
+        }
+
+        total_lines
+    }
+
+    /// Auto-scroll to bottom of messages given viewport height
+    pub fn auto_scroll_to_bottom(&mut self, viewport_height: u16) {
+        if !self.auto_scroll {
+            return;
+        }
+
+        let total_lines = self.calculate_total_lines();
+
+        // Scroll position = total_lines - viewport_height (show last page)
+        // Saturating sub prevents overflow if content fits in viewport
+        self.message_scroll = total_lines.saturating_sub(viewport_height);
     }
 
     /// Get spinner character for current frame

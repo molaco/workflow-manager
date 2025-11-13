@@ -79,7 +79,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
             }
         }
 
-        terminal.draw(|f| ui::ui(f, app))?;
+        terminal.draw(|f| ui::ui(f, &mut *app))?;
 
         if event::poll(std::time::Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
@@ -222,7 +222,6 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
 
                                         // Auto-scroll to bottom when user sends message
                                         chat.auto_scroll = true;
-                                        chat.message_scroll = 9999;
 
                                         // Send message asynchronously (spawns background task)
                                         chat.send_message_async(msg);
