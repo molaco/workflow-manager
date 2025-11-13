@@ -80,6 +80,8 @@ pub struct ChatInterface {
     pub message_scroll: u16,
     /// Scroll position for logs pane
     pub log_scroll: u16,
+    /// Whether to automatically scroll to bottom when new messages arrive
+    pub auto_scroll: bool,
     /// Currently active pane for keyboard navigation
     pub active_pane: ActivePane,
     /// Runtime for workflow operations
@@ -118,6 +120,7 @@ impl ChatInterface {
             scroll_offset: 0,
             message_scroll: 0,
             log_scroll: 0,
+            auto_scroll: true, // Start with auto-scroll enabled
             active_pane: ActivePane::ChatMessages,
             runtime: runtime.clone(),
             history: history.clone(),
@@ -363,6 +366,11 @@ impl ChatInterface {
                             });
                         }
                     }
+
+                    // Auto-scroll to bottom if enabled
+                    if self.auto_scroll {
+                        self.message_scroll = 9999; // Large number forces scroll to bottom
+                    }
                 }
                 Err(mpsc::error::TryRecvError::Empty) => {
                     // No response yet, keep waiting
@@ -377,6 +385,11 @@ impl ChatInterface {
                         content: "Error: Response channel disconnected".to_string(),
                         tool_calls: Vec::new(),
                     });
+
+                    // Auto-scroll to bottom if enabled
+                    if self.auto_scroll {
+                        self.message_scroll = 9999; // Large number forces scroll to bottom
+                    }
                 }
             }
         }
@@ -392,6 +405,8 @@ impl ChatInterface {
         match self.active_pane {
             ActivePane::ChatMessages => {
                 self.message_scroll = self.message_scroll.saturating_sub(1);
+                // Disable auto-scroll when user manually scrolls up
+                self.auto_scroll = false;
             }
             ActivePane::Logs => {
                 self.log_scroll = self.log_scroll.saturating_sub(1);
@@ -430,6 +445,8 @@ impl ChatInterface {
         self.scroll_offset = 0;
         self.message_scroll = 0;
         self.log_scroll = 0;
+        // Re-enable auto-scroll when explicitly scrolling to bottom
+        self.auto_scroll = true;
     }
 
     /// Update spinner animation frame

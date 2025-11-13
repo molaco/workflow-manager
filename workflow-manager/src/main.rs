@@ -220,6 +220,10 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                                             tool_calls: Vec::new(),
                                         });
 
+                                        // Auto-scroll to bottom when user sends message
+                                        chat.auto_scroll = true;
+                                        chat.message_scroll = 9999;
+
                                         // Send message asynchronously (spawns background task)
                                         chat.send_message_async(msg);
                                     }
