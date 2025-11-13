@@ -92,6 +92,11 @@ impl ProcessBasedRuntime {
         Ok(())
     }
 
+    /// Get reference to database for chat history
+    pub fn get_database(&self) -> Arc<Mutex<Database>> {
+        self.database.clone()
+    }
+
     /// Clean up completed/failed workflow executions
     /// Removes execution state for workflows that have finished, freeing memory
     pub fn cleanup_completed_executions(&self) {

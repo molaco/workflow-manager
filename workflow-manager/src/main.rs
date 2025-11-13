@@ -196,13 +196,29 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                                 // Ctrl+Q to quit
                                 app.should_quit = true;
                             }
+                            KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                // Ctrl+Up: Navigate to older message in history
+                                if let Some(chat) = &mut app.chat {
+                                    chat.history_prev();
+                                }
+                            }
+                            KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                // Ctrl+Down: Navigate to newer message in history
+                                if let Some(chat) = &mut app.chat {
+                                    chat.history_next();
+                                }
+                            }
                             KeyCode::Char(c) => {
                                 if let Some(chat) = &mut app.chat {
+                                    // User typing - exit history mode
+                                    chat.exit_history_mode();
                                     chat.input_buffer.push(c);
                                 }
                             }
                             KeyCode::Backspace => {
                                 if let Some(chat) = &mut app.chat {
+                                    // User editing - exit history mode
+                                    chat.exit_history_mode();
                                     chat.input_buffer.pop();
                                 }
                             }

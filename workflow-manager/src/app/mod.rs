@@ -118,6 +118,9 @@ impl App {
         // CHANGE: Initialize runtime WITH discovered workflows
         match crate::runtime::ProcessBasedRuntime::new_with_workflows(discovered_workflows) {
             Ok(runtime) => {
+                // Get database reference before moving runtime
+                let database = runtime.get_database();
+
                 let runtime_arc =
                     Arc::new(runtime) as Arc<dyn workflow_manager_sdk::WorkflowRuntime>;
                 app.runtime = Some(runtime_arc.clone());
@@ -130,6 +133,7 @@ impl App {
                     command_tx,
                     task_registry,
                     app.tokio_runtime.handle().clone(),
+                    database,
                 ));
             }
             Err(e) => {

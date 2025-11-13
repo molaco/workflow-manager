@@ -260,6 +260,34 @@ impl Database {
             [],
         )?;
 
+        // Run migrations
+        self.migrate_to_v2()?;
+
+        Ok(())
+    }
+
+    /// Migrate database schema to version 2 (chat input history)
+    pub fn migrate_to_v2(&self) -> Result<()> {
+        let current = self.get_schema_version()?;
+
+        if current < 2 {
+            self.conn.execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS chat_input_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_chat_history_timestamp
+                ON chat_input_history(timestamp DESC);
+
+                UPDATE schema_version SET version = 2;
+                "#,
+            )?;
+        }
+
         Ok(())
     }
 
@@ -604,6 +632,48 @@ impl Database {
 
         Ok(executions)
     }
+
+    /// Insert a chat input message
+    pub fn insert_chat_message(&self, message: &str) -> Result<i64> {
+        let timestamp = Local::now().to_rfc3339();
+
+        self.conn.execute(
+            "INSERT INTO chat_input_history (message, timestamp) VALUES (?1, ?2)",
+            params![message, timestamp],
+        )?;
+
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Get recent chat history (returns in chronological order - oldest first)
+    pub fn get_chat_history(&self, limit: usize) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT message FROM chat_input_history
+             ORDER BY timestamp DESC
+             LIMIT ?1"
+        )?;
+
+        let messages = stmt
+            .query_map([limit], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<String>, _>>()?;
+
+        // Reverse to get chronological order (oldest first)
+        Ok(messages.into_iter().rev().collect())
+    }
+
+    /// Delete old chat history (older than specified days)
+    pub fn cleanup_old_chat_history(&self, days: i64) -> Result<usize> {
+        use chrono::Duration;
+        let cutoff = Local::now() - Duration::days(days);
+        let cutoff_str = cutoff.to_rfc3339();
+
+        let deleted = self.conn.execute(
+            "DELETE FROM chat_input_history WHERE timestamp < ?1",
+            params![cutoff_str],
+        )?;
+
+        Ok(deleted)
+    }
 }
 
 /// Statistics for a workflow
@@ -748,7 +818,7 @@ mod tests {
         db.initialize_schema().unwrap();
 
         let version = db.get_schema_version().unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, 2); // Updated to v2 with chat_input_history table
     }
 
     #[test]

@@ -97,6 +97,14 @@ pub struct ChatInterface {
     command_tx: mpsc::UnboundedSender<AppCommand>,
     /// Task registry for background task cleanup
     task_registry: TaskRegistry,
+    /// History of user's sent messages (for Ctrl+Up/Down cycling)
+    message_history: Vec<String>,
+    /// Current position when browsing history (None = not browsing)
+    history_index: Option<usize>,
+    /// Draft message saved when starting to browse history
+    history_draft: String,
+    /// Database for persistence
+    database: Arc<std::sync::Mutex<crate::database::Database>>,
 }
 
 impl ChatInterface {
@@ -107,7 +115,15 @@ impl ChatInterface {
         command_tx: mpsc::UnboundedSender<AppCommand>,
         task_registry: TaskRegistry,
         tokio_handle: tokio::runtime::Handle,
+        database: Arc<std::sync::Mutex<crate::database::Database>>,
     ) -> Self {
+        // Load message history from database
+        let message_history = database
+            .lock()
+            .unwrap()
+            .get_chat_history(100) // Load last 100 messages
+            .unwrap_or_default();
+
         let mut chat = Self {
             messages: Vec::new(),
             input_buffer: String::new(),
@@ -129,6 +145,10 @@ impl ChatInterface {
             init_error: None,
             command_tx: command_tx.clone(),
             task_registry: task_registry.clone(),
+            message_history,
+            history_index: None,
+            history_draft: String::new(),
+            database,
         };
 
         // Start initialization in background
@@ -230,6 +250,21 @@ impl ChatInterface {
         if message.trim().is_empty() {
             return;
         }
+
+        // Save to database
+        if let Ok(db) = self.database.lock() {
+            let _ = db.insert_chat_message(&message);
+        }
+
+        // Add to in-memory history (keep last 100)
+        self.message_history.push(message.clone());
+        if self.message_history.len() > 100 {
+            self.message_history.remove(0);
+        }
+
+        // Reset history browsing
+        self.history_index = None;
+        self.history_draft.clear();
 
         self.waiting_for_response = true;
         self.response_start_time = Some(Instant::now());
@@ -507,5 +542,61 @@ impl ChatInterface {
     /// Get elapsed time since response started
     pub fn get_elapsed_seconds(&self) -> Option<u64> {
         self.response_start_time.map(|start| start.elapsed().as_secs())
+    }
+
+    /// Navigate to previous message in history (Ctrl+Up)
+    pub fn history_prev(&mut self) {
+        if self.message_history.is_empty() {
+            return;
+        }
+
+        match self.history_index {
+            None => {
+                // First time browsing - save current input and go to last message
+                self.history_draft = self.input_buffer.clone();
+                self.history_index = Some(self.message_history.len() - 1);
+                self.input_buffer = self.message_history[self.message_history.len() - 1].clone();
+            }
+            Some(idx) => {
+                // Already browsing - go to older message if possible
+                if idx > 0 {
+                    self.history_index = Some(idx - 1);
+                    self.input_buffer = self.message_history[idx - 1].clone();
+                }
+            }
+        }
+    }
+
+    /// Navigate to next message in history (Ctrl+Down)
+    pub fn history_next(&mut self) {
+        if self.message_history.is_empty() {
+            return;
+        }
+
+        match self.history_index {
+            None => {
+                // Not browsing - do nothing
+            }
+            Some(idx) => {
+                if idx < self.message_history.len() - 1 {
+                    // Go to newer message
+                    self.history_index = Some(idx + 1);
+                    self.input_buffer = self.message_history[idx + 1].clone();
+                } else {
+                    // At newest - restore draft and exit history mode
+                    self.input_buffer = self.history_draft.clone();
+                    self.history_index = None;
+                    self.history_draft.clear();
+                }
+            }
+        }
+    }
+
+    /// Exit history browsing mode when user types
+    pub fn exit_history_mode(&mut self) {
+        if self.history_index.is_some() {
+            self.history_index = None;
+            self.history_draft.clear();
+        }
     }
 }
