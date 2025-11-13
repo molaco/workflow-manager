@@ -208,18 +208,49 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                                     chat.history_next();
                                 }
                             }
+                            KeyCode::Left => {
+                                // Move cursor left
+                                if let Some(chat) = &mut app.chat {
+                                    chat.cursor_left();
+                                }
+                            }
+                            KeyCode::Right => {
+                                // Move cursor right
+                                if let Some(chat) = &mut app.chat {
+                                    chat.cursor_right();
+                                }
+                            }
+                            KeyCode::Home => {
+                                // Move cursor to start
+                                if let Some(chat) = &mut app.chat {
+                                    chat.cursor_home();
+                                }
+                            }
+                            KeyCode::End => {
+                                // Move cursor to end
+                                if let Some(chat) = &mut app.chat {
+                                    chat.cursor_end();
+                                }
+                            }
                             KeyCode::Char(c) => {
                                 if let Some(chat) = &mut app.chat {
                                     // User typing - exit history mode
                                     chat.exit_history_mode();
-                                    chat.input_buffer.push(c);
+                                    chat.insert_char(c);
                                 }
                             }
                             KeyCode::Backspace => {
                                 if let Some(chat) = &mut app.chat {
                                     // User editing - exit history mode
                                     chat.exit_history_mode();
-                                    chat.input_buffer.pop();
+                                    chat.delete_before_cursor();
+                                }
+                            }
+                            KeyCode::Delete => {
+                                // Delete character at cursor
+                                if let Some(chat) = &mut app.chat {
+                                    chat.exit_history_mode();
+                                    chat.delete_at_cursor();
                                 }
                             }
                             KeyCode::Enter => {
@@ -228,6 +259,7 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                                     if !chat.input_buffer.is_empty() && chat.initialized {
                                         let msg = chat.input_buffer.clone();
                                         chat.input_buffer.clear();
+                                        chat.cursor_position = 0;
 
                                         // Add user message to conversation immediately
                                         chat.messages.push(crate::chat::ChatMessage {

@@ -336,6 +336,20 @@ pub fn render_chat(f: &mut Frame, area: Rect, app: &mut App) {
 
     f.render_widget(input_widget, input_area);
 
+    // Set terminal cursor position to show blinking cursor
+    // Only show cursor when chat input pane is active
+    if matches!(chat.active_pane, ActivePane::ChatMessages) && chat.initialized && chat.init_error.is_none() {
+        // Calculate cursor position in widget
+        // Account for: border (1 char) + input text before cursor
+        let cursor_x = input_area.x + 1 + chat.cursor_position as u16;
+        let cursor_y = input_area.y + 1; // +1 for top border
+
+        // Make sure cursor is within bounds
+        if cursor_x < input_area.x + input_area.width - 1 {
+            f.set_cursor_position((cursor_x, cursor_y));
+        }
+    }
+
     // === RENDER TOOL CALL LOGS ===
     let log_border_style = if matches!(chat.active_pane, ActivePane::Logs) {
         Style::default().fg(Color::Yellow)

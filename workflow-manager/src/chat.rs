@@ -62,6 +62,8 @@ pub struct ChatInterface {
     pub messages: Vec<ChatMessage>,
     /// Current input buffer
     pub input_buffer: String,
+    /// Cursor position in input buffer (index in characters, not bytes)
+    pub cursor_position: usize,
     /// Claude SDK client (wrapped for async access)
     client: Option<Arc<Mutex<ClaudeSDKClient>>>,
     /// Channel for receiving initialization result
@@ -127,6 +129,7 @@ impl ChatInterface {
         let mut chat = Self {
             messages: Vec::new(),
             input_buffer: String::new(),
+            cursor_position: 0,
             client: None,
             init_rx: None,
             response_rx: None,
@@ -427,6 +430,7 @@ impl ChatInterface {
     /// Clear input buffer
     pub fn clear_input(&mut self) {
         self.input_buffer.clear();
+        self.cursor_position = 0;
     }
 
     /// Scroll up in active pane
@@ -556,12 +560,14 @@ impl ChatInterface {
                 self.history_draft = self.input_buffer.clone();
                 self.history_index = Some(self.message_history.len() - 1);
                 self.input_buffer = self.message_history[self.message_history.len() - 1].clone();
+                self.cursor_position = self.input_buffer.chars().count();
             }
             Some(idx) => {
                 // Already browsing - go to older message if possible
                 if idx > 0 {
                     self.history_index = Some(idx - 1);
                     self.input_buffer = self.message_history[idx - 1].clone();
+                    self.cursor_position = self.input_buffer.chars().count();
                 }
             }
         }
@@ -582,9 +588,11 @@ impl ChatInterface {
                     // Go to newer message
                     self.history_index = Some(idx + 1);
                     self.input_buffer = self.message_history[idx + 1].clone();
+                    self.cursor_position = self.input_buffer.chars().count();
                 } else {
                     // At newest - restore draft and exit history mode
                     self.input_buffer = self.history_draft.clone();
+                    self.cursor_position = self.input_buffer.chars().count();
                     self.history_index = None;
                     self.history_draft.clear();
                 }
@@ -597,6 +605,76 @@ impl ChatInterface {
         if self.history_index.is_some() {
             self.history_index = None;
             self.history_draft.clear();
+        }
+    }
+
+    /// Move cursor left by one character
+    pub fn cursor_left(&mut self) {
+        if self.cursor_position > 0 {
+            self.cursor_position -= 1;
+        }
+    }
+
+    /// Move cursor right by one character
+    pub fn cursor_right(&mut self) {
+        let len = self.input_buffer.chars().count();
+        if self.cursor_position < len {
+            self.cursor_position += 1;
+        }
+    }
+
+    /// Move cursor to start of line
+    pub fn cursor_home(&mut self) {
+        self.cursor_position = 0;
+    }
+
+    /// Move cursor to end of line
+    pub fn cursor_end(&mut self) {
+        self.cursor_position = self.input_buffer.chars().count();
+    }
+
+    /// Insert character at cursor position
+    pub fn insert_char(&mut self, c: char) {
+        // Convert cursor position (character index) to byte index
+        let byte_idx = self.input_buffer
+            .char_indices()
+            .nth(self.cursor_position)
+            .map(|(idx, _)| idx)
+            .unwrap_or(self.input_buffer.len());
+
+        self.input_buffer.insert(byte_idx, c);
+        self.cursor_position += 1;
+    }
+
+    /// Delete character before cursor (Backspace)
+    pub fn delete_before_cursor(&mut self) {
+        if self.cursor_position > 0 {
+            // Find byte index of character before cursor
+            let byte_idx = self.input_buffer
+                .char_indices()
+                .nth(self.cursor_position - 1)
+                .map(|(idx, _)| idx)
+                .unwrap_or(0);
+
+            self.input_buffer.remove(byte_idx);
+            self.cursor_position -= 1;
+        }
+    }
+
+    /// Delete character at cursor (Delete key)
+    pub fn delete_at_cursor(&mut self) {
+        let len = self.input_buffer.chars().count();
+        if self.cursor_position < len {
+            // Find byte index of character at cursor
+            let byte_idx = self.input_buffer
+                .char_indices()
+                .nth(self.cursor_position)
+                .map(|(idx, _)| idx)
+                .unwrap_or(self.input_buffer.len());
+
+            if byte_idx < self.input_buffer.len() {
+                self.input_buffer.remove(byte_idx);
+            }
         }
     }
 }
