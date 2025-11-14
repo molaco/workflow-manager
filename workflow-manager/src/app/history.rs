@@ -95,11 +95,12 @@ impl App {
             .iter()
             .position(|w| w.info.id == execution.workflow_id)?;
 
-        // Get params from database
+        // Get params from database via runtime
         let field_values = self.tokio_runtime.block_on(async {
-            // Similar issue - we need database access
-            // For now return empty, will fix in next iteration
-            HashMap::new()
+            match runtime.get_params(handle_id).await {
+                Ok(params) => params,
+                Err(_) => HashMap::new(), // Fallback to empty if error
+            }
         });
 
         // Get logs from database and process them properly
