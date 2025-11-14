@@ -152,13 +152,46 @@ impl App {
             });
         }
 
-        // TODO: Implement rerun via runtime.execute_workflow()
-        // For now, just show error message
-        tab.status = WorkflowStatus::Failed;
-        if let Ok(mut output) = tab.workflow_output.lock() {
-            output.clear();
-            output.push("❌ Rerun not yet implemented with runtime-based execution".to_string());
-            output.push("   Please close this tab and create a new one.".to_string());
+        // Get workflow info from current tab
+        let workflow_idx = tab.workflow_idx;
+        let params = tab.field_values.clone();
+        let workflow = &self.workflows[workflow_idx];
+        let workflow_id = workflow.info.id.clone();
+
+        // Execute workflow with same parameters via runtime
+        if let Some(runtime) = &self.runtime {
+            let runtime = runtime.clone();
+            let command_tx = self.command_tx.clone();
+
+            self.tokio_runtime.block_on(async move {
+                match runtime.execute_workflow(&workflow_id, params.clone()).await {
+                    Ok(handle) => {
+                        let handle_id = *handle.id();
+
+                        // Create new tab for the rerun execution
+                        let _ = command_tx.send(AppCommand::CreateTab {
+                            workflow_id: workflow_id.clone(),
+                            params,
+                            handle_id,
+                        });
+
+                        // Show success notification
+                        let _ = command_tx.send(AppCommand::ShowNotification {
+                            level: NotificationLevel::Success,
+                            title: "Workflow Rerun".to_string(),
+                            message: format!("Rerunning {}", workflow_id),
+                        });
+                    }
+                    Err(e) => {
+                        // Show error notification
+                        let _ = command_tx.send(AppCommand::ShowNotification {
+                            level: NotificationLevel::Error,
+                            title: "Rerun Failed".to_string(),
+                            message: format!("Failed to rerun workflow: {}", e),
+                        });
+                    }
+                }
+            });
         }
     }
 
