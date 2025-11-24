@@ -10,6 +10,7 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 tokio = { version = "1", features = ["sync"] }
 async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
 
 # Re-export the macro
 workflow-manager-macros = { path = "../workflow-manager-macros" }

@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 default-run = "workflow-manager"
 
+[[bin]]
+name = "task-planner"
+path = "src/bin/task_planner.rs"
+
 [dependencies]
 claude-agent-sdk = { path = "../claude-agent-sdk-rust", features = ["tracing-support"] }
 workflow-manager-sdk = { path = "../workflow-manager-sdk" }
@@ -12,13 +16,15 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 anyhow = { workspace = true }
-chrono = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 futures = "0.3"
 clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.11", features = ["json"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
 dotenv = "0.15"
 ratatui = "0.28"
 crossterm = "0.28"
 fuzzy-matcher = "0.3"
 directories = "5.0"
+dirs = "5.0"

@@ -1,11 +1,18 @@
 //! Tab state management
 
 use std::collections::{HashMap, HashSet};
-use std::process::Child;
 use std::sync::{Arc, Mutex};
 use workflow_manager_sdk::WorkflowStatus;
+use uuid::Uuid;
 
 use super::workflow::WorkflowPhase;
+
+/// Which pane is focused in the workflow view
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkflowPane {
+    StructuredLogs,
+    RawOutput,
+}
 
 /// Per-tab state container for tabbed interface
 #[derive(Debug)]
@@ -19,7 +26,12 @@ pub struct WorkflowTab {
 
     // Execution state
     pub status: WorkflowStatus,
-    pub child_process: Option<Child>,
+
+    /// Runtime execution handle (UUID) for ALL workflows
+    /// Both manual and MCP workflows are executed via ProcessBasedRuntime
+    /// Used for: get_logs, get_status, cancel_workflow
+    pub runtime_handle_id: Uuid,
+
     pub exit_code: Option<i32>,
 
     // Workflow data (per tab)
@@ -36,6 +48,10 @@ pub struct WorkflowTab {
     pub selected_task: Option<String>,
     pub selected_agent: Option<String>,
     pub agent_scroll_offsets: HashMap<String, usize>, // agent_id -> scroll offset
+
+    // Two-pane view state
+    pub focused_pane: WorkflowPane,
+    pub raw_output_scroll_offset: usize,
 
     // Session persistence
     pub saved_logs: Option<Vec<String>>,

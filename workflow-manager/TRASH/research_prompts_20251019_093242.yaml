@@ -1,0 +1,37 @@
+objective: Understand how candle chart data loading works and identify how to prioritize database data over other sources
+prompts:
+- title: Candle Chart Data Loading Architecture
+  query: Investigate how candle chart data is currently loaded in the application. Identify all data sources (database, API, WebSocket, cache) and the order in which they are queried. Examine the initialization flow and data fetching logic for candle charts.
+  focus:
+  - Chart component initialization code
+  - Data source priority and fallback logic
+  - Database query functions for candle data
+  - API/WebSocket data fetching mechanisms
+- title: Database Schema and Query Patterns
+  query: Analyze the database schema for storing candle/OHLCV data. Examine existing database query functions, indexes, and how historical candle data is retrieved. Document the data models and any ORM/query builder usage.
+  focus:
+  - Candle data table structure and fields
+  - Query functions for fetching candles by timeframe
+  - Database indexes for efficient retrieval
+  - Data availability checks in database
+- title: Data Source Selection Logic
+  query: Examine the code that determines whether to fetch data from the database, API, or WebSocket. Look for conditional logic, configuration settings, or flags that control data source selection. Identify where the decision is made to use external sources vs local storage.
+  focus:
+  - Conditional logic for source selection
+  - Configuration parameters affecting data loading
+  - Caching mechanisms and their priority
+  - Real-time vs historical data handling
+- title: Chart Component Data Flow
+  query: Trace the data flow from the candle chart UI component back to the data sources. Identify all intermediate layers (services, stores, APIs) and how data requests are routed. Document the component lifecycle and data loading triggers.
+  focus:
+  - Chart component props and state management
+  - Data fetching hooks or lifecycle methods
+  - Service layer abstractions
+  - Event handlers triggering data loads
+- title: Implementation Strategy for DB-First Loading
+  query: Identify the specific code locations where modifications would be needed to implement database-first loading. Look for data fetching functions, initialization logic, and source priority configurations that would need to be changed to always check the database first.
+  focus:
+  - Functions to modify for DB-first approach
+  - Configuration or settings to adjust
+  - Fallback logic if DB data is incomplete
+  - Performance considerations and optimizations

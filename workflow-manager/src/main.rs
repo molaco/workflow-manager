@@ -1,6 +1,6 @@
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -10,6 +10,7 @@ use workflow_manager_sdk::FieldType;
 
 mod app;
 mod chat;
+mod database;
 mod discovery;
 mod mcp_tools;
 mod models;
@@ -47,10 +48,38 @@ fn main() -> Result<()> {
 
 fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
     loop {
-        // Poll all running tabs for output
+        // 1. Process pending commands (non-blocking) with error handling
+        while let Ok(cmd) = app.command_rx.try_recv() {
+            if let Err(e) = app.handle_command(cmd.clone()) {
+                // Log to stderr for debugging
+                eprintln!("Error handling command {:?}: {}", cmd, e);
+
+                // Show error to user in TUI
+                app.notifications.error(
+                    "Command Failed",
+                    format!("Failed to process command: {}", e)
+                );
+            }
+        }
+
+        // 2. Cleanup expired notifications
+        app.notifications.cleanup_expired();
+
+        // 3. Poll all running tabs for output
         app.poll_all_tabs();
 
-        terminal.draw(|f| ui::ui(f, app))?;
+        // Poll chat for initialization and responses
+        if let Some(chat) = &mut app.chat {
+            chat.poll_initialization();
+            chat.poll_response();
+
+            // Update chat spinner animation if initializing or waiting for response
+            if !chat.initialized || chat.waiting_for_response {
+                chat.update_spinner();
+            }
+        }
+
+        terminal.draw(|f| ui::ui(f, &mut *app))?;
 
         if event::poll(std::time::Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
@@ -167,33 +196,83 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                                 // Ctrl+Q to quit
                                 app.should_quit = true;
                             }
+                            KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                // Ctrl+Up: Navigate to older message in history
+                                if let Some(chat) = &mut app.chat {
+                                    chat.history_prev();
+                                }
+                            }
+                            KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                // Ctrl+Down: Navigate to newer message in history
+                                if let Some(chat) = &mut app.chat {
+                                    chat.history_next();
+                                }
+                            }
+                            KeyCode::Left => {
+                                // Move cursor left
+                                if let Some(chat) = &mut app.chat {
+                                    chat.cursor_left();
+                                }
+                            }
+                            KeyCode::Right => {
+                                // Move cursor right
+                                if let Some(chat) = &mut app.chat {
+                                    chat.cursor_right();
+                                }
+                            }
+                            KeyCode::Home => {
+                                // Move cursor to start
+                                if let Some(chat) = &mut app.chat {
+                                    chat.cursor_home();
+                                }
+                            }
+                            KeyCode::End => {
+                                // Move cursor to end
+                                if let Some(chat) = &mut app.chat {
+                                    chat.cursor_end();
+                                }
+                            }
                             KeyCode::Char(c) => {
                                 if let Some(chat) = &mut app.chat {
-                                    chat.input_buffer.push(c);
+                                    // User typing - exit history mode
+                                    chat.exit_history_mode();
+                                    chat.insert_char(c);
                                 }
                             }
                             KeyCode::Backspace => {
                                 if let Some(chat) = &mut app.chat {
-                                    chat.input_buffer.pop();
+                                    // User editing - exit history mode
+                                    chat.exit_history_mode();
+                                    chat.delete_before_cursor();
+                                }
+                            }
+                            KeyCode::Delete => {
+                                // Delete character at cursor
+                                if let Some(chat) = &mut app.chat {
+                                    chat.exit_history_mode();
+                                    chat.delete_at_cursor();
                                 }
                             }
                             KeyCode::Enter => {
-                                // Send message to Claude
+                                // Send message to Claude asynchronously
                                 if let Some(chat) = &mut app.chat {
-                                    if !chat.input_buffer.is_empty() {
+                                    if !chat.input_buffer.is_empty() && chat.initialized {
                                         let msg = chat.input_buffer.clone();
                                         chat.input_buffer.clear();
+                                        chat.cursor_position = 0;
 
-                                        // Send message via tokio runtime
-                                        if let Err(e) =
-                                            app.tokio_runtime.block_on(chat.send_message(msg))
-                                        {
-                                            chat.messages.push(crate::chat::ChatMessage {
-                                                role: crate::chat::ChatRole::Assistant,
-                                                content: format!("Error: {}", e),
-                                                tool_calls: Vec::new(),
-                                            });
-                                        }
+                                        // Add user message to conversation immediately
+                                        chat.messages.push(crate::chat::ChatMessage {
+                                            role: crate::chat::ChatRole::User,
+                                            content: msg.clone(),
+                                            tool_calls: Vec::new(),
+                                        });
+
+                                        // Auto-scroll to bottom when user sends message
+                                        chat.auto_scroll = true;
+
+                                        // Send message asynchronously (spawns background task)
+                                        chat.send_message_async(msg);
                                     }
                                 }
                             }
@@ -223,32 +302,83 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                             KeyCode::Char('q') | KeyCode::Char('Q') => {
                                 app.should_quit = true;
                             }
+                            KeyCode::Char('1') => {
+                                // 1: Switch to left pane (Structured Logs)
+                                if matches!(app.current_view, View::Tabs | View::WorkflowRunning(_)) {
+                                    app.switch_pane_left();
+                                }
+                            }
+                            KeyCode::Char('2') => {
+                                // 2: Switch to right pane (Raw Output)
+                                if matches!(app.current_view, View::Tabs | View::WorkflowRunning(_)) {
+                                    app.switch_pane_right();
+                                }
+                            }
                             KeyCode::Down | KeyCode::Char('j') => {
                                 if matches!(app.current_view, View::WorkflowRunning(_)) {
-                                    app.navigate_workflow_down();
-                                    app.update_workflow_scroll(30); // Estimate viewport height
+                                    // Check if raw output pane is focused
+                                    use crate::app::WorkflowPane;
+                                    if app.workflow_focused_pane == WorkflowPane::RawOutput {
+                                        app.scroll_raw_output_down();
+                                    } else {
+                                        app.navigate_workflow_down();
+                                        app.update_workflow_scroll(30); // Estimate viewport height
+                                    }
                                 } else if matches!(app.current_view, View::Tabs) {
-                                    app.navigate_tab_down();
+                                    // Check if raw output pane is focused in current tab
+                                    use crate::app::WorkflowPane;
+                                    if !app.open_tabs.is_empty()
+                                        && app.open_tabs[app.active_tab_idx].focused_pane == WorkflowPane::RawOutput {
+                                        app.scroll_raw_output_down();
+                                    } else {
+                                        app.navigate_tab_down();
+                                    }
                                 } else {
                                     app.next();
                                 }
                             }
                             KeyCode::Up => {
                                 if matches!(app.current_view, View::WorkflowRunning(_)) {
-                                    app.navigate_workflow_up();
-                                    app.update_workflow_scroll(30); // Estimate viewport height
+                                    // Check if raw output pane is focused
+                                    use crate::app::WorkflowPane;
+                                    if app.workflow_focused_pane == WorkflowPane::RawOutput {
+                                        app.scroll_raw_output_up();
+                                    } else {
+                                        app.navigate_workflow_up();
+                                        app.update_workflow_scroll(30); // Estimate viewport height
+                                    }
                                 } else if matches!(app.current_view, View::Tabs) {
-                                    app.navigate_tab_up();
+                                    // Check if raw output pane is focused in current tab
+                                    use crate::app::WorkflowPane;
+                                    if !app.open_tabs.is_empty()
+                                        && app.open_tabs[app.active_tab_idx].focused_pane == WorkflowPane::RawOutput {
+                                        app.scroll_raw_output_up();
+                                    } else {
+                                        app.navigate_tab_up();
+                                    }
                                 } else {
                                     app.previous();
                                 }
                             }
                             KeyCode::Char('k') => {
                                 if matches!(app.current_view, View::WorkflowRunning(_)) {
-                                    app.navigate_workflow_up();
-                                    app.update_workflow_scroll(30); // Estimate viewport height
+                                    // Check if raw output pane is focused
+                                    use crate::app::WorkflowPane;
+                                    if app.workflow_focused_pane == WorkflowPane::RawOutput {
+                                        app.scroll_raw_output_up();
+                                    } else {
+                                        app.navigate_workflow_up();
+                                        app.update_workflow_scroll(30); // Estimate viewport height
+                                    }
                                 } else if matches!(app.current_view, View::Tabs) {
-                                    app.navigate_tab_up();
+                                    // Check if raw output pane is focused in current tab
+                                    use crate::app::WorkflowPane;
+                                    if !app.open_tabs.is_empty()
+                                        && app.open_tabs[app.active_tab_idx].focused_pane == WorkflowPane::RawOutput {
+                                        app.scroll_raw_output_up();
+                                    } else {
+                                        app.navigate_tab_up();
+                                    }
                                 } else {
                                     app.previous();
                                 }
@@ -257,6 +387,48 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                                 // K: Kill workflow (in Tabs view)
                                 if matches!(app.current_view, View::Tabs) {
                                     app.kill_current_tab();
+                                }
+                            }
+                            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                // Ctrl+D: Scroll down in raw output (half page)
+                                if matches!(app.current_view, View::WorkflowRunning(_)) {
+                                    use crate::app::WorkflowPane;
+                                    if app.workflow_focused_pane == WorkflowPane::RawOutput {
+                                        // Scroll down by half page (assuming ~15 lines)
+                                        for _ in 0..15 {
+                                            app.scroll_raw_output_down();
+                                        }
+                                    }
+                                } else if matches!(app.current_view, View::Tabs) {
+                                    use crate::app::WorkflowPane;
+                                    if !app.open_tabs.is_empty()
+                                        && app.open_tabs[app.active_tab_idx].focused_pane == WorkflowPane::RawOutput {
+                                        // Scroll down by half page (assuming ~15 lines)
+                                        for _ in 0..15 {
+                                            app.scroll_raw_output_down();
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                // Ctrl+U: Scroll up in raw output (half page)
+                                if matches!(app.current_view, View::WorkflowRunning(_)) {
+                                    use crate::app::WorkflowPane;
+                                    if app.workflow_focused_pane == WorkflowPane::RawOutput {
+                                        // Scroll up by half page (assuming ~15 lines)
+                                        for _ in 0..15 {
+                                            app.scroll_raw_output_up();
+                                        }
+                                    }
+                                } else if matches!(app.current_view, View::Tabs) {
+                                    use crate::app::WorkflowPane;
+                                    if !app.open_tabs.is_empty()
+                                        && app.open_tabs[app.active_tab_idx].focused_pane == WorkflowPane::RawOutput {
+                                        // Scroll up by half page (assuming ~15 lines)
+                                        for _ in 0..15 {
+                                            app.scroll_raw_output_up();
+                                        }
+                                    }
                                 }
                             }
                             KeyCode::Enter => {
@@ -301,6 +473,12 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                                     app.edit_current_tab();
                                 }
                             }
+                            KeyCode::Char('d') => {
+                                // d: Delete/clear current field value in WorkflowEdit view
+                                if matches!(app.current_view, View::WorkflowEdit(_)) {
+                                    app.delete_current_field();
+                                }
+                            }
                             KeyCode::Char('l') | KeyCode::Char('L') => match app.current_view {
                                 View::WorkflowDetail(_) | View::WorkflowEdit(_) => {
                                     app.launch_workflow_in_tab();
@@ -310,16 +488,6 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
                                 }
                                 _ => {}
                             },
-                            KeyCode::Char('1') => {
-                                if matches!(app.current_view, View::WorkflowRunning(_)) {
-                                    app.toggle_expand_phases();
-                                }
-                            }
-                            KeyCode::Char('2') => {
-                                if matches!(app.current_view, View::WorkflowRunning(_)) {
-                                    app.toggle_expand_tasks();
-                                }
-                            }
                             KeyCode::Char('3') => {
                                 if matches!(app.current_view, View::WorkflowRunning(_)) {
                                     app.toggle_expand_agents();
@@ -402,6 +570,12 @@ fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut A
         if app.should_quit {
             // Save session before quitting
             app.save_session();
+
+            // Cancel all background tasks before exit
+            app.tokio_runtime.block_on(async {
+                app.task_registry.cancel_everything().await;
+            });
+
             break;
         }
     }

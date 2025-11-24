@@ -1,7 +1,7 @@
 //! Tab rendering functions
 
 use ratatui::{
-    layout::Rect,
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
@@ -10,6 +10,7 @@ use ratatui::{
 use workflow_manager_sdk::WorkflowStatus;
 
 use super::components::centered_rect;
+use crate::app::WorkflowPane;
 use crate::models::*;
 
 pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App) {
@@ -80,7 +81,7 @@ pub fn render_tab_bar(f: &mut Frame, area: Rect, app: &App) {
     spans.push(Span::styled(
         "[+ New]",
         Style::default()
-            .fg(Color::Green)
+            .fg(Color::White)
             .add_modifier(Modifier::BOLD),
     ));
 
@@ -105,11 +106,11 @@ pub fn render_empty_tabs(f: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             "Press [Ctrl+T] or click [+ New]",
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(Color::White),
         )),
         Line::from(Span::styled(
             "to start a new workflow",
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(Color::White),
         )),
     ];
 
@@ -145,7 +146,7 @@ pub fn render_close_confirmation(f: &mut Frame, area: Rect) {
             Span::styled(
                 "[Y]",
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" Yes  "),
@@ -168,9 +169,25 @@ pub fn render_close_confirmation(f: &mut Frame, area: Rect) {
 }
 
 pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowTab) {
-    let title = format!(" {} #{} ", tab.workflow_name, tab.instance_number);
+    // Split area into two vertical panes (50/50)
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
 
-    let mut lines: Vec<Line> = Vec::new();
+    let left_pane = chunks[0];
+    let right_pane = chunks[1];
+
+    // Build structured logs for left pane
+    let mut structured_logs: Vec<Line> = Vec::new();
+
+    // Add handle ID (for all workflows)
+    structured_logs.push(Line::from(vec![
+        Span::styled(
+            format!("Handle ID: {}", tab.runtime_handle_id),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
 
     // Display hierarchical phase/task/agent structure
     let phases_snapshot: Vec<WorkflowPhase> = if let Ok(phases) = tab.workflow_phases.lock() {
@@ -191,7 +208,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
             let phase_color = match phase.status {
                 PhaseStatus::NotStarted => Color::Gray,
                 PhaseStatus::Running => Color::Yellow,
-                PhaseStatus::Completed => Color::Green,
+                PhaseStatus::Completed => Color::White,
                 PhaseStatus::Failed => Color::Red,
             };
 
@@ -205,7 +222,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                 Span::styled(format!("{} ", phase_icon), Style::default().fg(phase_color)),
                 Span::styled(
                     format!("{} ", expand_icon),
-                    Style::default().fg(Color::Cyan),
+                    Style::default().fg(Color::White),
                 ),
                 Span::styled(
                     format!("Phase {}: {}", phase.id, phase.name),
@@ -236,7 +253,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                 }
             }
 
-            lines.push(Line::from(phase_spans));
+            structured_logs.push(Line::from(phase_spans));
 
             if is_expanded {
                 // Display tasks
@@ -250,7 +267,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                     let task_color = match task.status {
                         TaskStatus::NotStarted => Color::Gray,
                         TaskStatus::Running => Color::Yellow,
-                        TaskStatus::Completed => Color::Green,
+                        TaskStatus::Completed => Color::White,
                         TaskStatus::Failed => Color::Red,
                     };
 
@@ -265,7 +282,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                         Span::styled(format!("{} ", task_icon), Style::default().fg(task_color)),
                         Span::styled(
                             format!("{} ", task_expand_icon),
-                            Style::default().fg(Color::Cyan),
+                            Style::default().fg(Color::White),
                         ),
                         Span::styled(
                             &task.description,
@@ -292,12 +309,12 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                         }
                     }
 
-                    lines.push(Line::from(task_spans));
+                    structured_logs.push(Line::from(task_spans));
 
                     if task_expanded {
                         // Display task messages
                         for msg in &task.messages {
-                            lines.push(Line::from(vec![
+                            structured_logs.push(Line::from(vec![
                                 Span::raw("    "),
                                 Span::styled(msg, Style::default().fg(Color::Gray)),
                             ]));
@@ -314,7 +331,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                             let agent_color = match agent.status {
                                 AgentStatus::NotStarted => Color::Gray,
                                 AgentStatus::Running => Color::Yellow,
-                                AgentStatus::Completed => Color::Green,
+                                AgentStatus::Completed => Color::White,
                                 AgentStatus::Failed => Color::Red,
                             };
 
@@ -330,7 +347,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                                 ),
                                 Span::styled(
                                     format!("{} ", agent_expand_icon),
-                                    Style::default().fg(Color::Cyan),
+                                    Style::default().fg(Color::White),
                                 ),
                                 Span::styled(
                                     format!("@{}", agent.name),
@@ -359,7 +376,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                                     ));
                                 }
                             }
-                            lines.push(Line::from(agent_line_spans));
+                            structured_logs.push(Line::from(agent_line_spans));
 
                             if agent_expanded {
                                 // Display scrollable 5-line window of agent messages
@@ -379,7 +396,7 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                                     let end = (start + window_size).min(total_messages);
 
                                     for msg in &agent.messages[start..end] {
-                                        lines.push(Line::from(vec![
+                                        structured_logs.push(Line::from(vec![
                                             Span::raw("      "),
                                             Span::styled(msg, Style::default().fg(Color::Gray)),
                                         ]));
@@ -393,10 +410,10 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                                             end,
                                             total_messages
                                         );
-                                        lines.push(Line::from(vec![Span::styled(
+                                        structured_logs.push(Line::from(vec![Span::styled(
                                             indicator,
                                             Style::default()
-                                                .fg(Color::Cyan)
+                                                .fg(Color::White)
                                                 .add_modifier(Modifier::ITALIC),
                                         )]));
                                     }
@@ -408,14 +425,14 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
 
                 // Display output files
                 if !phase.output_files.is_empty() {
-                    lines.push(Line::from(vec![
+                    structured_logs.push(Line::from(vec![
                         Span::raw("  "),
-                        Span::styled("Output files:", Style::default().fg(Color::Cyan)),
+                        Span::styled("Output files:", Style::default().fg(Color::White)),
                     ]));
                     for (path, desc) in &phase.output_files {
-                        lines.push(Line::from(vec![
+                        structured_logs.push(Line::from(vec![
                             Span::raw("    "),
-                            Span::styled("📄 ", Style::default().fg(Color::Green)),
+                            Span::styled("📄 ", Style::default().fg(Color::White)),
                             Span::styled(path, Style::default().fg(Color::Yellow)),
                             Span::raw(" - "),
                             Span::styled(desc, Style::default().fg(Color::Gray)),
@@ -424,23 +441,52 @@ pub fn render_tab_content(f: &mut Frame, area: Rect, _app: &App, tab: &WorkflowT
                 }
             }
         }
-    } else {
-        // No phases yet - show output
-        if let Ok(output) = tab.workflow_output.lock() {
-            for line in output.iter() {
-                lines.push(Line::from(line.clone()));
-            }
+    }
+
+    // Build raw output for right pane
+    let mut raw_output: Vec<Line> = Vec::new();
+    if let Ok(output) = tab.workflow_output.lock() {
+        for line in output.iter() {
+            raw_output.push(Line::from(line.clone()));
         }
     }
 
-    let content = Paragraph::new(lines)
+    // Determine focused pane styling
+    let left_border_style = if tab.focused_pane == WorkflowPane::StructuredLogs {
+        Style::default().fg(Color::White)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let right_border_style = if tab.focused_pane == WorkflowPane::RawOutput {
+        Style::default().fg(Color::White)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let left_title = format!(" {} #{} ", tab.workflow_name, tab.instance_number);
+
+    // Render left pane (Structured Logs)
+    let left_paragraph = Paragraph::new(structured_logs)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(title)
-                .style(Style::default().fg(Color::White)),
+                .title(left_title)
+                .border_style(left_border_style),
         )
         .scroll((tab.scroll_offset as u16, 0));
 
-    f.render_widget(content, area);
+    f.render_widget(left_paragraph, left_pane);
+
+    // Render right pane (Raw Output)
+    let right_paragraph = Paragraph::new(raw_output)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Raw Output ")
+                .border_style(right_border_style),
+        )
+        .scroll((tab.raw_output_scroll_offset as u16, 0));
+
+    f.render_widget(right_paragraph, right_pane);
 }

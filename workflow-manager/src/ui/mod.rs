@@ -15,6 +15,7 @@ use crate::models::{App, View};
 mod chat_view;
 mod components;
 mod header_footer;
+mod notifications;
 mod tab_views;
 mod workflow_views;
 
@@ -22,6 +23,7 @@ mod workflow_views;
 pub use chat_view::render_chat;
 pub use components::{render_dropdown, render_file_browser};
 pub use header_footer::{render_footer, render_header};
+pub use notifications::render_notifications;
 pub use tab_views::{
     render_close_confirmation, render_empty_tabs, render_tab_bar, render_tab_content,
 };
@@ -30,7 +32,7 @@ pub use workflow_views::{
 };
 
 /// Main UI rendering function - orchestrates all view rendering
-pub fn ui(f: &mut Frame, app: &App) {
+pub fn ui(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
         .constraints([
@@ -105,4 +107,7 @@ pub fn ui(f: &mut Frame, app: &App) {
     if app.show_close_confirmation {
         render_close_confirmation(f, f.area());
     }
+
+    // Notifications overlay (always render if there are active notifications)
+    render_notifications(f, app, f.area());
 }

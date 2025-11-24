@@ -549,9 +549,9 @@ impl Transport for SubprocessTransport {
                 let mut line = String::new();
 
                 // Add timeout to read_line to prevent hanging
-                // Increased to 5 minutes for complex suborchestrator operations
+                // Increased to 10 minutes for complex suborchestrator operations
                 match tokio::time::timeout(
-                    std::time::Duration::from_secs(300),
+                    std::time::Duration::from_secs(600),
                     stdout.read_line(&mut line)
                 ).await {
                     Ok(Ok(0)) => break, // EOF

@@ -4,9 +4,13 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use workflow_manager_sdk::Workflow;
+use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
 
 use super::{View, WorkflowHistory, WorkflowPhase, WorkflowTab};
 use crate::chat::ChatInterface;
+use crate::app::commands::AppCommand;
+use crate::app::notifications::NotificationManager;
+use crate::app::task_registry::TaskRegistry;
 
 /// Main application state
 pub struct App {
@@ -61,11 +65,26 @@ pub struct App {
     pub selected_agent: Option<String>,
     pub workflow_scroll_offset: usize,
 
+    // Two-pane view state (for non-tab workflow view)
+    pub workflow_focused_pane: super::tab::WorkflowPane,
+    pub workflow_raw_output_scroll: usize,
+
     // Chat interface
     pub chat: Option<ChatInterface>,
     pub runtime: Option<Arc<dyn workflow_manager_sdk::WorkflowRuntime>>,
-    pub chat_initialized: bool,
 
     // Tokio runtime for async operations
     pub tokio_runtime: tokio::runtime::Runtime,
+
+    // Command channel for MCP-TUI integration
+    /// Command sender (for cloning to other components)
+    pub command_tx: UnboundedSender<AppCommand>,
+    /// Command receiver (processed in event loop)
+    pub command_rx: UnboundedReceiver<AppCommand>,
+
+    /// Notification manager for user-visible messages
+    pub notifications: NotificationManager,
+
+    /// Registry for background task cleanup
+    pub task_registry: TaskRegistry,
 }

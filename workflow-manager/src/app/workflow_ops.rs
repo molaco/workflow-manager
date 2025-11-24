@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use uuid::Uuid;
 use workflow_manager_sdk::{WorkflowLog, WorkflowStatus};
 
 use super::*;
@@ -99,6 +100,17 @@ impl App {
         self.edit_buffer.clear();
     }
 
+    pub fn delete_current_field(&mut self) {
+        if let View::WorkflowEdit(idx) = self.current_view {
+            if let Some(workflow) = self.workflows.get(idx) {
+                if let Some(field) = workflow.info.fields.get(self.edit_field_index) {
+                    // Clear the field value (set to empty string)
+                    self.field_values.insert(field.name.clone(), String::new());
+                }
+            }
+        }
+    }
+
     pub fn launch_workflow(&mut self) {
         // Save field values to history
         self.save_to_history();
@@ -118,8 +130,8 @@ impl App {
             for field in &workflow.info.fields {
                 if let Some(value) = self.field_values.get(&field.name) {
                     if !value.is_empty() {
-                        // Convert field name to CLI arg format (e.g., "message" -> "--message")
-                        let arg_name = format!("--{}", field.name.replace('_', "-"));
+                        // Use the actual CLI argument from metadata, not the field name
+                        let arg_name = &field.cli_arg;
 
                         // For boolean flags, check if this looks like a bool field
                         // (description contains "[BOOL]" or value is "true"/"false")
@@ -129,11 +141,11 @@ impl App {
                         {
                             // Only add flag if value is "true" or non-empty
                             if value.eq_ignore_ascii_case("true") {
-                                args.push(arg_name);
+                                args.push(arg_name.clone());
                             }
                         } else {
                             // Regular argument with value
-                            args.push(arg_name);
+                            args.push(arg_name.clone());
                             args.push(value.clone());
                         }
                     }
@@ -188,10 +200,16 @@ impl App {
                                     // Check for structured log events
                                     if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
                                         // Parse WorkflowLog event
-                                        if let Ok(event) =
-                                            serde_json::from_str::<WorkflowLog>(json_str)
-                                        {
-                                            Self::handle_workflow_event(event, &phases);
+                                        match serde_json::from_str::<WorkflowLog>(json_str) {
+                                            Ok(event) => {
+                                                Self::handle_workflow_event(event, &phases);
+                                            }
+                                            Err(e) => {
+                                                if let Ok(mut output) = output.lock() {
+                                                    output.push(format!("ERROR: Failed to parse event: {}", e));
+                                                    output.push(format!("  JSON: {}", &json_str[..json_str.len().min(100)]));
+                                                }
+                                            }
                                         }
                                     } else {
                                         // Regular stderr output
@@ -249,7 +267,7 @@ impl App {
 
         if let Some(workflow) = self.workflows.get(idx) {
             let workflow_id = &workflow.info.id;
-            let binary_path = PathBuf::from("../target/debug").join(workflow_id);
+            let _binary_path = PathBuf::from("../target/debug").join(workflow_id);
 
             // Get next instance number
             let instance_number = {
@@ -282,7 +300,7 @@ impl App {
                         instance_number,
                         start_time: Some(chrono::Local::now()),
                         status: WorkflowStatus::Failed,
-                        child_process: None,
+                        runtime_handle_id: Uuid::new_v4(),
                         exit_code: None,
                         workflow_phases: Arc::new(Mutex::new(Vec::new())),
                         workflow_output: Arc::new(Mutex::new(Vec::new())),
@@ -295,6 +313,8 @@ impl App {
                         selected_task: None,
                         selected_agent: None,
                         agent_scroll_offsets: HashMap::new(),
+                        focused_pane: WorkflowPane::StructuredLogs,
+                        raw_output_scroll_offset: 0,
                         saved_logs: None,
                     };
 
@@ -327,7 +347,7 @@ impl App {
                         instance_number,
                         start_time: Some(chrono::Local::now()),
                         status: WorkflowStatus::Failed,
-                        child_process: None,
+                        runtime_handle_id: Uuid::new_v4(),
                         exit_code: None,
                         workflow_phases: Arc::new(Mutex::new(Vec::new())),
                         workflow_output: Arc::new(Mutex::new(Vec::new())),
@@ -340,6 +360,8 @@ impl App {
                         selected_task: None,
                         selected_agent: None,
                         agent_scroll_offsets: HashMap::new(),
+                        focused_pane: WorkflowPane::StructuredLogs,
+                        raw_output_scroll_offset: 0,
                         saved_logs: None,
                     };
 
@@ -358,24 +380,12 @@ impl App {
                 }
             }
 
-            // Build command arguments from field values
-            let mut args = Vec::new();
+            // Build parameters map from field values
+            let mut params = HashMap::new();
             for field in &workflow.info.fields {
                 if let Some(value) = self.field_values.get(&field.name) {
                     if !value.is_empty() {
-                        let arg_name = format!("--{}", field.name.replace('_', "-"));
-
-                        if field.description.contains("[BOOL]")
-                            || value.eq_ignore_ascii_case("true")
-                            || value.eq_ignore_ascii_case("false")
-                        {
-                            if value.eq_ignore_ascii_case("true") {
-                                args.push(arg_name);
-                            }
-                        } else {
-                            args.push(arg_name);
-                            args.push(value.clone());
-                        }
+                        params.insert(field.name.clone(), value.clone());
                     }
                 }
             }
@@ -394,7 +404,7 @@ impl App {
                 instance_number,
                 start_time: Some(chrono::Local::now()),
                 status: WorkflowStatus::Running,
-                child_process: None,
+                runtime_handle_id: Uuid::new_v4(),
                 exit_code: None,
                 workflow_phases: Arc::new(Mutex::new(Vec::new())),
                 workflow_output: Arc::new(Mutex::new(Vec::new())),
@@ -407,84 +417,91 @@ impl App {
                 selected_task: None,
                 selected_agent: None,
                 agent_scroll_offsets: HashMap::new(),
+                focused_pane: WorkflowPane::StructuredLogs,
+                raw_output_scroll_offset: 0,
                 saved_logs: None,
             };
 
-            // Spawn process
-            match Command::new(&binary_path)
-                .args(&args)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-            {
-                Ok(mut child) => {
-                    let output_clone = Arc::clone(&tab.workflow_output);
-                    let phases_clone = Arc::clone(&tab.workflow_phases);
-
-                    // Spawn thread to read stdout
-                    if let Some(stdout) = child.stdout.take() {
-                        let output = Arc::clone(&output_clone);
-                        thread::spawn(move || {
-                            use std::io::BufRead;
-                            let reader = std::io::BufReader::new(stdout);
-                            for line in reader.lines().flatten() {
-                                if let Ok(mut output) = output.lock() {
-                                    output.push(line);
-                                }
-                            }
-                        });
+            // Get runtime
+            let runtime = match &self.runtime {
+                Some(r) => r.clone(),
+                None => {
+                    // Create error tab
+                    tab.status = WorkflowStatus::Failed;
+                    if let Ok(mut output) = tab.workflow_output.lock() {
+                        output.push("❌ Runtime not available".to_string());
                     }
-
-                    // Spawn thread to read stderr and parse structured logs
-                    if let Some(stderr) = child.stderr.take() {
-                        let output = Arc::clone(&output_clone);
-                        let phases = phases_clone;
-                        thread::spawn(move || {
-                            use std::io::BufRead;
-                            let reader = std::io::BufReader::new(stderr);
-                            for line in reader.lines() {
-                                if let Ok(line) = line {
-                                    // Check for structured log events
-                                    if let Some(json_str) = line.strip_prefix("__WF_EVENT__:") {
-                                        if let Ok(event) =
-                                            serde_json::from_str::<WorkflowLog>(json_str)
-                                        {
-                                            Self::handle_workflow_event(event, &phases);
-                                        }
-                                    } else {
-                                        // Regular stderr output
-                                        if let Ok(mut output) = output.lock() {
-                                            output.push(format!("ERROR: {}", line));
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                    }
-
-                    tab.child_process = Some(child);
-
-                    // Add tab and switch to it
                     self.open_tabs.push(tab);
                     self.active_tab_idx = self.open_tabs.len() - 1;
                     self.current_view = View::Tabs;
-                    self.in_new_tab_flow = false; // Exit new tab flow
+                    self.in_new_tab_flow = false;
+                    return;
                 }
+            };
+
+            // Execute via runtime
+            let handle = self.tokio_runtime.block_on(async {
+                runtime.execute_workflow(&workflow.info.id, params).await
+            });
+
+            let handle_id = match handle {
+                Ok(h) => *h.id(),
                 Err(e) => {
-                    // Show error in tab
+                    // Create error tab
                     tab.status = WorkflowStatus::Failed;
                     if let Ok(mut output) = tab.workflow_output.lock() {
                         output.push(format!("❌ Failed to launch workflow: {}", e));
-                        output.push(format!("   Binary path: {}", binary_path.display()));
-                        output.push(format!("   Args: {:?}", args));
                     }
                     self.open_tabs.push(tab);
                     self.active_tab_idx = self.open_tabs.len() - 1;
                     self.current_view = View::Tabs;
-                    self.in_new_tab_flow = false; // Exit new tab flow
+                    self.in_new_tab_flow = false;
+                    return;
                 }
-            }
+            };
+
+            // Update tab with handle_id
+            tab.runtime_handle_id = handle_id;
+
+            // Clone Arc references BEFORE pushing tab
+            let tab_output = Arc::clone(&tab.workflow_output);
+            let tab_phases = Arc::clone(&tab.workflow_phases);
+
+            // Add tab to list
+            self.open_tabs.push(tab);
+            self.active_tab_idx = self.open_tabs.len() - 1;
+            self.current_view = View::Tabs;
+            self.in_new_tab_flow = false;
+
+            // Subscribe to logs and spawn streaming task
+            let log_task = self.tokio_runtime.spawn({
+                let runtime_clone = runtime.clone();
+
+                async move {
+                    if let Ok(mut logs_rx) = runtime_clone.subscribe_logs(&handle_id).await {
+                        while let Ok(log) = logs_rx.recv().await {
+                            // Handle both RawOutput and structured logs
+                            match &log {
+                                workflow_manager_sdk::WorkflowLog::RawOutput { stream: _, line } => {
+                                    // Add to raw output
+                                    if let Ok(mut output) = tab_output.lock() {
+                                        output.push(line.clone());
+                                    }
+                                }
+                                _ => {
+                                    // Structured log - update phases
+                                    App::handle_workflow_event(log, &tab_phases);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Register task for cleanup
+            self.tokio_runtime.block_on(async {
+                self.task_registry.register(handle_id, log_task).await;
+            });
         }
     }
 
@@ -626,8 +643,8 @@ impl App {
                         if let Some(task) = phase.tasks.iter_mut().find(|t| t.id == task_id) {
                             if let Some(agent) = task.agents.iter_mut().find(|a| a.id == agent_id) {
                                 agent.messages.push(message.clone());
-                                break;
                             }
+                            break;
                         }
                     }
                 }
@@ -683,6 +700,11 @@ impl App {
                     if let Some(p) = phases.get_mut(phase) {
                         p.output_files.push((file_path, description));
                     }
+                }
+                WorkflowLog::RawOutput { .. } => {
+                    // Raw output is handled separately in format_workflow_log()
+                    // for display in the raw output pane. This function only updates
+                    // the structured log view (phases/tasks/agents tree).
                 }
             }
         }

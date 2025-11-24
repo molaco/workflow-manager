@@ -7,6 +7,7 @@ pub use claude_agent_sdk;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
+use chrono::{DateTime, Local};
 
 // Re-export async trait for convenience
 pub use async_trait::async_trait;
@@ -192,6 +193,11 @@ pub enum WorkflowLog {
         phase: usize,
         file_path: String,
         description: String,
+    },
+    /// Raw output from workflow process (stdout/stderr)
+    RawOutput {
+        stream: String,  // "stdout" or "stderr"
+        line: String,
     },
 }
 
@@ -393,6 +399,18 @@ impl WorkflowHandle {
 /// Result type for workflow operations
 pub type WorkflowResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+/// Lightweight execution summary for listing (excludes logs and params)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionSummary {
+    pub id: Uuid,
+    pub workflow_id: String,
+    pub workflow_name: String,
+    pub status: WorkflowStatus,
+    pub start_time: DateTime<Local>,
+    pub end_time: Option<DateTime<Local>>,
+    pub exit_code: Option<i32>,
+}
+
 /// Runtime trait for workflow discovery and execution
 /// This provides a unified API for both TUI and MCP consumers
 #[async_trait]
@@ -417,15 +435,43 @@ pub trait WorkflowRuntime: Send + Sync {
         params: HashMap<String, String>,
     ) -> WorkflowResult<WorkflowHandle>;
 
-    /// Subscribe to logs from a running workflow
+    /// Subscribe to logs from a running workflow (real-time stream)
     async fn subscribe_logs(
         &self,
         handle_id: &Uuid,
     ) -> WorkflowResult<tokio::sync::broadcast::Receiver<WorkflowLog>>;
+
+    /// Get historical logs from a workflow execution (for MCP tools)
+    async fn get_logs(&self, handle_id: &Uuid, limit: Option<usize>) -> WorkflowResult<Vec<WorkflowLog>>;
 
     /// Get current status of a running workflow
     async fn get_status(&self, handle_id: &Uuid) -> WorkflowResult<WorkflowStatus>;
 
     /// Cancel a running workflow
     async fn cancel_workflow(&self, handle_id: &Uuid) -> WorkflowResult<()>;
+
+    /// List workflow executions with pagination and optional filtering
+    ///
+    /// # Arguments
+    /// * `limit` - Maximum number of executions to return
+    /// * `offset` - Number of executions to skip (for pagination)
+    /// * `workflow_id` - Optional filter by workflow type
+    ///
+    /// # Returns
+    /// Vector of execution summaries, ordered by start_time descending (newest first)
+    async fn list_executions(
+        &self,
+        limit: usize,
+        offset: usize,
+        workflow_id: Option<String>,
+    ) -> WorkflowResult<Vec<ExecutionSummary>>;
+
+    /// Get parameters used for a specific workflow execution
+    ///
+    /// # Arguments
+    /// * `handle_id` - The execution UUID
+    ///
+    /// # Returns
+    /// HashMap of parameter names to values used in the execution
+    async fn get_params(&self, handle_id: &Uuid) -> WorkflowResult<HashMap<String, String>>;
 }

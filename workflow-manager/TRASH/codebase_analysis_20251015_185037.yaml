@@ -1,0 +1,527 @@
+project_name: Workflow Manager & Claude Agent SDK for Rust
+project_type: Rust Workspace (Multi-Crate Monorepo)
+total_size: 3.0 MB (excluding .git and target)
+file_statistics:
+  total_files: 214
+  by_extension:
+    rust:
+      total_files: 82
+      total_lines: 42368
+      breakdown:
+        source_files: 71
+        test_files: 11
+      by_crate:
+        claude_agent_sdk:
+          source_files: 17
+          source_lines: 5836
+          test_files: 3
+          test_lines: 993
+          example_files: 17
+          example_lines: 2679
+        workflow_manager:
+          source_files: 31
+          source_lines: 7861
+          example_and_bin_files: 11
+          example_lines: 6076
+        workflow_manager_sdk:
+          source_files: 1
+          source_lines: 431
+        workflow_manager_macros:
+          source_files: 1
+          source_lines: 346
+    python:
+      total_files: 15
+      total_lines: 6250
+      breakdown:
+        source_files: 7
+        test_files: 8
+      location: SCRIPTS/
+    markdown:
+      total_files: 30
+      total_lines: 8199
+    yaml:
+      total_files: 43
+      total_lines: 20905
+    json:
+      total_files: 918
+      total_lines: 26
+      note: Primarily in .git and .uv-cache directories
+    toml:
+      total_files: 5
+      total_lines: 166
+      note: Cargo workspace and package manifests
+    html_xml:
+      total_files: 107
+      note: Primarily generated documentation in target/doc
+    text:
+      total_files: 6
+    shell_scripts:
+      total_files: 6
+    config_files:
+      total_files: 2
+      types:
+      - .claudeignore
+      - .gitignore
+directory_structure:
+  root_level:
+  - name: workflow-manager/
+    purpose: Main TUI application for managing AI-powered workflows
+    subdirectories:
+    - src/: Source code (main.rs, modules)
+    - src/bin/: Additional binary examples (5 executables)
+    - src/app/: Application logic (navigation, workflow operations, history)
+    - src/ui/: Terminal user interface components (ratatui-based)
+    - examples/: Workflow examples (6 files)
+    - templates/: Workflow templates
+    - RESULTS/: Output and results storage
+  - name: claude-agent-sdk-rust/
+    purpose: Rust SDK for building AI agents powered by Claude Code
+    subdirectories:
+    - src/: Core SDK implementation
+    - src/client/: Client implementation
+    - src/control/: Control protocol handler
+    - src/hooks/: Hook system for intercepting events
+    - src/mcp/: Model Context Protocol (MCP) implementation
+    - src/message/: Message type system
+    - src/permissions/: Permission callback system
+    - src/transport/: Transport layer (subprocess CLI)
+    - examples/: 17 comprehensive examples
+    - tests/: Integration test suite
+  - name: workflow-manager-sdk/
+    purpose: SDK for creating workflow-manager workflows
+    subdirectories:
+    - src/: Single lib.rs file with workflow abstractions
+  - name: workflow-manager-macros/
+    purpose: Procedural macros for workflow definitions
+    subdirectories:
+    - src/: Proc macro implementation (derive macros)
+  - name: SCRIPTS/
+    purpose: Python utility scripts
+    contents:
+    - research.py
+    - check_yaml.py
+    - get_task.py
+    - 'tasks.py (large: 69,814 lines)'
+    - test*.py (multiple test scripts)
+  - name: DOCS/
+    purpose: Documentation directory
+    subdirectories:
+    - RUST_SDK/: SDK-specific documentation
+  - name: TEMPLATES/
+    purpose: Template files
+  - name: RESULTS/
+    purpose: Output results storage
+  - name: TRASH/
+    purpose: Deleted/unused files
+  - name: .claude/
+    purpose: Claude Code configuration
+    subdirectories:
+    - commands/: Custom Claude commands
+  - name: .pytest_cache/
+    purpose: Python test cache
+  - name: .uv-cache/
+    purpose: Python virtual environment cache
+    subdirectories:
+    - environments-v2/: Cached Python environments
+  - name: target/
+    purpose: Rust build artifacts (debug, release, documentation)
+workspace:
+  type: Cargo Workspace
+  resolver: '2'
+  members:
+  - workflow-manager
+  - workflow-manager-sdk
+  - workflow-manager-macros
+  - claude-agent-sdk-rust
+  shared_dependencies:
+  - tokio = { version = "1", features = ["full"] }
+  - serde = { version = "1", features = ["derive"] }
+  - serde_json = "1"
+  - serde_yaml = "0.9"
+  - anyhow = "1"
+  - chrono = "0.4"
+entry_points:
+  primary:
+  - path: workflow-manager/src/main.rs
+    type: TUI Application
+    lines: 403
+    description: Main workflow manager terminal UI application
+  binaries:
+  - workflow-manager/src/bin/simple_echo.rs
+  - workflow-manager/src/bin/hooks_demo.rs
+  - workflow-manager/src/bin/demo_multiphase.rs
+  - workflow-manager/src/bin/research_agent.rs
+  - workflow-manager/src/bin/simple_query.rs
+  libraries:
+  - path: claude-agent-sdk-rust/src/lib.rs
+    lines: 295
+    description: Main SDK library with query() function and ClaudeSDKClient
+  - path: workflow-manager-sdk/src/lib.rs
+    lines: 431
+    description: Workflow definition SDK with traits and macros
+  - path: workflow-manager-macros/src/lib.rs
+    lines: 346
+    description: Procedural macro crate for WorkflowDefinition derive
+configuration:
+  build_manifests:
+  - path: Cargo.toml
+    type: Workspace manifest
+    purpose: Defines workspace members and shared dependencies
+  - path: workflow-manager/Cargo.toml
+    purpose: Main application dependencies (ratatui, crossterm, clap, reqwest)
+  - path: claude-agent-sdk-rust/Cargo.toml
+    purpose: SDK dependencies (tokio, serde, futures, async-trait, jsonschema)
+  - path: workflow-manager-sdk/Cargo.toml
+    purpose: 'SDK interface dependencies (minimal: serde, tokio, async-trait)'
+  - path: workflow-manager-macros/Cargo.toml
+    purpose: Proc macro dependencies (syn, quote, proc-macro2)
+  documentation:
+  - claude-agent-sdk-rust/README.md
+  - claude-agent-sdk-rust/examples/README.md
+  - DOCS/RUST_SDK/README.md
+  - CLAUDE.md
+  - PROMPT.md
+  - PROMTP2.md
+  version_control:
+  - .gitignore
+  - .claudeignore
+  claude_code:
+  - .claude/settings.local.json
+  - .claude/commands/think.md
+  - .mcp.json (symlink to Nix store)
+  ci_cd: None detected
+dependencies:
+  rust_external:
+    async_runtime:
+    - tokio (v1) - Full async runtime
+    - tokio-util (v0.7) - Codec utilities
+    - futures (v0.3) - Async streams
+    - async-stream (v0.3)
+    - async-trait (v0.1)
+    serialization:
+    - serde (v1) - Serialization framework
+    - serde_json (v1) - JSON support
+    - serde_yaml (v0.9) - YAML support
+    http_client:
+    - reqwest (v0.11-0.12) - HTTP client with JSON support
+    tui_terminal:
+    - ratatui (v0.28) - Terminal UI framework
+    - crossterm (v0.28) - Terminal manipulation
+    cli_utilities:
+    - clap (v4) - Command-line argument parsing
+    - dotenv (v0.15) - Environment variable loading
+    - directories (v5.0) - Standard directory paths
+    error_handling:
+    - anyhow (v1) - Error handling
+    - thiserror (v1.0) - Error derive macros
+    validation:
+    - jsonschema (v0.18) - JSON Schema validation
+    utilities:
+    - uuid (v1) - UUID generation
+    - chrono (v0.4) - Date/time handling
+    - fuzzy-matcher (v0.3) - Fuzzy string matching
+    - which (v6.0) - Executable path finding
+    macros:
+    - syn (v2.0) - Rust syntax parsing
+    - quote (v1.0) - Code generation
+    - proc-macro2 (v1.0) - Procedural macro support
+    optional:
+    - tracing (v0.1) - Structured logging (optional)
+    - tracing-subscriber (v0.3) - Tracing utilities (optional)
+  internal_dependencies:
+    workflow_manager_depends_on:
+    - claude-agent-sdk (local path)
+    - workflow-manager-sdk (local path)
+    workflow_manager_sdk_depends_on:
+    - workflow-manager-macros (local path)
+    - claude-agent-sdk (local path, re-exported)
+  python_external:
+    note: Python dependencies not tracked (scripts use uv for environment management)
+    environment_manager: uv (Python package manager)
+  system_requirements:
+  - Rust 1.75.0 or later
+  - Node.js (for Claude Code CLI)
+  - '@anthropic-ai/claude-code (npm package)'
+architecture:
+  project_pattern: Monorepo with Cargo Workspace
+  module_organization: Layered modular architecture
+  layers:
+  - name: Procedural Macros
+    crate: workflow-manager-macros
+    purpose: Compile-time code generation for workflow definitions
+  - name: SDK Layer
+    crates:
+    - claude-agent-sdk-rust
+    - workflow-manager-sdk
+    purpose: Reusable libraries for building workflows and AI agents
+  - name: Application Layer
+    crate: workflow-manager
+    purpose: End-user TUI application
+  architectural_patterns:
+  - pattern: Builder Pattern
+    location: claude-agent-sdk-rust
+    usage: ClaudeAgentOptions builder for configuration
+  - pattern: Async Streams
+    location: claude-agent-sdk-rust
+    usage: Message streaming with futures::Stream
+  - pattern: Trait-based Plugin System
+    location: workflow-manager-sdk
+    usage: WorkflowDefinition trait for custom workflows
+  - pattern: Procedural Macro Derive
+    location: workflow-manager-macros
+    usage: '#[derive(WorkflowDefinition)] for automatic trait implementation'
+  - pattern: Hook System
+    location: claude-agent-sdk-rust/src/hooks
+    usage: Event interception (before_tool_call, after_tool_call, after_agent_turn)
+  - pattern: Permission Callbacks
+    location: claude-agent-sdk-rust/src/permissions
+    usage: User approval for sensitive operations
+  - pattern: MCP (Model Context Protocol)
+    location: claude-agent-sdk-rust/src/mcp
+    usage: Custom tool integration via JSONRPC
+  - pattern: TUI Component Architecture
+    location: workflow-manager/src/ui
+    usage: Modular UI components with ratatui
+  - pattern: State Management
+    location: workflow-manager/src/app
+    usage: Centralized app state with navigation and history
+  concurrency_model: Async/await with Tokio runtime (multi-threaded)
+  type_safety:
+  - Newtype pattern for domain types
+  - Strong typing with Rust's type system
+  - Serde for serialization safety
+  - JSON Schema validation for external data
+key_components:
+  claude_agent_sdk:
+    public_api:
+    - query() function - Simple one-shot queries
+    - ClaudeSDKClient - Bidirectional stateful client
+    - ClaudeAgentOptions - Configuration builder
+    - Message enum - All message types
+    - Hook system - Event interception
+    - Permission callbacks - User approval system
+    - SdkMcpServer - Custom in-process tools
+    core_modules:
+    - path: src/lib.rs
+      lines: 295
+      purpose: Public API and re-exports
+    - path: src/types.rs
+      lines: 25515
+      purpose: Comprehensive type system (largest file)
+    - path: src/client/
+      purpose: ClaudeSDKClient implementation
+    - path: src/transport/
+      purpose: Subprocess communication with Claude CLI
+    - path: src/control/
+      purpose: Control protocol handler
+    - path: src/hooks/
+      purpose: Hook system implementation
+    - path: src/permissions/
+      purpose: Permission callback system
+    - path: src/mcp/
+      purpose: Model Context Protocol server
+    - path: src/message/
+      purpose: Message type parsing
+    - path: src/query.rs
+      lines: 4429
+      purpose: Simple query implementation
+    - path: src/error.rs
+      lines: 4541
+      purpose: Error types with thiserror
+    test_coverage:
+      total_tests: 70 tests (42 unit + 28 doc tests)
+      test_files: 3
+      test_lines: 993
+    examples:
+      count: 17
+      total_lines: 2679
+      notable_examples:
+      - simple_query.rs - Basic usage
+      - interactive_client.rs - Bidirectional communication
+      - bidirectional_demo.rs - Concurrent operations
+      - hooks_demo.rs - Hook system (3 examples)
+      - hooks_advanced_demo.rs - Advanced hook patterns
+      - permissions_demo.rs - Permission callbacks (3 examples)
+      - mcp_demo.rs - Custom tools with MCP
+      - mcp_integration_demo.rs - MCP integration
+      - tts_notify_demo.rs - Text-to-speech notifications
+  workflow_manager:
+    description: Terminal UI application for managing AI-powered workflows
+    core_modules:
+    - path: src/main.rs
+      lines: 403
+      purpose: Application entry point and event loop
+    - path: src/app/
+      purpose: Application state and logic
+      submodules:
+      - models/app.rs - App state structure
+      - models/view.rs - View state
+      - models/workflow.rs - Workflow models
+      - models/history.rs - History tracking
+      - navigation.rs - Tab and view navigation
+      - workflow_ops.rs - Workflow operations
+      - history.rs - History management
+    - path: src/ui/
+      purpose: Terminal UI components
+      submodules:
+      - mod.rs - UI entry point
+      - tab_views.rs - Tab rendering
+      - workflow_views.rs - Workflow-specific views
+      - chat_view.rs - Chat interface
+      - components.rs - Reusable UI components
+      - header_footer.rs - Layout components
+    - path: src/chat.rs
+      lines: 8684
+      purpose: Chat functionality implementation
+    - path: src/runtime.rs
+      lines: 8947
+      purpose: Workflow runtime execution
+    - path: src/discovery.rs
+      lines: 7636
+      purpose: Workflow discovery system
+    - path: src/mcp_tools.rs
+      lines: 8876
+      purpose: MCP tool integration
+    - path: src/utils.rs
+      lines: 1987
+      purpose: Utility functions
+    - path: src/models.rs
+      lines: 319
+      purpose: Re-exports and shared models
+    binaries:
+    - name: workflow-manager (default)
+      purpose: Main TUI application
+    - name: simple_echo
+      purpose: Echo workflow example
+    - name: hooks_demo
+      purpose: Hook system demonstration
+    - name: demo_multiphase
+      purpose: Multi-phase workflow example
+    - name: research_agent
+      purpose: Research agent workflow
+    - name: simple_query
+      purpose: Simple query example
+    features:
+    - Interactive TUI with ratatui
+    - Workflow discovery and execution
+    - Chat interface with Claude
+    - Multi-phase workflow support
+    - History tracking and navigation
+    - Fuzzy search for workflows
+    - MCP tool integration
+    - State file management
+  workflow_manager_sdk:
+    purpose: SDK for creating workflow definitions
+    main_file: src/lib.rs (431 lines)
+    exports:
+      traits:
+      - WorkflowDefinition - Core trait for workflows
+      macros:
+      - WorkflowDefinition derive macro (re-exported)
+      types:
+      - WorkflowMetadata - Workflow identification
+      - FullWorkflowMetadata - Complete metadata with fields
+      - FieldSchema - Field definition
+      - FieldType - Field type enum (Text, Number, FilePath, Select, PhaseSelector, StateFile)
+      - WorkflowStatus - Status tracking (Pending, InProgress, Completed, Failed)
+      re_exports:
+      - claude_agent_sdk - Full SDK re-export
+      - async_trait - For async trait implementations
+    design_philosophy: Minimal abstraction layer for workflow creation
+  workflow_manager_macros:
+    purpose: Procedural macros for automatic trait implementation
+    main_file: src/lib.rs (346 lines)
+    macros:
+    - name: WorkflowDefinition
+      type: Derive macro
+      purpose: Auto-implement WorkflowDefinition trait from struct definition
+      features:
+      - Parses struct attributes for metadata
+      - Generates field schemas from struct fields
+      - Implements print_metadata() method
+    dependencies:
+    - syn - Parsing Rust syntax
+    - quote - Code generation
+    - proc-macro2 - Procedural macro infrastructure
+notable_features:
+- feature: Full Feature Parity with Python SDK
+  status: Completed (v0.1.1)
+  description: Idiomatic Rust implementation matching Python SDK capabilities
+- feature: Lock-Free Transport Architecture
+  location: claude-agent-sdk-rust/src/transport
+  description: Efficient subprocess communication without blocking
+- feature: Comprehensive Hook System
+  location: claude-agent-sdk-rust/src/hooks
+  hooks:
+  - before_tool_call
+  - after_tool_call
+  - after_agent_turn
+  description: Intercept and modify agent behavior at runtime
+- feature: Permission Callback System
+  location: claude-agent-sdk-rust/src/permissions
+  description: User approval for sensitive operations (file access, bash execution)
+- feature: SDK MCP Server
+  location: claude-agent-sdk-rust/src/mcp
+  description: In-process custom tools with JSONRPC protocol
+- feature: Workflow Template System
+  location: workflow-manager/templates
+  description: Reusable workflow templates
+- feature: Terminal UI with Ratatui
+  location: workflow-manager/src/ui
+  description: Rich terminal interface with tab navigation and chat views
+- feature: Automatic Workflow Discovery
+  location: workflow-manager/src/discovery.rs
+  description: Dynamic workflow loading and registration
+- feature: Python Scripting Support
+  location: SCRIPTS/
+  description: Utility scripts for research, task management, and testing
+development_status:
+  maturity: Active Development
+  version: v0.1.1 (SDK), v0.1.0 (Workflow Manager)
+  completed_features:
+  - Core SDK with full Python parity
+  - Comprehensive test suite (70 tests passing)
+  - Full documentation with examples
+  - TUI application with workflow management
+  - Hook and permission systems
+  - MCP server implementation
+  code_quality:
+    total_rust_code: 42,368 lines
+    total_python_code: 6,250 lines
+    documentation_lines: 8,199 lines (Markdown)
+    test_coverage: 70 tests for SDK
+    examples: 34 example programs total
+  repository:
+    vcs: Git
+    repository_url: https://github.com/anthropics/claude-agent-sdk-rust
+    license: MIT
+usage_patterns:
+  primary_use_cases:
+  - Building AI agents with Claude Code
+  - Creating workflow automation tools
+  - Interactive Claude conversations with TUI
+  - Custom tool integration via MCP
+  - Multi-phase workflow execution
+  target_audience:
+  - Rust developers building AI applications
+  - Workflow automation engineers
+  - AI researchers and experimenters
+  - CLI/TUI tool developers
+build_artifacts:
+  debug_builds: target/debug/
+  release_builds: target/release/
+  documentation: target/doc/
+  generated_documentation:
+  - target/doc/claude_agent_sdk/
+  - HTML documentation with search index
+  - 107 HTML files generated
+technical_notes:
+- Workspace uses Rust 2021 edition with resolver v2
+- Heavy use of async/await with Tokio for concurrency
+- Type-safe message parsing with comprehensive type system
+- Zero-cost abstractions with Rust's ownership model
+- Cross-platform support (relies on crossterm for terminal)
+- JSON Schema validation for external tool inputs
+- Python scripts use uv for virtual environment management
+- No CI/CD detected in repository
+- Development appears to be NixOS-based (symlink to Nix store)

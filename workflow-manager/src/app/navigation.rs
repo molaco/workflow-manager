@@ -471,4 +471,60 @@ impl App {
             }
         }
     }
+
+    /// Switch to the left pane in the current workflow view
+    pub fn switch_pane_left(&mut self) {
+        use crate::app::WorkflowPane;
+
+        if matches!(self.current_view, View::WorkflowRunning(_)) {
+            self.workflow_focused_pane = WorkflowPane::StructuredLogs;
+        } else if matches!(self.current_view, View::Tabs) && !self.open_tabs.is_empty() {
+            let tab = &mut self.open_tabs[self.active_tab_idx];
+            tab.focused_pane = WorkflowPane::StructuredLogs;
+        }
+    }
+
+    /// Switch to the right pane in the current workflow view
+    pub fn switch_pane_right(&mut self) {
+        use crate::app::WorkflowPane;
+
+        if matches!(self.current_view, View::WorkflowRunning(_)) {
+            self.workflow_focused_pane = WorkflowPane::RawOutput;
+        } else if matches!(self.current_view, View::Tabs) && !self.open_tabs.is_empty() {
+            let tab = &mut self.open_tabs[self.active_tab_idx];
+            tab.focused_pane = WorkflowPane::RawOutput;
+        }
+    }
+
+    /// Scroll the raw output pane up
+    pub fn scroll_raw_output_up(&mut self) {
+        use crate::app::WorkflowPane;
+
+        if matches!(self.current_view, View::WorkflowRunning(_)) {
+            if self.workflow_focused_pane == WorkflowPane::RawOutput && self.workflow_raw_output_scroll > 0 {
+                self.workflow_raw_output_scroll -= 1;
+            }
+        } else if matches!(self.current_view, View::Tabs) && !self.open_tabs.is_empty() {
+            let tab = &mut self.open_tabs[self.active_tab_idx];
+            if tab.focused_pane == WorkflowPane::RawOutput && tab.raw_output_scroll_offset > 0 {
+                tab.raw_output_scroll_offset -= 1;
+            }
+        }
+    }
+
+    /// Scroll the raw output pane down
+    pub fn scroll_raw_output_down(&mut self) {
+        use crate::app::WorkflowPane;
+
+        if matches!(self.current_view, View::WorkflowRunning(_)) {
+            if self.workflow_focused_pane == WorkflowPane::RawOutput {
+                self.workflow_raw_output_scroll += 1;
+            }
+        } else if matches!(self.current_view, View::Tabs) && !self.open_tabs.is_empty() {
+            let tab = &mut self.open_tabs[self.active_tab_idx];
+            if tab.focused_pane == WorkflowPane::RawOutput {
+                tab.raw_output_scroll_offset += 1;
+            }
+        }
+    }
 }

@@ -12,23 +12,62 @@ use crate::chat::ChatInterface;
 mod models;
 pub use models::*;
 
+// Command pattern modules
+pub mod commands;
+pub mod notifications;
+pub mod task_registry;
+
 // Declare submodules
 mod file_browser;
 mod history;
 mod navigation;
 mod tabs;
 mod workflow_ops;
+mod command_handlers;
+
+// Re-export for convenience
+pub use commands::{AppCommand, NotificationLevel};
+pub use notifications::NotificationManager;
+pub use task_registry::TaskRegistry;
 
 // Re-export methods from submodules
 
 impl App {
     pub fn new() -> Self {
-        let workflows = crate::utils::load_workflows();
+        // CHANGE: Discover workflows ONCE
+        let discovered_workflows = crate::discovery::discover_workflows();
+
+        // Convert to UI model (clone metadata since we need it for runtime too)
+        let workflows = discovered_workflows
+            .iter()
+            .map(|dw| workflow_manager_sdk::Workflow {
+                info: workflow_manager_sdk::WorkflowInfo {
+                    id: dw.metadata.id.clone(),
+                    name: dw.metadata.name.clone(),
+                    description: dw.metadata.description.clone(),
+                    status: workflow_manager_sdk::WorkflowStatus::NotStarted,
+                    metadata: dw.metadata.clone(),
+                    fields: dw.fields.clone(),
+                    progress_messages: vec![],
+                },
+                source: workflow_manager_sdk::WorkflowSource::BuiltIn,
+            })
+            .collect();
+
         let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
         let history = crate::utils::load_history();
 
         // Create tokio runtime for async operations
         let tokio_runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+
+        // Create command channel
+        let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // Create notification manager
+        let notifications = NotificationManager::new();
+
+        // Create task registry
+        let task_registry = TaskRegistry::new();
 
         let mut app = Self {
             workflows,
@@ -65,19 +104,37 @@ impl App {
             selected_task: None,
             selected_agent: None,
             workflow_scroll_offset: 0,
+            workflow_focused_pane: WorkflowPane::StructuredLogs,
+            workflow_raw_output_scroll: 0,
             chat: None,
             runtime: None,
-            chat_initialized: false,
             tokio_runtime,
+            command_tx: command_tx.clone(),
+            command_rx,
+            notifications,
+            task_registry: task_registry.clone(),
         };
 
-        // Initialize runtime
-        match crate::runtime::ProcessBasedRuntime::new() {
+        // CHANGE: Initialize runtime WITH discovered workflows
+        match crate::runtime::ProcessBasedRuntime::new_with_workflows(discovered_workflows) {
             Ok(runtime) => {
+                // Get database reference before moving runtime
+                let database = runtime.get_database();
+
                 let runtime_arc =
                     Arc::new(runtime) as Arc<dyn workflow_manager_sdk::WorkflowRuntime>;
                 app.runtime = Some(runtime_arc.clone());
-                app.chat = Some(ChatInterface::new(runtime_arc));
+
+                // Wrap history for sharing with chat interface
+                let history_arc = Arc::new(tokio::sync::Mutex::new(app.history.clone()));
+                app.chat = Some(ChatInterface::new(
+                    runtime_arc,
+                    history_arc,
+                    command_tx,
+                    task_registry,
+                    app.tokio_runtime.handle().clone(),
+                    database,
+                ));
             }
             Err(e) => {
                 eprintln!("Warning: Failed to initialize workflow runtime: {}", e);
@@ -94,20 +151,7 @@ impl App {
     }
 
     pub fn open_chat(&mut self) {
-        // Initialize chat if needed
-        if !self.chat_initialized {
-            if let Some(chat) = &mut self.chat {
-                // Initialize Claude client asynchronously
-                match self.tokio_runtime.block_on(chat.initialize()) {
-                    Ok(_) => {
-                        self.chat_initialized = true;
-                    }
-                    Err(e) => {
-                        chat.init_error = Some(format!("Failed to initialize: {}", e));
-                    }
-                }
-            }
-        }
+        // Initialization happens automatically in background on startup
         self.current_view = View::Chat;
     }
 }

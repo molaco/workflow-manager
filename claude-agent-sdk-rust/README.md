@@ -18,8 +18,9 @@ Rust SDK for Claude Agent. A Rust implementation mirroring the [Python Claude Ag
 - ✅ **Hook system** - Fully integrated with automatic handling
 - ✅ **Permission callbacks** - Fully integrated with automatic handling
 - ✅ **SDK MCP server** - In-process custom tools with JSONRPC protocol
-- ✅ Comprehensive test suite (70 tests: 42 unit + 28 doc, all passing)
-- ✅ Full documentation with examples and API docs (6,200+ LOC)
+- ✅ **Custom agents** - Builder methods for agent definitions
+- ✅ Comprehensive test suite (75 tests: 47 unit + 28 doc, all passing)
+- ✅ Full documentation with examples and API docs (6,400+ LOC)
 
 ### Examples
 - `simple_query.rs` - Basic query usage
@@ -28,6 +29,7 @@ Rust SDK for Claude Agent. A Rust implementation mirroring the [Python Claude Ag
 - `hooks_demo.rs` - Hook system with 3 examples
 - `permissions_demo.rs` - Permission system with 3 examples
 - `mcp_demo.rs` - Custom tools with SDK MCP server
+- `agents.rs` - Custom agent definitions
 
 ## Installation
 
@@ -115,6 +117,50 @@ let options = ClaudeAgentOptions::builder()
 let stream = query("Create a hello.py file", Some(options)).await?;
 ```
 
+### Custom Agents
+
+Define custom agents with specific tools, prompts, and models:
+
+```rust
+use claude_agent_sdk::{query, ClaudeAgentOptions, AgentDefinition};
+
+let options = ClaudeAgentOptions::builder()
+    .add_agent("code-reviewer", AgentDefinition {
+        description: "Reviews code for best practices".to_string(),
+        prompt: "You are a code reviewer. Analyze code for bugs, \
+                 performance issues, and security vulnerabilities.".to_string(),
+        tools: Some(vec!["Read".to_string(), "Grep".to_string()]),
+        model: Some("sonnet".to_string()),
+    })
+    .add_agent("tester", AgentDefinition {
+        description: "Creates and runs tests".to_string(),
+        prompt: "You are a testing expert. Write comprehensive tests.".to_string(),
+        tools: Some(vec!["Read".to_string(), "Write".to_string(), "Bash".to_string()]),
+        model: Some("sonnet".to_string()),
+    })
+    .build();
+
+let stream = query("Use the code-reviewer agent to review src/main.rs", Some(options)).await?;
+```
+
+You can also set all agents at once using `agents()`:
+
+```rust
+use std::collections::HashMap;
+
+let mut agents = HashMap::new();
+agents.insert("reviewer".to_string(), AgentDefinition {
+    description: "Code reviewer".to_string(),
+    prompt: "Review code thoroughly".to_string(),
+    tools: Some(vec!["Read".to_string()]),
+    model: Some("sonnet".to_string()),
+});
+
+let options = ClaudeAgentOptions::builder()
+    .agents(agents)
+    .build();
+```
+
 ## Architecture
 
 The SDK follows Rust best practices and idiomatic patterns:
@@ -156,6 +202,7 @@ src/
 | Custom Tools (SDK MCP) | ✅ | ✅ |
 | Hooks | ✅ | ✅ |
 | Permission callbacks | ✅ | ✅ |
+| Custom Agents | ✅ | ✅ |
 | Type safety | ✅✅ | ✅ |
 | Error handling | ✅✅ | ✅ |
 | Documentation | ✅✅ | ✅ |
@@ -178,6 +225,7 @@ See `examples/` directory for more:
 - `hooks_demo.rs` - Hook system with 3 examples
 - `permissions_demo.rs` - Permission system with 3 examples
 - `mcp_demo.rs` - Custom tools with SDK MCP server
+- `agents.rs` - Custom agent definitions
 
 ## Development
 

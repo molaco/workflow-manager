@@ -1,7 +1,7 @@
 //! Workflow rendering functions (list, detail, edit, running)
 
 use ratatui::{
-    layout::Rect,
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
@@ -9,6 +9,7 @@ use ratatui::{
 };
 use workflow_manager_sdk::{FieldType, WorkflowSource};
 
+use crate::app::WorkflowPane;
 use crate::models::*;
 
 pub fn render_workflow_list(f: &mut Frame, area: Rect, app: &App) {
@@ -90,7 +91,7 @@ pub fn render_workflow_detail(f: &mut Frame, area: Rect, app: &App, idx: usize) 
             Span::styled(
                 &workflow.info.name,
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
@@ -135,7 +136,7 @@ pub fn render_workflow_detail(f: &mut Frame, area: Rect, app: &App, idx: usize) 
         Span::styled(
             format!("{} configured", configured_count),
             Style::default().fg(if configured_count > 0 {
-                Color::Green
+                Color::White
             } else {
                 Color::DarkGray
             }),
@@ -164,7 +165,7 @@ pub fn render_workflow_detail(f: &mut Frame, area: Rect, app: &App, idx: usize) 
 
         info_lines.push(Line::from(vec![
             Span::styled("  • ", Style::default().fg(Color::DarkGray)),
-            Span::styled(&field.label, Style::default().fg(Color::Cyan)),
+            Span::styled(&field.label, Style::default().fg(Color::White)),
             Span::raw(": "),
             Span::styled(display_value, value_style),
         ]));
@@ -176,7 +177,7 @@ pub fn render_workflow_detail(f: &mut Frame, area: Rect, app: &App, idx: usize) 
         Span::styled(
             "[L]",
             Style::default()
-                .fg(Color::Green)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" Launch workflow"),
@@ -249,7 +250,7 @@ pub fn render_workflow_edit(f: &mut Frame, area: Rect, app: &App, idx: usize) {
 
             let value_style = if is_editing_this {
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else if is_selected {
                 Style::default()
@@ -289,7 +290,7 @@ pub fn render_workflow_edit(f: &mut Frame, area: Rect, app: &App, idx: usize) {
                 Line::from(vec![Span::styled(
                     format!("{}{}: ", field.label, required_marker),
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(Color::White)
                         .add_modifier(Modifier::BOLD),
                 )]),
                 Line::from(vec![Span::styled(
@@ -300,7 +301,7 @@ pub fn render_workflow_edit(f: &mut Frame, area: Rect, app: &App, idx: usize) {
                     Span::raw("  "),
                     Span::styled(display_text, value_style),
                     if is_editing_this {
-                        Span::styled(" █", Style::default().fg(Color::Green))
+                        Span::styled(" █", Style::default().fg(Color::White))
                     } else {
                         Span::raw("")
                     },
@@ -334,17 +335,17 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
         }
     };
 
-    let title = format!(
-        "Running: {} {}",
-        workflow.info.name,
-        if app.workflow_running {
-            "[IN PROGRESS]"
-        } else {
-            "[COMPLETED]"
-        }
-    );
+    // Split area into two vertical panes (50/50)
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
 
-    let mut lines: Vec<Line> = Vec::new();
+    let left_pane = chunks[0];
+    let right_pane = chunks[1];
+
+    // Build structured logs for left pane
+    let mut structured_logs: Vec<Line> = Vec::new();
 
     // Display hierarchical phase/task/agent structure
     let phases_snapshot: Vec<WorkflowPhase> = if let Ok(phases) = app.workflow_phases.lock() {
@@ -365,7 +366,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
             let phase_color = match phase.status {
                 PhaseStatus::NotStarted => Color::Gray,
                 PhaseStatus::Running => Color::Yellow,
-                PhaseStatus::Completed => Color::Green,
+                PhaseStatus::Completed => Color::White,
                 PhaseStatus::Failed => Color::Red,
             };
 
@@ -379,7 +380,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                 Span::styled(format!("{} ", phase_icon), Style::default().fg(phase_color)),
                 Span::styled(
                     format!("{} ", expand_icon),
-                    Style::default().fg(Color::Cyan),
+                    Style::default().fg(Color::White),
                 ),
                 Span::styled(
                     format!("Phase {}: {}", phase.id, phase.name),
@@ -410,7 +411,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                 }
             }
 
-            lines.push(Line::from(phase_spans));
+            structured_logs.push(Line::from(phase_spans));
 
             if is_expanded {
                 // Display tasks
@@ -424,7 +425,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                     let task_color = match task.status {
                         TaskStatus::NotStarted => Color::Gray,
                         TaskStatus::Running => Color::Yellow,
-                        TaskStatus::Completed => Color::Green,
+                        TaskStatus::Completed => Color::White,
                         TaskStatus::Failed => Color::Red,
                     };
 
@@ -439,7 +440,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                         Span::styled(format!("{} ", task_icon), Style::default().fg(task_color)),
                         Span::styled(
                             format!("{} ", task_expand_icon),
-                            Style::default().fg(Color::Cyan),
+                            Style::default().fg(Color::White),
                         ),
                         Span::styled(
                             &task.description,
@@ -466,12 +467,12 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                         }
                     }
 
-                    lines.push(Line::from(task_spans));
+                    structured_logs.push(Line::from(task_spans));
 
                     if task_expanded {
                         // Display task messages
                         for msg in &task.messages {
-                            lines.push(Line::from(vec![
+                            structured_logs.push(Line::from(vec![
                                 Span::raw("    "),
                                 Span::styled(msg, Style::default().fg(Color::Gray)),
                             ]));
@@ -488,7 +489,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                             let agent_color = match agent.status {
                                 AgentStatus::NotStarted => Color::Gray,
                                 AgentStatus::Running => Color::Yellow,
-                                AgentStatus::Completed => Color::Green,
+                                AgentStatus::Completed => Color::White,
                                 AgentStatus::Failed => Color::Red,
                             };
 
@@ -504,7 +505,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                                 ),
                                 Span::styled(
                                     format!("{} ", agent_expand_icon),
-                                    Style::default().fg(Color::Cyan),
+                                    Style::default().fg(Color::White),
                                 ),
                                 Span::styled(
                                     format!("@{}", agent.name),
@@ -518,12 +519,12 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                                 ),
                             ];
 
-                            lines.push(Line::from(agent_spans));
+                            structured_logs.push(Line::from(agent_spans));
 
                             // Show last message in full detail if collapsed
                             if !agent_expanded && !agent.messages.is_empty() {
                                 if let Some(last_msg) = agent.messages.last() {
-                                    lines.push(Line::from(vec![
+                                    structured_logs.push(Line::from(vec![
                                         Span::raw("      "),
                                         Span::styled(last_msg, Style::default().fg(Color::Gray)),
                                     ]));
@@ -533,7 +534,7 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                             if agent_expanded {
                                 // Display agent messages
                                 for msg in &agent.messages {
-                                    lines.push(Line::from(vec![
+                                    structured_logs.push(Line::from(vec![
                                         Span::raw("      "),
                                         Span::styled(msg, Style::default().fg(Color::Gray)),
                                     ]));
@@ -545,14 +546,14 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
 
                 // Display output files
                 if !phase.output_files.is_empty() {
-                    lines.push(Line::from(vec![
+                    structured_logs.push(Line::from(vec![
                         Span::raw("  "),
-                        Span::styled("Output files:", Style::default().fg(Color::Cyan)),
+                        Span::styled("Output files:", Style::default().fg(Color::White)),
                     ]));
                     for (path, desc) in &phase.output_files {
-                        lines.push(Line::from(vec![
+                        structured_logs.push(Line::from(vec![
                             Span::raw("    "),
-                            Span::styled(format!("📄 {}", path), Style::default().fg(Color::Blue)),
+                            Span::styled(format!("📄 {}", path), Style::default().fg(Color::White)),
                             Span::raw(" - "),
                             Span::styled(desc, Style::default().fg(Color::Gray)),
                         ]));
@@ -560,38 +561,61 @@ pub fn render_workflow_running(f: &mut Frame, area: Rect, app: &App, idx: usize)
                 }
             }
 
-            lines.push(Line::from(""));
+            structured_logs.push(Line::from(""));
         }
     }
 
-    // Append regular stdout output
+    // Build raw output for right pane
+    let mut raw_output: Vec<Line> = Vec::new();
     if let Ok(output) = app.workflow_output.lock() {
-        if !output.is_empty() {
-            lines.push(Line::from(vec![Span::styled(
-                "─────────────────",
-                Style::default().fg(Color::DarkGray),
-            )]));
-            lines.push(Line::from(vec![Span::styled(
-                "Workflow Output:",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )]));
-            lines.push(Line::from(""));
-            for line in output.iter() {
-                lines.push(Line::from(line.clone()));
-            }
+        for line in output.iter() {
+            raw_output.push(Line::from(line.clone()));
         }
     }
 
-    let paragraph = Paragraph::new(lines)
+    // Determine focused pane styling
+    let left_border_style = if app.workflow_focused_pane == WorkflowPane::StructuredLogs {
+        Style::default().fg(Color::White)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let right_border_style = if app.workflow_focused_pane == WorkflowPane::RawOutput {
+        Style::default().fg(Color::White)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let left_title = format!(
+        " Structured Logs {} ",
+        if app.workflow_running {
+            "[IN PROGRESS]"
+        } else {
+            "[COMPLETED]"
+        }
+    );
+
+    // Render left pane (Structured Logs)
+    let left_paragraph = Paragraph::new(structured_logs)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(title)
-                .style(Style::default().fg(Color::White)),
+                .title(left_title)
+                .border_style(left_border_style),
         )
         .scroll((app.workflow_scroll_offset as u16, 0));
 
-    f.render_widget(paragraph, area);
+    f.render_widget(left_paragraph, left_pane);
+
+    // Render right pane (Raw Output)
+    let right_paragraph = Paragraph::new(raw_output)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Raw Output ")
+                .border_style(right_border_style),
+        )
+        .scroll((app.workflow_raw_output_scroll as u16, 0));
+
+    f.render_widget(right_paragraph, right_pane);
 }
