@@ -52,3 +52,7 @@ Thumbs.db
 # User-specific config
 .mcp.json
 .claude/settings.local.json
+
+# Markdown files (except CLAUDE.md)
+*.md
+!CLAUDE.md
