@@ -1,1 +1,54 @@
-/target
+# Build artifacts
+/target/
+*.rlib
+*.rmeta
+*.so
+*.dylib
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Package manager caches
+.uv-cache/
+.pytest_cache/
+.mypy_cache/
+.cache/
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.*
+
+# Generated output directories
+DOCS/
+OUTPUT/
+RESULTS/
+SCRIPTS/
+TEMPLATES/
+TRASH/
+workflow-manager/OUTPUT/
+workflow-manager/LOGS/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# User-specific config
+.mcp.json
+.claude/settings.local.json
