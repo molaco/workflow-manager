@@ -4,7 +4,6 @@ members = [
     "workflow-manager",
     "workflow-manager-sdk",
     "workflow-manager-macros",
-    "claude-agent-sdk-rust",
 ]
 
 [workspace.dependencies]

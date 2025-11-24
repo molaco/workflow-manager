@@ -54,6 +54,9 @@ Thumbs.db
 .claude/
 .claudeignore
 
+# Local SDK (using git dependency)
+claude-agent-sdk-rust/
+
 # Markdown files (except CLAUDE.md)
 *.md
 !CLAUDE.md
