@@ -1,0 +1,153 @@
+flowchart TB
+    subgraph Startup["Application Startup"]
+        MAIN[main.rs] --> TERM[Setup Terminal<br/>crossterm/ratatui]
+        TERM --> APPNEW[App::new]
+        APPNEW --> DISC[discover_workflows]
+        DISC --> SCAN[Scan Search Paths]
+        SCAN --> META[binary --workflow-metadata]
+        META --> PARSE[Parse JSON Metadata]
+        APPNEW --> RUNTIME[Create ProcessBasedRuntime]
+        RUNTIME --> DB[(SQLite Database)]
+        RUNTIME --> RESTORE[Restore From Database]
+        APPNEW --> TOKIO[Create Tokio Runtime]
+        APPNEW --> CMDCH[Create Command Channel<br/>tx/rx]
+    end
+
+    subgraph EventLoop["Main Event Loop (50ms)"]
+        LOOP[run_app Loop] --> CMDRX[Process Commands<br/>command_rx.try_recv]
+        CMDRX --> CLEANUP[Cleanup Notifications]
+        CLEANUP --> POLL[poll_all_tabs<br/>Check Workflow Status]
+        POLL --> CHATPOLL[Poll Chat<br/>init + response]
+        CHATPOLL --> DRAW[Draw UI<br/>ui::ui]
+        DRAW --> INPUT[Handle Keyboard Input]
+        INPUT --> LOOP
+    end
+
+    subgraph ManualLaunch["Manual Workflow Launch"]
+        USERKEY[User Presses 'L'] --> LAUNCHFN[launch_workflow_in_tab]
+        LAUNCHFN --> BUILD[cargo build --bin]
+        BUILD --> EXECWF[runtime.execute_workflow]
+        EXECWF --> CREATETAB[Create WorkflowTab]
+        CREATETAB --> SUBSCRIBE[Subscribe to Logs]
+        SUBSCRIBE --> TABVIEW[Switch to Tabs View]
+    end
+
+    subgraph MCPLaunch["MCP/Chat Workflow Launch"]
+        CLAUDE[Claude AI] --> MCPTOOL[MCP Tool: execute_workflow]
+        MCPTOOL --> EXECWF2[runtime.execute_workflow]
+        EXECWF2 --> CMDTX[command_tx.send<br/>CreateTab]
+        CMDTX --> CMDRX
+        MCPTOOL --> LOGTASK[Spawn Log Streaming Task]
+        LOGTASK --> CMDTX2[command_tx.send<br/>AppendTabLog]
+        CMDTX2 --> CMDRX
+    end
+
+    subgraph RuntimeExec["Runtime Execution"]
+        REXEC[execute_workflow] --> VALIDATE[Validate Inputs]
+        VALIDATE --> BUILDCMD[Build Command Args]
+        BUILDCMD --> SPAWN[Spawn Child Process]
+        SPAWN --> BCAST[Create Broadcast Channel]
+        BCAST --> STDERR[spawn: parse_workflow_stderr]
+        BCAST --> STDOUT[spawn: parse_workflow_stdout]
+        BCAST --> WAIT[spawn: wait_for_process_exit]
+        SPAWN --> PERSIST[Persist to Database]
+        SPAWN --> HANDLE[Return WorkflowHandle]
+    end
+
+    subgraph LogParsing["Structured Log Parsing"]
+        STDERR --> WFEVENT{Line starts with<br/>__WF_EVENT__:?}
+        WFEVENT -->|Yes| PARSEJSON[Parse JSON]
+        PARSEJSON --> WFLOG[WorkflowLog Enum]
+        WFLOG --> BROADCAST[Broadcast to Subscribers]
+        WFLOG --> DBLOG[(Batch Insert to DB)]
+        WFEVENT -->|No| RAWOUT[RawOutput Log]
+        RAWOUT --> BROADCAST
+    end
+
+    subgraph ChatInterface["Chat Interface"]
+        OPENCHAT[open_chat] --> CHATINIT[ChatInterface::new]
+        CHATINIT --> MCPSERVER[create_workflow_mcp_server<br/>8 Tools]
+        CHATINIT --> SDKINIT[ClaudeSDKClient::new]
+        SDKINIT --> MCPREG[Register MCP Server]
+        SENDMSG[send_message_async] --> BGTASK[Background Task]
+        BGTASK --> SDKSEND[client.send_message]
+        SDKSEND --> COLLECT[Collect Responses]
+        COLLECT --> RESPCH[Send via Channel]
+        RESPCH --> CHATPOLL
+    end
+
+    subgraph WorkflowState["Workflow State Management"]
+        BROADCAST --> HANDLER[handle_workflow_event]
+        HANDLER --> PHASES[Update Phases]
+        HANDLER --> TASKS[Update Tasks]
+        HANDLER --> AGENTS[Update Agents]
+        PHASES --> TABSTATE[WorkflowTab State]
+        TASKS --> TABSTATE
+        AGENTS --> TABSTATE
+        WAIT --> STATUS[Update Status<br/>Completed/Failed]
+        STATUS --> DBUPDATE[(Update Database)]
+        STATUS --> TABSTATE
+    end
+
+    subgraph UIRender["UI Rendering"]
+        DRAW --> VIEW{Current View?}
+        VIEW -->|WorkflowList| LIST[render_workflow_list]
+        VIEW -->|WorkflowEdit| EDIT[render_workflow_edit]
+        VIEW -->|Tabs| TABS[render_tab_content]
+        VIEW -->|Chat| CHATVIEW[render_chat]
+        TABS --> STRUCT[Structured Logs Pane]
+        TABS --> RAW[Raw Output Pane]
+    end
+
+    MAIN --> LOOP
+    USERKEY --> LAUNCHFN
+    CLAUDE --> MCPTOOL
+    HANDLE --> SUBSCRIBE
+    MCPTOOL --> HANDLE
+    EXECWF --> REXEC
+    EXECWF2 --> REXEC
+
+    %% Startup - Deep Blue
+    style Startup fill:#1a237e,stroke:#7986cb,stroke-width:2px,color:#e8eaf6
+    classDef startupNode fill:#3949ab,stroke:#7986cb,stroke-width:1px,color:#ffffff
+    class MAIN,TERM,APPNEW,DISC,SCAN,META,PARSE,RUNTIME,DB,RESTORE,TOKIO,CMDCH startupNode
+
+    %% Event Loop - Orange/Amber
+    style EventLoop fill:#e65100,stroke:#ffb74d,stroke-width:2px,color:#fff3e0
+    classDef loopNode fill:#f57c00,stroke:#ffb74d,stroke-width:1px,color:#ffffff
+    class LOOP,CMDRX,CLEANUP,POLL,CHATPOLL,DRAW,INPUT loopNode
+
+    %% Manual Launch - Green
+    style ManualLaunch fill:#1b5e20,stroke:#81c784,stroke-width:2px,color:#e8f5e9
+    classDef launchNode fill:#388e3c,stroke:#81c784,stroke-width:1px,color:#ffffff
+    class USERKEY,LAUNCHFN,BUILD,EXECWF,CREATETAB,SUBSCRIBE,TABVIEW launchNode
+
+    %% MCP Launch - Teal
+    style MCPLaunch fill:#004d40,stroke:#4db6ac,stroke-width:2px,color:#e0f2f1
+    classDef mcpNode fill:#00796b,stroke:#4db6ac,stroke-width:1px,color:#ffffff
+    class CLAUDE,MCPTOOL,EXECWF2,CMDTX,LOGTASK,CMDTX2 mcpNode
+
+    %% Runtime - Red/Pink
+    style RuntimeExec fill:#880e4f,stroke:#f48fb1,stroke-width:2px,color:#fce4ec
+    classDef runtimeNode fill:#c2185b,stroke:#f48fb1,stroke-width:1px,color:#ffffff
+    class REXEC,VALIDATE,BUILDCMD,SPAWN,BCAST,STDERR,STDOUT,WAIT,PERSIST,HANDLE runtimeNode
+
+    %% Log Parsing - Purple
+    style LogParsing fill:#4a148c,stroke:#ce93d8,stroke-width:2px,color:#f3e5f5
+    classDef parseNode fill:#7b1fa2,stroke:#ce93d8,stroke-width:1px,color:#ffffff
+    class WFEVENT,PARSEJSON,WFLOG,BROADCAST,DBLOG,RAWOUT parseNode
+
+    %% Chat Interface - Cyan
+    style ChatInterface fill:#006064,stroke:#4dd0e1,stroke-width:2px,color:#e0f7fa
+    classDef chatNode fill:#0097a7,stroke:#4dd0e1,stroke-width:1px,color:#ffffff
+    class OPENCHAT,CHATINIT,MCPSERVER,SDKINIT,MCPREG,SENDMSG,BGTASK,SDKSEND,COLLECT,RESPCH chatNode
+
+    %% Workflow State - Yellow/Gold
+    style WorkflowState fill:#f57f17,stroke:#fff176,stroke-width:2px,color:#fffde7
+    classDef stateNode fill:#fbc02d,stroke:#fff176,stroke-width:1px,color:#212121
+    class HANDLER,PHASES,TASKS,AGENTS,TABSTATE,STATUS,DBUPDATE stateNode
+
+    %% UI Render - Indigo
+    style UIRender fill:#283593,stroke:#9fa8da,stroke-width:2px,color:#e8eaf6
+    classDef uiNode fill:#5c6bc0,stroke:#9fa8da,stroke-width:1px,color:#ffffff
+    class VIEW,LIST,EDIT,TABS,CHATVIEW,STRUCT,RAW uiNode
