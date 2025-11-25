@@ -10,6 +10,16 @@ Workflow Manager lets you define, execute, and monitor complex workflows from yo
 
 The core idea: workflows are just binaries that follow a simple logging protocol. The TUI discovers them, parses their metadata, and handles all the orchestration.
 
+## Screenshots
+
+**Workflow Execution View** - Structured logs with phases, tasks, and agents alongside raw output:
+
+![Workflow Execution](./screenshot-2025-11-25-14-19-05.png)
+
+**AI Chat Interface** - Built-in Claude integration for AI-driven workflow execution:
+
+![AI Chat Interface](./screenshot-2025-11-25-14-20-25.png)
+
 ## Features
 
 - **Tab-based execution** - Run multiple workflows simultaneously, each in its own tab
