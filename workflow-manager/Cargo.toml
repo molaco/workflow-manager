@@ -9,7 +9,7 @@ name = "task-planner"
 path = "src/bin/task_planner.rs"
 
 [dependencies]
-claude-agent-sdk = { git = "https://github.com/molaco/claude-agent-sdk-rust", branch = "mcp-complete-implementation", features = ["tracing-support"] }
+claude-agent-sdk = { git = "https://github.com/molaco/claude-agent-sdk-rust", branch = "feature/mcp-complete-implementation" }
 workflow-manager-sdk = { path = "../workflow-manager-sdk" }
 tokio = { workspace = true, features = ["fs", "process", "io-util"] }
 serde = { workspace = true }

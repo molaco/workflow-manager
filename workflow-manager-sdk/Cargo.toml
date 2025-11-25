@@ -16,4 +16,4 @@ chrono = { version = "0.4", features = ["serde"] }
 workflow-manager-macros = { path = "../workflow-manager-macros" }
 
 # Re-export claude-agent-sdk for convenience
-claude-agent-sdk = { git = "https://github.com/molaco/claude-agent-sdk-rust", branch = "mcp-complete-implementation" }
+claude-agent-sdk = { git = "https://github.com/molaco/claude-agent-sdk-rust", branch = "feature/mcp-complete-implementation" }
